@@ -69,7 +69,7 @@ class ReadOnlyInline(admin.TabularInline):
 
 @admin.register(Champion)
 class ChampionAdmin(admin.ModelAdmin):
-    list_display = ("name", "id", "is_enabled", "updated_at")
+    list_display = ("name", "id", "unicode_emoji", "is_enabled", "updated_at")
     list_editable = ("is_enabled",)
     list_filter = ("is_enabled",)
     search_fields = ("name", "aliases")
@@ -297,7 +297,7 @@ class MatchResourceAdmin(ReadOnlyAdmin):
 
 @admin.register(OutboxEffect)
 class OutboxEffectAdmin(ReadOnlyAdmin):
-    list_display = ("id", "kind", "match", "status", "attempts", "run_after", "last_error")
+    list_display = ("id", "kind", "match", "lane", "status", "attempts", "run_after", "last_error")
     list_filter = ("status", "kind")
 
 

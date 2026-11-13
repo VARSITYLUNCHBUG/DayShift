@@ -24,32 +24,52 @@ BOARD_MOVE_MAX_WAIT_SECONDS = 20
 BOARD_MOVE_IDLE_SECONDS = 3600
 
 
-def due_by_match(limit: int = 200) -> list[list[OutboxEffect]]:
-    """Due effects grouped so each match runs its effects in order.
+Lane = int | str
 
-    If an earlier effect of a match is waiting on a retry, later ones of that match wait too,
-    unless they were created with a future `run_after`, such as the reminder and final cleanup,
-    which are independent of the immediate work.
+
+def lane_key(match_id: int | None, lane: str, kind: str, community_id: int) -> Lane:
+    """Which effects must run in order with this one.
+
+    A match's effects share its lane. Work outside a match runs in the lane it names (one per
+    standalone draft, say), or else one lane per kind and server, so a queue panel that keeps
+    failing in one server never holds up another server or another kind of work.
+    """
+    if match_id is not None:
+        return match_id
+    return lane or f"{kind}:{community_id}"
+
+
+def lane_of(effect: OutboxEffect) -> Lane:
+    return lane_key(effect.match_id, effect.lane, effect.kind, effect.community_id)
+
+
+def due_by_match(limit: int = 200) -> list[list[OutboxEffect]]:
+    """Due effects grouped by lane (see `lane_key`), so each lane runs its effects in order.
+
+    If an earlier effect of a lane is waiting on a retry, later ones of that lane wait too.
     """
     moment = now()
-    retrying: dict[object, int] = {}
+    retrying: dict[Lane, int] = {}
     waiting = OutboxEffect.objects.filter(status=EffectStatus.PENDING, attempts__gt=0).order_by(
         "id"
     )
-    for match_id, effect_id in waiting.values_list("match_id", "id"):
-        retrying.setdefault(match_id, effect_id)
+    for match_id, lane, kind, community_id, effect_id in waiting.values_list(
+        "match_id", "lane", "kind", "community_id", "id"
+    ):
+        retrying.setdefault(lane_key(match_id, lane, kind, community_id), effect_id)
 
-    groups: dict[object, list[OutboxEffect]] = defaultdict(list)
+    groups: dict[Lane, list[OutboxEffect]] = defaultdict(list)
     due = (
         OutboxEffect.objects.filter(status=EffectStatus.PENDING, run_after__lte=moment)
         .select_related("community", "match")
         .order_by("id")[:limit]
     )
     for effect in due:
-        blocker = retrying.get(effect.match_id)
+        key = lane_of(effect)
+        blocker = retrying.get(key)
         if blocker is not None and effect.pk > blocker:
             continue
-        groups[effect.match_id].append(effect)
+        groups[key].append(effect)
     return list(groups.values())
 
 
@@ -173,11 +193,15 @@ def cancel_board_moves(match_id: int) -> None:
     ).update(status=EffectStatus.SKIPPED, done_at=now())
 
 
-def voice_target(discord_user_id: int, joined_channel_id: int) -> tuple[int, int] | None:
-    """Where a player joining this channel should be sent: (guild ID, channel ID), or None.
+def on_voice_join(discord_user_id: int, joined_channel_id: int) -> tuple[int, int] | None:
+    """A member joined a voice channel. Returns where to send them: (guild ID, channel ID), or None.
 
-    Covers someone who joins the Waiting Room after their lobby popped, or the lobby voice after
-    teams moved on. Anyone else is left alone, wherever they are.
+    - Joining your match's lobby or team voice records that you've arrived.
+    - The Waiting Room sends you on to your match's voice only until you've arrived. After that,
+      coming back to the Waiting Room (to requeue, say) leaves you there.
+    - The lobby voice always sends you on to your team's voice once teams have their own.
+
+    Anyone else is left alone, wherever they are.
     """
     participant = (
         MatchParticipant.objects.filter(player__discord_user_id=discord_user_id, is_active=True)
@@ -193,10 +217,20 @@ def voice_target(discord_user_id: int, joined_channel_id: int) -> tuple[int, int
     )
     team_channel = channels.get(team_kind) if team_kind else None
     lobby_channel = channels.get(ResourceKind.LOBBY_VOICE)
+    match_voice = {channel for channel in (team_channel, lobby_channel) if channel is not None}
+    arrived = participant.voice_joined_at is not None
+    if joined_channel_id in match_voice and not arrived:
+        # Moved in by the bot or joined through the invite: either way, they've arrived.
+        MatchParticipant.objects.filter(pk=participant.pk, voice_joined_at__isnull=True).update(
+            voice_joined_at=now()
+        )
+        arrived = True
     target = team_channel or lobby_channel
     if target is None or target == joined_channel_id:
         return None
-    if joined_channel_id not in {match.community.waiting_room_channel_id, lobby_channel}:
+    if joined_channel_id == lobby_channel:
+        return match.community.discord_guild_id, target  # The lobby voice is on its way out.
+    if joined_channel_id != match.community.waiting_room_channel_id or arrived:
         return None
     return match.community.discord_guild_id, target
 

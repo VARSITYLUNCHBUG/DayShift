@@ -51,7 +51,7 @@ The admin binds to localhost. Put a TLS reverse proxy in front of it before expo
 |---|---|---|
 | Queue | Join and Leave buttons, FIFO. Voice isn't required | Blocked by a cooldown or a live match |
 | Pop at 12 | Creates a private text channel and lobby voice channel | Queue waits at `max_concurrent_matches` |
-| Gather | In the Waiting Room: moved. Anywhere else: DM with invite and Ready button. DMs closed: mention in the lobby channel | Joining the Waiting Room later moves them |
+| Gather | In the Waiting Room: moved. Anywhere else: DM with invite and Ready button. DMs closed: mention in the lobby channel | Joining the Waiting Room later moves them, until they've been in the match's voice once. After that, where they go is up to them |
 | Ready | Ready button on the board and in the DM | 180 s. A miss brings in the next in queue. No replacement: cancel and requeue |
 | Captain vote | Everyone votes for up to two captains, themselves included, from players with 5 completed matches. Most votes wins; rating breaks ties and fills any gap. Two or fewer eligible: no vote | 45 s, or closes early once everyone has voted |
 | Player draft | `FSSFFSSFFS`, lower-rated captain first. Last player is assigned | 45 s, then highest rated |
@@ -76,7 +76,9 @@ judgements, not published standards.
 
 Switch with `/mode activate slug:<slug>`. Bebot's custom hero emojis are in
 `presets/champion_emojis.yaml`. Load them with `manage.py load_champion_emojis`. The bot must be in
-the server that owns them.
+the server that owns them. Heroes Bebot showed with a plain emoji (Apollo 🗡️, Billy 🐐 and so on)
+are in the same file's `unicode` section. `load_presets` loads those on every start, filling only
+heroes that have none, so an edit in the admin is kept.
 
 ### Subs
 
@@ -408,7 +410,8 @@ The rules that keep it reliable:
 - **Timers are rows.** A poller applies timeouts through the same path as a click. After downtime,
   past-due deadlines get 60 s of grace.
 - **Discord calls happen after commit.** State changes write `outbox_effects` in the same transaction,
-  and a worker runs them in order per match, retrying on server errors.
+  and a worker runs them in order per lane, retrying on server errors. Each match is a lane, and
+  other work gets one lane per kind and server, so one that keeps failing never holds up another.
 
 ## Operations
 

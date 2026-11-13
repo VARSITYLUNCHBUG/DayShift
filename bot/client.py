@@ -140,15 +140,23 @@ class DraftBot(discord.Client):
         self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
     ) -> None:
         """Joining the Waiting Room after your lobby popped moves you straight into it."""
-        channel = after.channel
-        if channel is None or before.channel == channel:
-            return
+        if before.channel == after.channel:
+            return  # Mute, deafen, stream and the like.
+        await self._auto_move(member, after.channel)
+
+    async def _auto_move(
+        self, member: discord.Member, channel: discord.VoiceChannel | discord.StageChannel | None
+    ) -> None:
+        if channel is None:
+            return  # They left voice.
         try:
-            target = await db(effects.voice_target, member.id, channel.id)
+            target = await db(effects.on_voice_join, member.id, channel.id)
             if target is not None:
                 await self.gateway.move_member(target[0], member.id, target[1])
         except Exception:
-            logger.exception("Auto-move failed", extra={"user": member.id})
+            logger.exception(
+                "Auto-move failed", extra={"user": member.id, "guild": member.guild.id}
+            )
 
 
 def run() -> None:

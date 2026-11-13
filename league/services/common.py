@@ -137,32 +137,33 @@ def add_effect(
     match: Match | None = None,
     dedupe_key: str | None = None,
     run_after: datetime | None = None,
+    lane: str | None = None,
 ) -> None:
+    """Queue a Discord side effect. `lane` names the ordering lane for work outside a match."""
     created_at = now()
+    fields = {
+        "community": community,
+        "match": match,
+        "kind": kind,
+        "lane": lane or "",
+        "payload": payload or {},
+        "run_after": run_after or created_at,
+        "created_at": created_at,
+    }
     if dedupe_key is not None:
-        OutboxEffect.objects.get_or_create(
-            dedupe_key=dedupe_key,
-            defaults={
-                "community": community,
-                "match": match,
-                "kind": kind,
-                "payload": payload or {},
-                "run_after": run_after or created_at,
-                "created_at": created_at,
-            },
-        )
+        OutboxEffect.objects.get_or_create(dedupe_key=dedupe_key, defaults=fields)
         return
-    OutboxEffect.objects.create(
-        community=community,
-        match=match,
-        kind=kind,
-        payload=payload or {},
-        run_after=run_after or created_at,
-        created_at=created_at,
-    )
+    OutboxEffect.objects.create(**fields)
 
 
-def request_render(community: Community, kind: str, match: Match | None = None) -> None:
+def request_render(
+    community: Community,
+    kind: str,
+    match: Match | None = None,
+    *,
+    lane: str | None = None,
+    payload: dict[str, object] | None = None,
+) -> None:
     """Ask for a re-render. Renders read the latest state, so ones not yet started coalesce.
 
     One the worker has started may have read the state before this change, so it doesn't count.
@@ -170,6 +171,8 @@ def request_render(community: Community, kind: str, match: Match | None = None) 
     first and a new render is added, or the render starts after this change has committed.
     A row another request holds is skipped rather than waited on: an extra render is harmless,
     and requests never queue behind each other's locks.
+
+    Renders of something other than a match coalesce by `lane`, which names the thing rendered.
     """
     with transaction.atomic():
         unstarted = (
@@ -178,6 +181,7 @@ def request_render(community: Community, kind: str, match: Match | None = None) 
                 community=community,
                 kind=kind,
                 match=match,
+                lane=lane or "",
                 status=EffectStatus.PENDING,
                 attempts=0,
                 started_at__isnull=True,
@@ -185,7 +189,7 @@ def request_render(community: Community, kind: str, match: Match | None = None) 
             .first()
         )
         if unstarted is None:
-            add_effect(community, kind, match=match)
+            add_effect(community, kind, payload, match=match, lane=lane)
 
 
 def clear_notices(match: Match) -> None:

@@ -21,6 +21,7 @@ def publish_presets(*, captain_rule: bool = False) -> None:
     the presets as shipped.
     """
     champions.seed_from_file(PRESETS / "champions.yaml")
+    champions.load_unicode_emojis(PRESETS / "champion_emojis.yaml")
     for path in sorted(PRESETS.glob("*.yaml")):
         if path.name not in NOT_MODES:
             body = modes.load_yaml(path)

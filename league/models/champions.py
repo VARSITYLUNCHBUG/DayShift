@@ -13,6 +13,8 @@ class Champion(models.Model):
     aliases = ArrayField(models.CharField(max_length=64), default=list, blank=True)
     icon_url = models.URLField(max_length=500, blank=True)
     discord_emoji_id = models.BigIntegerField(null=True, blank=True)
+    # A plain emoji shown when there's no custom one, as Bebot did for newer heroes.
+    unicode_emoji = models.CharField(max_length=16, blank=True)
     is_enabled = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

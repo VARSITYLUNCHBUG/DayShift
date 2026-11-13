@@ -100,6 +100,7 @@ class ChampionOption:
     name: str
     emoji_id: int | None = None
     taken: bool = False  # Banned or picked. It stays on the grid, so nothing shifts.
+    unicode_emoji: str = ""  # Shown when there's no custom emoji.
 
 
 @dataclass(slots=True)
@@ -273,7 +274,14 @@ def board_state(match_id: int) -> BoardState:
         )
         rows = Champion.objects.filter(pk__in=match.champion_pool).order_by("name")
         state.champions = [
-            ChampionOption(row.pk, row.name, row.discord_emoji_id, row.pk in used) for row in rows
+            ChampionOption(
+                row.pk,
+                row.name,
+                row.discord_emoji_id,
+                taken=row.pk in used,
+                unicode_emoji=row.unicode_emoji,
+            )
+            for row in rows
         ]
 
     report = match.submissions.filter(verdict="report").select_related("captain").first()

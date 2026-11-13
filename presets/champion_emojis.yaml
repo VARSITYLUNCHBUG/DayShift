@@ -1,6 +1,7 @@
 # Custom hero emojis from Bebot's production set (bot/config/ui.py, prod_hero_emojis2).
 # Load with `manage.py load_champion_emojis`. The bot must be in the server that owns them.
-# Heroes Bebot showed with a plain Unicode emoji are left out: the field holds a custom emoji ID.
+# Heroes Bebot showed with a plain emoji are in the `unicode` section instead. `load_presets` loads
+# those on every start, filling only heroes that have none, so an edit in the admin is kept.
 emojis:
   Abrams: 1302512783283191879
   Bebop: 1302512796671545414
@@ -34,3 +35,16 @@ emojis:
   Warden: 1302513115283460137
   Wraith: 1302513159504134224
   Yamato: 1302513147952889887
+unicode:
+  Apollo: "🗡️"
+  Baba: "🕊️"
+  Billy: "🐐"
+  Celeste: "🦄"
+  Deadman Danny: "💣"
+  Graves: "🪦"
+  Nurse Harrow: "💉"
+  Rat King: "🐀"
+  Silver: "🐺"
+  Solomon: "♟️"
+  Venator: "✝️"
+  Violet: "🎨"

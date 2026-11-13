@@ -21,6 +21,7 @@ from bot.commands import player as player_commands
 from bot.commands import setup as setup_commands
 from bot.commands import staff
 from bot.db import db
+from bot.handlers.common import is_staff
 from bot.handlers.draft import LobbyCodeModal
 from bot.handlers.results import DisputeModal, ReportModal, process_report
 from bot.routing import Context, _dispatch
@@ -169,6 +170,21 @@ def test_join_and_leave_buttons(wired: Community) -> None:
     click(interaction, "leave")
     assert not QueueEntry.objects.filter(player=player).exists()
     assert replies(interaction) == []
+
+
+def test_is_staff_means_an_administrator_or_the_staff_role(wired: Community) -> None:
+    Community.objects.filter(pk=wired.pk).update(staff_role_id=4242)
+    wired.refresh_from_db()
+    player = make_player(1)
+    assert is_staff(fake_interaction(player, administrator=True), wired)
+    assert is_staff(fake_interaction(player, role_ids=(4242,)), wired)
+    assert not is_staff(fake_interaction(player, role_ids=(1,)), wired)
+    Community.objects.filter(pk=wired.pk).update(staff_role_id=None)
+    wired.refresh_from_db()
+    assert not is_staff(fake_interaction(player), wired)
+    dm = fake_interaction(player)
+    dm.user = MagicMock(spec=discord.User)  # Not a member: outside a server.
+    assert not is_staff(dm, wired)
 
 
 def test_leaving_when_not_queued_still_gets_a_reply(wired: Community) -> None:

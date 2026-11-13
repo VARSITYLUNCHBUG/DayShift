@@ -21,7 +21,6 @@ from league.domain.errors import InvalidAction, StaleAction
 from league.domain.mode_schema import parse_mode
 from league.models import (
     CaptainVote,
-    Champion,
     Community,
     Match,
     MatchParticipant,
@@ -32,7 +31,7 @@ from league.models import (
 )
 from league.models.matches import RemovedReason, Source
 from league.models.moderation import PenaltyKind
-from league.services import penalties, standing
+from league.services import champions, penalties, standing
 from league.services.common import (
     active_participants,
     add_effect,
@@ -65,12 +64,7 @@ TEXT_CHANNEL_GRACE_MINUTES = 15
 def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match | None:
     """Turn the front of the queue into a lobby. Caller holds the community lock."""
     mode = parse_mode(community.active_mode.body)
-    excluded = set(mode.champion_draft.excluded_champion_ids)
-    pool = sorted(
-        pk
-        for pk in Champion.objects.filter(is_enabled=True).values_list("pk", flat=True)
-        if pk not in excluded
-    )
+    pool = champions.draft_pool(mode)
     if len(pool) < mode.champions_consumed_max:
         logger.error(
             "Queue full but champion pool too small",

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
 
+from bot.renderers.board import champion_emoji
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.models import (
@@ -26,6 +30,7 @@ from league.models import (
 )
 from league.models.outbox import EffectStatus
 from league.services import (
+    boards,
     champions,
     deadlines,
     dev,
@@ -540,6 +545,50 @@ def test_bebot_emojis_load_onto_champions(league: Community) -> None:
     assert Champion.objects.get(name="Abrams").discord_emoji_id == 1302512783283191879
     again = champions.load_emojis(PRESETS / "champion_emojis.yaml")
     assert not again.updated
+
+
+def test_every_plain_hero_emoji_in_the_preset_is_valid() -> None:
+    """Discord refuses a bad button emoji for good, which would leave a board stuck."""
+    data = yaml.safe_load((PRESETS / "champion_emojis.yaml").read_text(encoding="utf-8"))
+    section = data["unicode"]
+    assert section
+    assert all(champions.is_unicode_emoji(str(emoji)) for emoji in section.values()), section
+    # A hero has either a custom emoji or a plain one, not both.
+    assert not set(section) & set(data["emojis"])
+
+
+@pytest.mark.parametrize("value", ["", "A", "abc", "<:c:123>", ":smile:", "🐐 ", "🐐" * 17])
+def test_plain_emoji_check_refuses_what_discord_would(value: str) -> None:
+    assert not champions.is_unicode_emoji(value)
+
+
+def test_plain_hero_emojis_fill_blanks_only(league: Community, tmp_path: Path) -> None:
+    # The fixture already loaded the preset, as `load_presets` does.
+    apollo = Champion.objects.get(name="Apollo")
+    assert apollo.unicode_emoji == "🗡️"
+    again = champions.load_unicode_emojis(PRESETS / "champion_emojis.yaml")
+    assert not again.updated and not again.unknown
+    # An admin's change survives the next start.
+    Champion.objects.filter(pk=apollo.pk).update(unicode_emoji="⚔️")
+    champions.load_unicode_emojis(PRESETS / "champion_emojis.yaml")
+    assert Champion.objects.get(pk=apollo.pk).unicode_emoji == "⚔️"
+    # A bad entry stops the load instead of reaching Discord.
+    bad = tmp_path / "emojis.yaml"
+    bad.write_text("unicode:\n  Billy: goat\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Billy"):
+        champions.load_unicode_emojis(bad)
+
+
+def test_a_hero_without_a_custom_emoji_shows_its_plain_one(popped: Match) -> None:
+    match = to_champion_draft(popped)
+    Champion.objects.filter(name="Billy").update(discord_emoji_id=None)
+    Champion.objects.filter(name="Abrams").update(discord_emoji_id=1302512783283191879)
+    by_name = {option.name: option for option in boards.board_state(match.pk).champions}
+    assert champion_emoji(by_name["Billy"].emoji_id, by_name["Billy"].unicode_emoji) is not None
+    assert str(champion_emoji(None, "🐐")) == "🐐"
+    custom = champion_emoji(by_name["Abrams"].emoji_id, by_name["Abrams"].unicode_emoji)
+    assert custom is not None and custom.id == 1302512783283191879
+    assert champion_emoji(None, "") is None
 
 
 # --- Lobby code ----------------------------------------------------------------------------

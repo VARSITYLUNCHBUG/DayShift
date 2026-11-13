@@ -253,8 +253,17 @@ def _player_button(state: BoardState, player: PlayerLine) -> RouteButton:
     )
 
 
+def champion_emoji(emoji_id: int | None, unicode_emoji: str) -> discord.PartialEmoji | None:
+    """A hero's custom emoji if it has one, else its plain fallback. Custom ones need only an ID."""
+    if emoji_id:
+        return discord.PartialEmoji(name="c", id=emoji_id)
+    if unicode_emoji:
+        return discord.PartialEmoji(name=unicode_emoji)
+    return None
+
+
 def _champion_emoji(champion: ChampionOption) -> discord.PartialEmoji | None:
-    return discord.PartialEmoji(name="c", id=champion.emoji_id) if champion.emoji_id else None
+    return champion_emoji(champion.emoji_id, champion.unicode_emoji)
 
 
 def _champion_button(state: BoardState, champion: ChampionOption) -> RouteButton:

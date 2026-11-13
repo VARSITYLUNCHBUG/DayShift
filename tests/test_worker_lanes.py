@@ -1,4 +1,5 @@
-"""The effect worker gives each match its own lane, so one slow match never stalls another."""
+"""The effect worker gives each lane its own task, so one slow match, or one server's stuck
+panel, never stalls another."""
 
 from __future__ import annotations
 
@@ -25,21 +26,31 @@ async def settle(condition: Callable[[], bool], timeout: float = 2.0) -> None:
         await asyncio.sleep(0.01)
 
 
-def fake_effect(pk: int, match_id: int | None, kind: str) -> Any:
-    return SimpleNamespace(pk=pk, match_id=match_id, kind=kind, community=None, match=None)
+def fake_effect(
+    pk: int, match_id: int | None, kind: str, *, lane: str = "", community_id: int = 1
+) -> Any:
+    return SimpleNamespace(
+        pk=pk,
+        match_id=match_id,
+        kind=kind,
+        lane=lane,
+        community_id=community_id,
+        community=None,
+        match=None,
+    )
 
 
 class Outbox:
-    """Stands in for the database: hands out pending effects in order, per match."""
+    """Stands in for the database: hands out pending effects in order, per lane."""
 
     def __init__(self, *effects: Any) -> None:
         self.pending = list(effects)
         self.done: list[int] = []
 
     def due_by_match(self) -> list[list[Any]]:
-        groups: dict[int | None, list[Any]] = {}
+        groups: dict[Any, list[Any]] = {}
         for effect in self.pending:
-            groups.setdefault(effect.match_id, []).append(effect)
+            groups.setdefault(worker_module.effects.lane_of(effect), []).append(effect)
         return list(groups.values())
 
     def mark_started(self, effect_id: int) -> bool:
@@ -98,6 +109,54 @@ def test_a_slow_match_does_not_hold_up_another_match(
 
     asyncio.run(scenario())
     assert outbox.done == [2, 1]
+
+
+def _run_slow_then_fast(outbox: Outbox, state: SimpleNamespace, stuck_lane: object) -> None:
+    """Effect 1 hangs; effect 2, in another lane, must finish while it does."""
+
+    async def scenario() -> None:
+        state.release = asyncio.Event()
+        state.fast_ran = asyncio.Event()
+        worker = EffectWorker(gateway=None)  # type: ignore[arg-type]
+        assert await worker.dispatch() == 2
+        await asyncio.wait_for(state.fast_ran.wait(), timeout=2)
+        await settle(lambda: 2 in outbox.done)
+        assert worker.busy_matches == {stuck_lane}
+        state.release.set()
+        await worker.run_once()
+
+    asyncio.run(scenario())
+    assert outbox.done == [2, 1]
+
+
+def test_one_servers_panel_does_not_hold_up_anothers(
+    outbox: Outbox, slow_and_fast: SimpleNamespace
+) -> None:
+    """Work outside a match used to share one lane across every server."""
+    outbox.pending = [
+        fake_effect(1, None, "slow", community_id=1),
+        fake_effect(2, None, "fast", community_id=2),
+    ]
+    _run_slow_then_fast(outbox, slow_and_fast, "slow:1")
+
+
+def test_a_named_lane_runs_apart_from_others(
+    outbox: Outbox, slow_and_fast: SimpleNamespace
+) -> None:
+    outbox.pending = [
+        fake_effect(1, None, "slow", lane="quick_draft:7"),
+        fake_effect(2, None, "fast", lane="quick_draft:8"),
+    ]
+    _run_slow_then_fast(outbox, slow_and_fast, "quick_draft:7")
+
+
+def test_lane_keys() -> None:
+    lane_key = worker_module.effects.lane_key
+    assert lane_key(101, "", "render_board", 1) == 101
+    assert lane_key(101, "ignored", "render_board", 1) == 101  # A match's lane always wins.
+    assert lane_key(None, "quick_draft:7", "render_quick_draft", 1) == "quick_draft:7"
+    # Rows written before lanes existed have a blank lane: one per kind and server.
+    assert lane_key(None, "", "render_queue", 3) == "render_queue:3"
 
 
 def test_a_busy_match_keeps_its_effects_in_order(

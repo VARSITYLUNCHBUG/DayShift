@@ -40,7 +40,7 @@ from league.domain.errors import InvalidAction
 from league.models import Community, Match, OutboxEffect, Player
 from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
-from league.services import boards, community, dev, effects, integrity, lobby, queue
+from league.services import boards, common, community, dev, effects, integrity, lobby, queue
 from league.services import draft as draft_service
 from league.services import results as results_service
 from league.services.boards import ResultRow
@@ -837,10 +837,69 @@ def test_joining_waiting_room_after_pop_targets_the_lobby(wired: Community) -> N
     match = Match.objects.get()
     lobby_voice = resource(match, ResourceKind.LOBBY_VOICE)
     user_id = players[0].discord_user_id
-    assert effects.voice_target(user_id, WAITING_ROOM) == (999, lobby_voice)
-    assert effects.voice_target(user_id, lobby_voice) is None
-    assert effects.voice_target(user_id, 12345) is None  # Their own business.
-    assert effects.voice_target(make_player(50).discord_user_id, WAITING_ROOM) is None
+    assert effects.on_voice_join(user_id, WAITING_ROOM) == (999, lobby_voice)
+    assert effects.on_voice_join(user_id, lobby_voice) is None
+    assert effects.on_voice_join(user_id, 12345) is None  # Their own business.
+    assert effects.on_voice_join(make_player(50).discord_user_id, WAITING_ROOM) is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_waiting_room_only_pulls_a_player_in_once(wired: Community) -> None:
+    players = [make_player(n) for n in range(1, 13)]
+    gateway = FakeGateway()
+    for player in players:
+        queue.join(wired.pk, player)
+    drain(gateway)
+    match = Match.objects.get()
+    lobby_voice = resource(match, ResourceKind.LOBBY_VOICE)
+    first, second = players[0].discord_user_id, players[1].discord_user_id
+    # The first time, the Waiting Room sends them on to the lobby.
+    assert effects.on_voice_join(first, WAITING_ROOM) == (999, lobby_voice)
+    assert effects.on_voice_join(first, lobby_voice) is None  # The move lands: they've arrived.
+    assert match.participants.get(player=players[0]).voice_joined_at is not None
+    # Coming back later, they stay where they chose to be.
+    assert effects.on_voice_join(first, WAITING_ROOM) is None
+    # Joining the lobby through the invite counts as arriving too.
+    assert effects.on_voice_join(second, lobby_voice) is None
+    assert effects.on_voice_join(second, WAITING_ROOM) is None
+    # Someone who never arrived is still pulled in.
+    third = players[2].discord_user_id
+    assert effects.on_voice_join(third, WAITING_ROOM) == (999, lobby_voice)
+    # Once teams have their own channels, someone who never arrived goes straight to their team.
+    match = to_champion_draft(match)
+    drain(gateway)
+    late = match.participants.get(player=players[2])
+    team_kind = ResourceKind.TEAM_A_VOICE if late.team == "A" else ResourceKind.TEAM_B_VOICE
+    team_voice = resource(match, team_kind)
+    assert effects.on_voice_join(third, WAITING_ROOM) == (999, team_voice)
+    assert effects.on_voice_join(third, team_voice) is None
+    assert effects.on_voice_join(third, WAITING_ROOM) is None  # Arrived: left alone now.
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_retrying_panel_only_holds_up_its_own_server(wired: Community) -> None:
+    other = community.ensure(1000, "Other")
+    request_queue(wired)
+    request_queue(other)
+    stuck = OutboxEffect.objects.get(community=wired, kind="render_queue")
+    stuck.attempts = 1
+    stuck.save(update_fields=["attempts"])
+    request_queue(wired)  # Queued behind the retry: it must wait its turn.
+    groups = effects.due_by_match()
+    lanes = {effects.lane_of(group[0]): [effect.pk for effect in group] for group in groups}
+    assert lanes[f"render_queue:{other.pk}"] == [
+        OutboxEffect.objects.get(community=other, kind="render_queue").pk
+    ]
+    assert lanes[f"render_queue:{wired.pk}"] == [stuck.pk]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_renders_of_different_lanes_do_not_coalesce(wired: Community) -> None:
+    common.request_render(wired, "render_thing", lane="thing:1")
+    common.request_render(wired, "render_thing", lane="thing:1")
+    common.request_render(wired, "render_thing", lane="thing:2")
+    rows = OutboxEffect.objects.filter(kind="render_thing").order_by("lane")
+    assert [row.lane for row in rows] == ["thing:1", "thing:2"]
 
 
 @pytest.mark.django_db(transaction=True)
