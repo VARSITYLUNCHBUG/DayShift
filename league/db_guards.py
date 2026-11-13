@@ -21,6 +21,7 @@ APPEND_ONLY_TABLES = (
     "strike_adjustments",
     "captain_overrides",
     "api_match_checks",
+    "quick_draft_actions",
 )
 
 FUNCTION = """

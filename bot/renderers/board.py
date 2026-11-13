@@ -9,6 +9,10 @@ import discord
 from discord import ButtonStyle, SelectOption
 from discord.ui import ActionRow, Container, LayoutView, MediaGallery, Separator, TextDisplay
 
+from bot.renderers.grid import BUTTONS_PER_ROW, SELECT_LIMIT, hero_emoji
+from bot.renderers.grid import chunks as _chunks
+from bot.renderers.grid import fits as grid_fits
+from bot.renderers.grid import messages as grid_messages
 from bot.routing import RouteButton, RouteSelect
 from league.domain.engine import Status
 from league.models.subs import SubStatus
@@ -16,14 +20,6 @@ from league.services import dev
 from league.services.boards import BoardState, ChampionOption, PlayerLine, SubLine
 from league.services.subs import OfferInfo
 
-# Discord caps a string select at 25 options, and an action row at 5 buttons.
-SELECT_LIMIT = 25
-BUTTONS_PER_ROW = 5
-# A message holds 40 components, counting each row and button, so a message of nothing but rows
-# holds 6 full rows. The champion grid gets up to two such messages of its own below the board; a
-# bigger roster falls back to selects.
-ROWS_PER_GRID_MESSAGE = 6
-GRID_MESSAGES = 2
 ACCENT_LIVE = 0x5865F2
 ACCENT_ATTENTION = 0xFEE75C
 ACCENT_DONE = 0x57F287
@@ -133,10 +129,6 @@ def _header(state: BoardState) -> str:
     timer = countdown(state)
     line = f"## Match #{state.match_id}: {title}"
     return f"{line}\n{timer}" if timer else line
-
-
-def _chunks(items: list[Any], size: int = SELECT_LIMIT) -> list[list[Any]]:
-    return [items[start : start + size] for start in range(0, len(items), size)]
 
 
 def _ready(state: BoardState, box: Container[Any]) -> None:
@@ -253,17 +245,8 @@ def _player_button(state: BoardState, player: PlayerLine) -> RouteButton:
     )
 
 
-def champion_emoji(emoji_id: int | None, unicode_emoji: str) -> discord.PartialEmoji | None:
-    """A hero's custom emoji if it has one, else its plain fallback. Custom ones need only an ID."""
-    if emoji_id:
-        return discord.PartialEmoji(name="c", id=emoji_id)
-    if unicode_emoji:
-        return discord.PartialEmoji(name=unicode_emoji)
-    return None
-
-
 def _champion_emoji(champion: ChampionOption) -> discord.PartialEmoji | None:
-    return champion_emoji(champion.emoji_id, champion.unicode_emoji)
+    return hero_emoji(champion.emoji_id, champion.unicode_emoji)
 
 
 def _champion_button(state: BoardState, champion: ChampionOption) -> RouteButton:
@@ -347,17 +330,9 @@ def render_pickers(state: BoardState) -> list[LayoutView]:
     if state.status != Status.CHAMPION_DRAFT or state.on_hold:
         return []
     rows = [*_champion_rows(state, state.champions), ActionRow(_random_button(state))]
-    if len(rows) > ROWS_PER_GRID_MESSAGE * GRID_MESSAGES:
+    if not grid_fits(rows):
         rows = [*_champion_selects(state), ActionRow(_random_button(state))]
-    messages = -(-len(rows) // ROWS_PER_GRID_MESSAGE)
-    per_message = -(-len(rows) // messages)  # Balanced, so neither half looks like an afterthought.
-    views = []
-    for start in range(0, len(rows), per_message):
-        view = LayoutView(timeout=None)
-        for row in rows[start : start + per_message]:
-            view.add_item(row)
-        views.append(view)
-    return views
+    return grid_messages(rows)
 
 
 def _final_draft_summary(state: BoardState) -> str:

@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta
 
 from django.db import transaction
 
 from league.domain.engine import LIVE, Status
 from league.domain.errors import DomainError
 from league.models import Community, Match
-from league.services import draft, early_leave, lobby, queue, results, subs
+from league.services import (
+    draft,
+    early_leave,
+    lobby,
+    queue,
+    quick_drafts,
+    results,
+    subs,
+)
 from league.services.common import lock_match, now
 
 logger = logging.getLogger(__name__)
@@ -56,6 +65,8 @@ def tick() -> int:
 
     fired += subs.tick(moment)
     fired += early_leave.tick(moment)
+    # Each of these can fail without stopping the others, or the queue pops below.
+    fired += _side_tick("quick drafts", quick_drafts.tick, moment)
 
     for community_id in Community.objects.values_list("pk", flat=True):
         try:
@@ -73,4 +84,13 @@ def extend_past_due(grace_seconds: int = STARTUP_GRACE_SECONDS) -> int:
         deadline_at=new_deadline
     )
     count += subs.extend_past_due(new_deadline)
+    count += quick_drafts.extend_past_due(new_deadline)
     return count
+
+
+def _side_tick(name: str, tick_fn: Callable[[datetime], int], moment: datetime) -> int:
+    try:
+        return tick_fn(moment)
+    except Exception:
+        logger.exception("Deadline pass failed", extra={"part": name})
+        return 0

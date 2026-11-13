@@ -1,6 +1,9 @@
 ## Acknowledgments
 Thank you to \_bacon_ for the base build. This project started from their Bebot draft bot. Without their work made, PUGs would in rigor mortis and none of our current community would be possible.
 
+Thanks to datsir for porting Bebot's standalone draft,
+which these versions are built from.
+
 A big shout out to the ZA Deadlock community for playing in the inhouses, giving feedback and helping shape how the bot works.
 
 ---
@@ -356,10 +359,36 @@ cooldown's strikes too, unless told to keep them, and `/penalty strikes` adds or
 hand. All the numbers are in each server's `penalty_policy`, editable in admin. They are starting
 judgements.
 
+## Bebot's tools
+
+Alongside the match flow, the server keeps Bebot's other tools. None of them touches ratings.
+
+### Standalone draft
+
+`/startdraft` runs a hero ban and pick in any channel, for scrims or anything outside the queue.
+Two people press **Become The Hidden King Captain** and **Become The Archmother Captain**, then the
+active mode's bans and picks run, The Hidden King first. Only the captain on turn can choose;
+🎲 Random picks for them, and a turn that runs out picks at random, shown as "(randomed)". It
+looks the way it did in Bebot: the 👑 Captains block, 🚫 Bans, each side's heroes, the turn strip,
+and `# GLHF` with a GIF at the end. The hero grid sits below the draft in messages of its own, and
+the draft moves back below the chat once a few messages push it up.
+
+- `/captains_coinflip captain1 captain2` flips a coin. The winner chooses First Pick, Last Pick,
+  🔶 Hidden King or 🔷 Archmother; the loser chooses from the other kind; either captain presses
+  Start Draft. Here The Archmother can go first.
+- `/coinflip player1 player2` only says who should take The Hidden King. `/randomdraft` posts a
+  random ban and pick for both sides.
+- `/stopdraft` stops it and deletes its messages. The captains, whoever started it, and staff can.
+- One draft per channel, and at most 10 at once per server. A draft whose captains never show up
+  frees the channel after 15 minutes. With `DEBUG` on, one person can captain both sides.
+- The bot needs View Channel, Send Messages and Read Message History in the channel, and Use
+  External Emojis for the hero icons. Without that last one, heroes show their plain emoji.
+
 ## Commands
 
 **Players:** `/leaderboard`, `/stats`, `/rating history`, `/queue status`, `/link`, `/unlink`,
-`/submit` (fallback for when the report form's upload fails).
+`/submit` (fallback for when the report form's upload fails), `/startdraft`, `/stopdraft`,
+`/captains_coinflip`, `/coinflip`, `/randomdraft`.
 
 **Staff:** `/setup`, `/match status|void|rescore|sub|explain|awards|names|early_leave`,
 `/rating seed|adjust`, `/queue kick|clear`, `/penalty add|revoke|strikes`,
@@ -377,6 +406,7 @@ Anything that rewrites past ratings shows a preview and needs Confirm.
 | Matches | `matches`, `match_participants`, `match_resources`, `match_transitions`, `draft_actions`, `captain_votes`, `sub_requests`, `sub_offers`, `early_leaves` |
 | Results | `result_submissions`, `match_results`, `match_awards`, `scoreboard_reads`, `player_match_stats`, `player_aliases`, `api_match_checks` |
 | Operations | `penalties`, `strike_adjustments`, `captain_overrides`, `outbox_effects` |
+| Bebot's tools | `quick_drafts`, `quick_draft_actions` |
 
 For analytics, start at `result_submissions`. Screenshots are in the archive channel: use
 `archive_message_id` and `attachment_id` with the Discord API, because CDN URLs expire. Join
@@ -391,7 +421,8 @@ league/domain/    Pure rules, no Django or Discord: ratings (openskill_v1), stri
                   captain eligibility (standing), Steam IDs, mode schema, draft plan, engine
 league/models/    The tables
 league/services/  Transactions: queue, lobby, draft, results, ratings, corrections, awards,
-                  standing, penalties, ocr, steam, api_results, calibration, deadlines
+                  standing, penalties, ocr, steam, api_results, calibration, deadlines,
+                  and Bebot's standalone draft: quick_drafts
 league/integrations/  The deadlock-api client. Network only, no database
 league/web/       The staff calibration dashboard
 league/admin/     Django admin
@@ -410,8 +441,9 @@ The rules that keep it reliable:
 - **Timers are rows.** A poller applies timeouts through the same path as a click. After downtime,
   past-due deadlines get 60 s of grace.
 - **Discord calls happen after commit.** State changes write `outbox_effects` in the same transaction,
-  and a worker runs them in order per lane, retrying on server errors. Each match is a lane, and
-  other work gets one lane per kind and server, so one that keeps failing never holds up another.
+  and a worker runs them in order per lane, retrying on server errors. Each match is a lane, each
+  standalone draft is a lane, and other work gets one lane per kind and server, so one that keeps
+  failing never holds up another.
 
 ## Operations
 

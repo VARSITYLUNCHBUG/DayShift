@@ -6,9 +6,9 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
 
 from bot.db import db
+from bot.effects import flow
 from bot.effects.gateway import ChannelGone, Gateway
 from bot.renderers.board import (
     render_board,
@@ -17,7 +17,9 @@ from bot.renderers.board import (
     render_sub_offer_dm,
     render_voice_dm,
 )
+from bot.renderers.grid import GRID_MESSAGES
 from bot.renderers.queue import render_queue
+from bot.renderers.quick_draft import render_draft, render_grid
 from bot.renderers.results import (
     render_correction,
     render_results,
@@ -28,7 +30,18 @@ from league.domain.errors import DomainError
 from league.integrations import deadlock_api
 from league.models import Community, Match, OutboxEffect, Player
 from league.models.matches import ResourceKind
-from league.services import api_results, boards, dev, draft, effects, lobby, ocr, subs
+from league.models.quick_drafts import QuickDraftStatus
+from league.services import (
+    api_results,
+    boards,
+    dev,
+    draft,
+    effects,
+    lobby,
+    ocr,
+    quick_drafts,
+    subs,
+)
 from league.services.common import add_effect
 from league.services.common import render_board as request_board
 
@@ -323,12 +336,29 @@ async def remove_player(env: Env) -> None:
 GRID_KINDS = (ResourceKind.PICKER_MESSAGE, ResourceKind.PICKER_MESSAGE_2)
 
 
-def _last_message(resources: dict[str, int]) -> int | None:
-    """The bottom of the flow: the last grid message, or the board when there is no grid."""
-    for kind in reversed(GRID_KINDS):
-        if kind in resources:
-            return resources[kind]
-    return resources.get(ResourceKind.BOARD_MESSAGE)
+def _match_flow(resources: dict[str, int], text_id: int) -> flow.FlowMessages:
+    return flow.FlowMessages(
+        text_id,
+        resources.get(ResourceKind.BOARD_MESSAGE),
+        tuple(resources.get(kind) for kind in GRID_KINDS),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _MatchFlowStore:
+    """A match's board and grid messages live in its resources."""
+
+    match_id: int
+
+    async def save_board(self, message_id: int) -> None:
+        await db(effects.record_resource, self.match_id, ResourceKind.BOARD_MESSAGE, message_id)
+
+    async def save_grid(self, index: int, message_id: int | None) -> None:
+        kind = GRID_KINDS[index]
+        if message_id is None:
+            await db(effects.mark_resource_deleted, self.match_id, kind)
+        else:
+            await db(effects.record_resource, self.match_id, kind, message_id)
 
 
 async def _render_board(env: Env) -> None:
@@ -337,48 +367,16 @@ async def _render_board(env: Env) -> None:
     if text_id is None:
         raise Skip("Lobby channel isn't up yet; creating it renders the board.")
     state = await db(boards.board_state, env.match_id)
-    board = render_board(state)
-    grid = render_pickers(state)
-    board_id = resources.get(ResourceKind.BOARD_MESSAGE)
-    in_place = False
-    if board_id is not None and await env.gateway.latest_message_id(text_id) == _last_message(
-        resources
-    ):
-        try:
-            await env.gateway.edit_view(text_id, board_id, board)
-        except ChannelGone:
-            logger.info("The board was deleted; posting it again", extra={"match": env.match_id})
-        else:
-            in_place = True
-    if not in_place:
-        # Post before deleting, so the flow is never missing. Old buttons stay safe in between:
-        # they carry their step, and a stale click gets a polite refusal. Each old message goes
-        # as soon as its replacement is recorded, so a retry can't leave one behind.
-        message_id = await env.gateway.send_view(text_id, board)
-        await db(effects.record_resource, env.match_id, ResourceKind.BOARD_MESSAGE, message_id)
-        if board_id is not None:
-            await env.gateway.delete_message(text_id, board_id)
-    await _repost_grid(env, text_id, resources, grid)
-    if not in_place:
+    reposted = await flow.render(
+        env.gateway,
+        _MatchFlowStore(env.match_id),
+        _match_flow(resources, text_id),
+        render_board(state),
+        render_pickers(state),
+        log_extra={"match": env.match_id},
+    )
+    if reposted:
         await db(effects.cancel_board_moves, env.match_id)  # Chat now starts counting afresh.
-
-
-async def _repost_grid(env: Env, text_id: int, resources: dict[str, int], grid: list[Any]) -> None:
-    """Post the champion grid afresh below the board, then remove the old one.
-
-    The grid is never edited: an edited message gets an "(edited)" tag, which would split it.
-    Each old message goes as soon as its replacement is recorded, so a retry can't leave one
-    behind, and the new messages end up in order directly below the board.
-    """
-    for index, kind in enumerate(GRID_KINDS):
-        old_id = resources.get(kind)
-        if index < len(grid):
-            message_id = await env.gateway.send_view(text_id, grid[index])
-            await db(effects.record_resource, env.match_id, kind, message_id)
-        elif old_id is not None:
-            await db(effects.mark_resource_deleted, env.match_id, kind)
-        if old_id is not None:
-            await env.gateway.delete_message(text_id, old_id)
 
 
 @effect("render_board")
@@ -393,8 +391,7 @@ async def move_board(env: Env) -> None:
     text_id = resources.get(ResourceKind.TEXT)
     if text_id is None:
         raise Skip("The channel has closed.")
-    last_id = _last_message(resources)
-    if last_id is not None and await env.gateway.latest_message_id(text_id) == last_id:
+    if await flow.at_bottom(env.gateway, _match_flow(resources, text_id)):
         raise Skip("The board is already last.")
     await _render_board(env)
 
@@ -744,3 +741,83 @@ async def delete_text_channel(env: Env) -> None:
         raise Skip("Already deleted.")
     await env.gateway.delete_channel(channel_id)
     await db(effects.mark_resource_deleted, env.match_id, ResourceKind.TEXT)
+
+
+# --- Standalone drafts (/startdraft) ----------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _DraftFlowStore:
+    """A standalone draft's messages live on its row."""
+
+    draft_id: int
+
+    async def save_board(self, message_id: int) -> None:
+        await db(quick_drafts.record_board, self.draft_id, message_id)
+
+    async def save_grid(self, index: int, message_id: int | None) -> None:
+        await db(quick_drafts.record_grid, self.draft_id, index, message_id)
+
+
+def _draft_flow(messages: quick_drafts.Messages) -> flow.FlowMessages:
+    slots: list[int | None] = [*messages.grid_ids]
+    slots += [None] * (GRID_MESSAGES - len(slots))
+    return flow.FlowMessages(messages.channel_id, messages.board_id, tuple(slots))
+
+
+def _draft_id(env: Env) -> int:
+    return int(env.effect.payload["draft_id"])
+
+
+async def _render_quick_draft(env: Env, draft_id: int, messages: quick_drafts.Messages) -> None:
+    state = await db(quick_drafts.state, draft_id)
+    try:
+        reposted = await flow.render(
+            env.gateway,
+            _DraftFlowStore(draft_id),
+            _draft_flow(messages),
+            render_draft(state),
+            render_grid(state),
+            log_extra={"draft": draft_id},
+        )
+    except ChannelGone:
+        # The channel is gone, or it was never ours to post in: free it rather than block it.
+        await db(quick_drafts.close_gone, draft_id)
+        raise
+    if reposted:
+        await db(effects.cancel_moves, quick_drafts.MOVE_KIND, lane=f"quick_draft:{draft_id}")
+
+
+@effect(quick_drafts.RENDER_KIND)
+async def render_quick_draft(env: Env) -> None:
+    draft_id = _draft_id(env)
+    messages = await db(quick_drafts.messages, draft_id)
+    if messages.status == QuickDraftStatus.STOPPED:
+        raise Skip("The draft was stopped; its messages are being deleted.")
+    await _render_quick_draft(env, draft_id, messages)
+
+
+@effect(quick_drafts.MOVE_KIND)
+async def move_quick_draft(env: Env) -> None:
+    """Chat has built up below the draft, unless a pick has already moved it since."""
+    draft_id = _draft_id(env)
+    messages = await db(quick_drafts.messages, draft_id)
+    if messages.status != QuickDraftStatus.DRAFTING or messages.board_id is None:
+        raise Skip("Only a draft in progress follows the chat.")
+    if await flow.at_bottom(env.gateway, _draft_flow(messages)):
+        raise Skip("The draft is already last.")
+    await _render_quick_draft(env, draft_id, messages)
+
+
+@effect(quick_drafts.DELETE_KIND)
+async def delete_quick_draft(env: Env) -> None:
+    """Runs after any render in flight, so it reads the message IDs that render recorded."""
+    draft_id = _draft_id(env)
+    messages = await db(quick_drafts.messages, draft_id)
+    store = _DraftFlowStore(draft_id)
+    for index, message_id in reversed(list(enumerate(messages.grid_ids))):
+        await env.gateway.delete_message(messages.channel_id, message_id)
+        await store.save_grid(index, None)
+    if messages.board_id is not None:
+        await env.gateway.delete_message(messages.channel_id, messages.board_id)
+        await db(quick_drafts.record_board, draft_id, None)

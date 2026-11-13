@@ -17,6 +17,7 @@ from discord import app_commands
 from django.db import connections
 
 from bot.client import DraftBot
+from bot.commands import drafts as draft_commands
 from bot.commands import player as player_commands
 from bot.commands import setup as setup_commands
 from bot.commands import staff
@@ -786,12 +787,14 @@ def test_every_command_serialises_for_discord() -> None:
         setup_commands.setup_command,
         *staff.GROUPS,
         *staff.COMMANDS,
+        *draft_commands.COMMANDS,
     ):
         tree.add_command(command)
     payloads = [command.to_dict(tree) for command in tree.get_commands()]
     names = {payload["name"] for payload in payloads}
     assert {"queue", "rating", "match", "penalty", "mode", "roster", "setup", "submit"} <= names
     assert {"link", "unlink", "captain", "ocr", "deadlock"} <= names
+    assert {"startdraft", "stopdraft", "captains_coinflip", "coinflip", "randomdraft"} <= names
     rating = next(payload for payload in payloads if payload["name"] == "rating")
     assert {option["name"] for option in rating["options"]} == {"history", "seed", "adjust"}
     queue_payload = next(payload for payload in payloads if payload["name"] == "queue")

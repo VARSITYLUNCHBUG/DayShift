@@ -3,13 +3,28 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from league.domain.engine import LIVE
-from league.models import Community, Match, MatchParticipant, MatchResource, OutboxEffect
+from league.models import (
+    Community,
+    Match,
+    MatchParticipant,
+    MatchResource,
+    OutboxEffect,
+    QuickDraft,
+)
 from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
-from league.services.common import add_effect, now, render_board, render_queue
+from league.models.quick_drafts import QUICK_DRAFT_LIVE, QuickDraftStatus
+from league.services.common import (
+    add_effect,
+    now,
+    render_board,
+    render_queue,
+    request_render,
+)
 
 MAX_ATTEMPTS = 8
 MAX_BACKOFF_SECONDS = 300
@@ -152,8 +167,29 @@ def mark_notice_deleted(match_id: int, message_id: int) -> None:
     ).update(deleted_at=now())
 
 
+@dataclass(frozen=True, slots=True)
+class MoveTiming:
+    after_messages: int
+    quiet_seconds: int
+    max_wait_seconds: int
+    idle_seconds: int
+
+
+BOARD_MOVE = MoveTiming(
+    BOARD_MOVE_AFTER_MESSAGES,
+    BOARD_MOVE_QUIET_SECONDS,
+    BOARD_MOVE_MAX_WAIT_SECONDS,
+    BOARD_MOVE_IDLE_SECONDS,
+)
+# A standalone draft runs in an ordinary channel, which is busier than a match's own, and each
+# move reposts three messages, so it waits for more chat before following it.
+QUICK_DRAFT_MOVE = MoveTiming(
+    after_messages=5, quiet_seconds=5, max_wait_seconds=30, idle_seconds=600
+)
+
+
 def note_chat(channel_id: int) -> None:
-    """Count a chat message in a match channel towards moving the board back below the chat."""
+    """Count a chat message towards moving a match board, or a standalone draft, back below it."""
     resource = (
         MatchResource.objects.filter(
             kind=ResourceKind.TEXT, discord_id=channel_id, deleted_at__isnull=True
@@ -161,36 +197,74 @@ def note_chat(channel_id: int) -> None:
         .select_related("match__community")
         .first()
     )
-    if resource is None:
-        return  # Any other channel in the server.
-    match = resource.match
+    if resource is not None:
+        match = resource.match
+        _debounce_move(match.community, "move_board", BOARD_MOVE, match=match)
+        return
+    draft = (
+        QuickDraft.objects.filter(channel_id=channel_id, status=QuickDraftStatus.DRAFTING)
+        .select_related("community")
+        .first()
+    )
+    if draft is not None and draft.board_message_id is not None:
+        _debounce_move(
+            draft.community,
+            "move_quick_draft",
+            QUICK_DRAFT_MOVE,
+            lane=draft.lane,
+            payload={"draft_id": draft.pk},
+        )
+    # Any other channel in the server: nothing to keep in view.
+
+
+def _debounce_move(
+    community: Community,
+    kind: str,
+    timing: MoveTiming,
+    *,
+    match: Match | None = None,
+    lane: str | None = None,
+    payload: dict[str, object] | None = None,
+) -> None:
+    """Move once chat is pushing the message out of view, after a quiet moment. Non-stop chat
+    can only hold that off for so long; a message or two left below moves it much later."""
     moment = now()
     pending = OutboxEffect.objects.filter(
-        match=match, kind="move_board", status=EffectStatus.PENDING, attempts=0
+        match=match, lane=lane or "", kind=kind, status=EffectStatus.PENDING, attempts=0
     ).first()
     if pending is None:
         add_effect(
-            match.community,
-            "move_board",
-            {"messages": 1},
+            community,
+            kind,
+            {**(payload or {}), "messages": 1},
             match=match,
-            run_after=moment + timedelta(seconds=BOARD_MOVE_IDLE_SECONDS),
+            lane=lane,
+            run_after=moment + timedelta(seconds=timing.idle_seconds),
         )
         return
     messages = int(pending.payload.get("messages", 0)) + 1
     pending.payload["messages"] = messages
-    if messages >= BOARD_MOVE_AFTER_MESSAGES:
-        latest = moment + timedelta(seconds=BOARD_MOVE_MAX_WAIT_SECONDS)
+    if messages >= timing.after_messages:
+        latest = moment + timedelta(seconds=timing.max_wait_seconds)
         move_by = datetime.fromisoformat(pending.payload.setdefault("move_by", latest.isoformat()))
-        pending.run_after = min(moment + timedelta(seconds=BOARD_MOVE_QUIET_SECONDS), move_by)
+        pending.run_after = min(moment + timedelta(seconds=timing.quiet_seconds), move_by)
     pending.save(update_fields=["payload", "run_after"])
 
 
+def cancel_moves(kind: str, *, match_id: int | None = None, lane: str | None = None) -> None:
+    """The message has just moved to the bottom, so chat before now no longer counts."""
+    pending = OutboxEffect.objects.filter(
+        lane=lane or "", kind=kind, status=EffectStatus.PENDING, attempts=0
+    )
+    if match_id is None:
+        pending = pending.filter(match__isnull=True)
+    else:
+        pending = pending.filter(match_id=match_id)
+    pending.update(status=EffectStatus.SKIPPED, done_at=now())
+
+
 def cancel_board_moves(match_id: int) -> None:
-    """The board has just moved to the bottom, so chat before now no longer counts."""
-    OutboxEffect.objects.filter(
-        match_id=match_id, kind="move_board", status=EffectStatus.PENDING, attempts=0
-    ).update(status=EffectStatus.SKIPPED, done_at=now())
+    cancel_moves("move_board", match_id=match_id)
 
 
 def on_voice_join(discord_user_id: int, joined_channel_id: int) -> tuple[int, int] | None:
@@ -260,6 +334,12 @@ def request_reconcile() -> int:
     live = Match.objects.filter(status__in=LIVE).select_related("community")
     for match in live:
         render_board(match)
+        count += 1
+    drafts = QuickDraft.objects.filter(status__in=QUICK_DRAFT_LIVE).select_related("community")
+    for draft in drafts:
+        request_render(
+            draft.community, "render_quick_draft", lane=draft.lane, payload={"draft_id": draft.pk}
+        )
         count += 1
     return count
 
