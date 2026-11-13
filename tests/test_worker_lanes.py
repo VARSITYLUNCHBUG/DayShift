@@ -4,6 +4,7 @@ panel, never stalls another."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -237,3 +238,4 @@ def test_sigterm_shuts_the_bot_down_like_ctrl_c(monkeypatch: pytest.MonkeyPatch)
             signal.raise_signal(signal.SIGTERM)
     finally:
         signal.signal(signal.SIGTERM, previous)
+        logging.getLogger().removeHandler(client_module.discord_error_handler)

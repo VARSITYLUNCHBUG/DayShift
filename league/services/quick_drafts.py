@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 
 from django.db import IntegrityError, transaction
 
+from league import log_context
 from league.domain.draft_plan import PlanStep, champion_plan
 from league.domain.engine import auto_champion, draft_name, pick_gif, seeded_rng
 from league.domain.errors import DomainError, InvalidAction, NotAllowed, StaleAction
@@ -453,8 +454,9 @@ def tick(moment: datetime) -> int:
         board_message_id__isnull=True,
         created_at__lt=moment - timedelta(seconds=UNPOSTED_SECONDS),
     )
-    for draft_id in due.values_list("pk", flat=True):
-        fired += _fire_one(draft_id)
+    for draft_id, guild_id in due.values_list("pk", "community__discord_guild_id"):
+        with log_context.bind(guild=guild_id, draft=draft_id):
+            fired += _fire_one(draft_id)
     for draft_id in unposted.values_list("pk", flat=True):
         try:
             close_gone(draft_id)

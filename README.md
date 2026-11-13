@@ -1,7 +1,7 @@
 ## Acknowledgments
 Thank you to \_bacon_ for the base build. This project started from their Bebot draft bot. Without their work made, PUGs would in rigor mortis and none of our current community would be possible.
 
-Thanks to datsir for porting Bebot's standalone draft, priority list and pings,
+Thanks to datsir for porting Bebot's standalone draft, priority list, pings and error channel,
 which these versions are built from.
 
 A big shout out to the ZA Deadlock community for playing in the inhouses, giving feedback and helping shape how the bot works.
@@ -409,6 +409,13 @@ and `/pings` lists a channel's pings and when each is ready. Only the roles and 
 chose can be pinged: @everyone, @here and anything typed into the message never are. If Discord
 refuses a ping, its cooldown isn't used. `/removeping` deletes one.
 
+### Error channel
+
+`/seterrorchannel channel` posts this server's bot errors in a channel, summarised, at most 10 a
+minute (admins). Only this server's own errors go there. `/clearerrorchannel` stops it. Whoever
+runs the bot can also set `ERROR_LOG_CHANNEL_ID` to get every error, from every server, with its
+full traceback.
+
 ## Commands
 
 **Players:** `/leaderboard`, `/stats`, `/rating history`, `/queue status`, `/link`, `/unlink`,
@@ -419,7 +426,7 @@ refuses a ping, its cooldown isn't used. `/removeping` deletes one.
 `/rating seed|adjust`, `/queue kick|clear`, `/penalty add|revoke|strikes`,
 `/captain allow|bar|clear`, `/ocr mode|status`, `/deadlock settings|status|check|unlink`,
 `/mode list|activate`, `/roster sync`, `/ledger_check`, `/priolist`, `/refresh`, `/removeprio`,
-`/pingchannel`, `/removeping`.
+`/pingchannel`, `/removeping`, `/seterrorchannel`, `/clearerrorchannel`.
 Anything that rewrites past ratings shows a preview and needs Confirm.
 
 ## Tables
@@ -456,6 +463,7 @@ bot/handlers/     Clicks and modals: validate, call a service, acknowledge
 bot/commands/     Slash commands
 bot/renderers/    State to Discord components, with no I/O
 bot/effects/      Runs Discord side effects from the outbox, with retries
+bot/error_log.py  Posts ERROR logs to each server's /seterrorchannel channel
 scoreocr/         Scoreboard screenshot reader, used through league/services/ocr.py when installed
 ```
 

@@ -14,11 +14,13 @@ from discord import app_commands
 from django.conf import settings
 
 from bot.commands import drafts, player, setup, staff
+from bot.commands import errors as error_commands
 from bot.commands import pings as ping_commands
 from bot.commands import prio as prio_commands
 from bot.db import db
 from bot.effects.gateway import ChannelGone, DiscordGateway
 from bot.effects.worker import EffectWorker
+from bot.error_log import ErrorSink, discord_error_handler
 
 # Importing the handlers registers them with the router.
 from bot.handlers import draft as _draft  # noqa: F401
@@ -28,6 +30,7 @@ from bot.handlers import quick_draft as _quick_draft  # noqa: F401
 from bot.handlers import results as _results  # noqa: F401
 from bot.handlers import subs as _subs  # noqa: F401
 from bot.routing import RouteButton, RouteSelect, RouteUserSelect
+from league import log_context
 from league.services import community as community_service
 from league.services import deadlines, effects, prio
 
@@ -54,18 +57,22 @@ class DraftBot(discord.Client):
             allowed_mentions=discord.AllowedMentions.none(),
             max_messages=None,  # Nothing reads the message cache, so don't spend memory on it.
         )
-        self.tree = app_commands.CommandTree(self)
+        self.tree = _Tree(self)
         self.gateway = DiscordGateway(self)
         self.worker = EffectWorker(self.gateway, on_lane_done=self.wake_effects)
         self._effects_wake = asyncio.Event()
         self._started = False
         self._tasks: list[asyncio.Task[None]] = []
+        self.error_sink = ErrorSink(
+            self, self._error_channel, settings.ERROR_LOG_CHANNEL_ID or None
+        )
 
     def wake_effects(self) -> None:
         """Called after each click, so board updates follow immediately rather than on a poll."""
         self._effects_wake.set()
 
     async def setup_hook(self) -> None:
+        discord_error_handler.bind(asyncio.get_running_loop())
         self.add_dynamic_items(RouteButton, RouteSelect, RouteUserSelect)
         commands: tuple[Any, ...] = (
             *player.COMMANDS,
@@ -75,6 +82,7 @@ class DraftBot(discord.Client):
             *drafts.COMMANDS,
             *prio_commands.COMMANDS,
             *ping_commands.COMMANDS,
+            *error_commands.COMMANDS,
         )
         for command in commands:
             self.tree.add_command(command)
@@ -90,6 +98,9 @@ class DraftBot(discord.Client):
         if self._started:
             return  # on_ready fires again after reconnects.
         self._started = True
+        queue = discord_error_handler.queue
+        if queue is not None:
+            self._tasks.append(asyncio.create_task(self.error_sink.run(queue), name="errors"))
         extended = await db(deadlines.extend_past_due)
         logger.info("Startup grace applied", extra={"extended": extended})
         await db(effects.request_reconcile)
@@ -97,10 +108,13 @@ class DraftBot(discord.Client):
         # Before the deadline loop starts, or its first pass would expire the grace of anyone
         # who came back to the Waiting Room while the bot was down.
         await self._reconcile_prio()
-        self._tasks = [
+        self._tasks += [
             asyncio.create_task(self._deadline_loop(), name="deadlines"),
             asyncio.create_task(self._effect_loop(), name="effects"),
         ]
+
+    async def _error_channel(self, guild_id: int) -> int | None:
+        return await db(community_service.error_channel, guild_id)
 
     async def _sweep_stale_channels(self) -> None:
         """Delete channels whose cleanup failed for good. By stored ID only, never by name."""
@@ -156,10 +170,11 @@ class DraftBot(discord.Client):
         """Chat is welcome in match channels, but the board has to stay in view."""
         if message.guild is None or self.user is None or message.author.id == self.user.id:
             return
-        try:
-            await db(effects.note_chat, message.channel.id)
-        except Exception:
-            logger.exception("Couldn't note chat", extra={"channel": message.channel.id})
+        with log_context.bind(guild=message.guild.id):
+            try:
+                await db(effects.note_chat, message.channel.id)
+            except Exception:
+                logger.exception("Couldn't note chat", extra={"channel": message.channel.id})
 
     async def on_voice_state_update(
         self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
@@ -167,8 +182,9 @@ class DraftBot(discord.Client):
         """Joining the Waiting Room after your lobby popped moves you straight into it."""
         if before.channel == after.channel:
             return  # Mute, deafen, stream and the like.
-        await self._update_prio(member, before.channel, after.channel)
-        await self._auto_move(member, after.channel)
+        with log_context.bind(guild=member.guild.id):
+            await self._update_prio(member, before.channel, after.channel)
+            await self._auto_move(member, after.channel)
 
     async def _update_prio(
         self,
@@ -211,6 +227,16 @@ class DraftBot(discord.Client):
             )
 
 
+class _Tree(app_commands.CommandTree[DraftBot]):
+    async def on_error(
+        self, interaction: discord.Interaction[DraftBot], error: app_commands.AppCommandError
+    ) -> None:
+        """Errors outside `guarded`, such as a bad argument. Tagged with their server."""
+        with log_context.bind(guild=interaction.guild_id, interaction=interaction.id):
+            command = interaction.command.name if interaction.command else None
+            logger.error("Command error", extra={"command": command}, exc_info=error)
+
+
 def run() -> None:
     if not settings.DISCORD_TOKEN:
         raise SystemExit("DISCORD_TOKEN isn't set. Add it to .env.")
@@ -218,7 +244,11 @@ def run() -> None:
     # waited out the grace period and then killed it. Treat SIGTERM like Ctrl+C: discord.py then
     # closes the connection cleanly, and any effect cut short stays pending and runs on restart.
     signal.signal(signal.SIGTERM, _stop_on_sigterm)
-    DraftBot().run(settings.DISCORD_TOKEN, log_handler=None)
+    bot = DraftBot()
+    # Only the bot process posts errors to Discord, so this isn't in settings.LOGGING, which the
+    # web process and tests share. It's bound to the loop once that's running (setup_hook).
+    logging.getLogger().addHandler(discord_error_handler)
+    bot.run(settings.DISCORD_TOKEN, log_handler=None)
 
 
 def _stop_on_sigterm(signum: int, frame: object) -> None:

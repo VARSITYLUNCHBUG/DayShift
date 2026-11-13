@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from django.db import transaction
 
+from league import log_context
 from league.domain.engine import LIVE, Status
 from league.domain.errors import DomainError
 from league.models import Community, Match
@@ -56,13 +57,14 @@ def tick() -> int:
     moment = now()
     fired = 0
     due = Match.objects.filter(status__in=LIVE, deadline_at__lte=moment)
-    for match_id in due.values_list("pk", flat=True):
-        try:
-            fired += 1 if fire_match_deadline(match_id) else 0
-        except DomainError as exc:
-            logger.info("Match deadline skipped", extra={"match": match_id, "why": exc.message})
-        except Exception:
-            logger.exception("Match deadline failed", extra={"match": match_id})
+    for match_id, guild_id in due.values_list("pk", "community__discord_guild_id"):
+        with log_context.bind(guild=guild_id, match=match_id):
+            try:
+                fired += 1 if fire_match_deadline(match_id) else 0
+            except DomainError as exc:
+                logger.info("Match deadline skipped", extra={"match": match_id, "why": exc.message})
+            except Exception:
+                logger.exception("Match deadline failed", extra={"match": match_id})
 
     fired += subs.tick(moment)
     fired += early_leave.tick(moment)

@@ -17,6 +17,7 @@ import discord
 from bot.db import db
 from bot.effects.gateway import ChannelGone, Gateway
 from bot.effects.handlers import HANDLERS, Env, Skip
+from league import log_context
 from league.models import OutboxEffect
 from league.models.outbox import EffectStatus
 from league.services import effects, lobby, quick_drafts
@@ -91,6 +92,12 @@ class EffectWorker:
         return ran
 
     async def _run_effect(self, effect: OutboxEffect) -> bool:
+        # So an error is posted to its own server's error channel, and nobody else's.
+        guild = getattr(effect.community, "discord_guild_id", None)
+        with log_context.bind(guild=guild, match=effect.match_id, effect=effect.pk):
+            return await self._run_bound(effect)
+
+    async def _run_bound(self, effect: OutboxEffect) -> bool:
         handler = HANDLERS.get(effect.kind)
         if handler is None:
             await db(effects.mark_failed, effect.pk, f"No handler for {effect.kind}")

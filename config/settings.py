@@ -133,6 +133,9 @@ BOT_HEARTBEAT_FILE = Path(os.environ.get("BOT_HEARTBEAT_FILE", BASE_DIR / ".bot-
 DEADLOCK_API_BASE = os.environ.get("DEADLOCK_API_BASE", "https://api.deadlock-api.com")
 # Optional. Raises deadlock-api's limits, such as lobby creation from 10 an hour to 100 per 30 min.
 DEADLOCK_API_KEY = os.environ.get("DEADLOCK_API_KEY", "")
+# Optional. The operator's channel: every error's full traceback, from every server, is posted
+# there. Servers' own /seterrorchannel channels only ever get their own errors, summarised.
+ERROR_LOG_CHANNEL_ID = int(os.environ.get("ERROR_LOG_CHANNEL_ID") or 0)
 # Optional. Only needed to link Steam accounts by a custom profile URL (/id/name).
 STEAM_WEB_API_KEY = os.environ.get("STEAM_WEB_API_KEY", "")
 

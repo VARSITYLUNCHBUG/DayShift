@@ -1524,9 +1524,9 @@ def test_only_other_peoples_server_messages_count_as_chat(
         )
 
     async def scenario() -> None:
-        await DraftBot.on_message(bot, message(object(), 1, 5))  # type: ignore[arg-type]
+        await DraftBot.on_message(bot, message(SimpleNamespace(id=9), 1, 5))  # type: ignore[arg-type]
         await DraftBot.on_message(bot, message(None, 2, 6))  # type: ignore[arg-type]
-        await DraftBot.on_message(bot, message(object(), 2, 7))  # type: ignore[arg-type]
+        await DraftBot.on_message(bot, message(SimpleNamespace(id=9), 2, 7))  # type: ignore[arg-type]
 
     asyncio.run(scenario())
     assert seen == [7]

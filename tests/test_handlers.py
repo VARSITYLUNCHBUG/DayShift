@@ -18,6 +18,7 @@ from django.db import connections
 
 from bot.client import DraftBot
 from bot.commands import drafts as draft_commands
+from bot.commands import errors as error_commands
 from bot.commands import pings as ping_commands
 from bot.commands import player as player_commands
 from bot.commands import prio as prio_commands
@@ -792,6 +793,7 @@ def test_every_command_serialises_for_discord() -> None:
         *draft_commands.COMMANDS,
         *prio_commands.COMMANDS,
         *ping_commands.COMMANDS,
+        *error_commands.COMMANDS,
     ):
         tree.add_command(command)
     payloads = [command.to_dict(tree) for command in tree.get_commands()]
@@ -801,6 +803,7 @@ def test_every_command_serialises_for_discord() -> None:
     assert {"startdraft", "stopdraft", "captains_coinflip", "coinflip", "randomdraft"} <= names
     assert {"priolist", "prio", "refresh", "removeprio"} <= names
     assert {"pingchannel", "removeping", "pings", "ping"} <= names
+    assert {"seterrorchannel", "clearerrorchannel"} <= names
     rating = next(payload for payload in payloads if payload["name"] == "rating")
     assert {option["name"] for option in rating["options"]} == {"history", "seed", "adjust"}
     queue_payload = next(payload for payload in payloads if payload["name"] == "queue")
