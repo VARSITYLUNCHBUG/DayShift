@@ -1,7 +1,7 @@
 ## Acknowledgments
 Thank you to \_bacon_ for the base build. This project started from their Bebot draft bot. Without their work made, PUGs would in rigor mortis and none of our current community would be possible.
 
-Thanks to datsir for porting Bebot's standalone draft and priority list,
+Thanks to datsir for porting Bebot's standalone draft, priority list and pings,
 which these versions are built from.
 
 A big shout out to the ZA Deadlock community for playing in the inhouses, giving feedback and helping shape how the bot works.
@@ -401,16 +401,25 @@ on their own and the message only changes when the list does. `/prio` shows it t
 `/refresh` re-posts it and `/removeprio` takes someone off (staff). It catches up with the
 Waiting Room when the bot starts.
 
+### Pings
+
+`/pingchannel channel name mention timer [required_role]` sets up a named ping, such as `pugs`
+mentioning @PUGS at most every 15 minutes (staff). Members send it with `/ping message [name]`,
+and `/pings` lists a channel's pings and when each is ready. Only the roles and members staff
+chose can be pinged: @everyone, @here and anything typed into the message never are. If Discord
+refuses a ping, its cooldown isn't used. `/removeping` deletes one.
+
 ## Commands
 
 **Players:** `/leaderboard`, `/stats`, `/rating history`, `/queue status`, `/link`, `/unlink`,
 `/submit` (fallback for when the report form's upload fails), `/startdraft`, `/stopdraft`,
-`/captains_coinflip`, `/coinflip`, `/randomdraft`, `/prio`.
+`/captains_coinflip`, `/coinflip`, `/randomdraft`, `/prio`, `/ping`, `/pings`.
 
 **Staff:** `/setup`, `/match status|void|rescore|sub|explain|awards|names|early_leave`,
 `/rating seed|adjust`, `/queue kick|clear`, `/penalty add|revoke|strikes`,
 `/captain allow|bar|clear`, `/ocr mode|status`, `/deadlock settings|status|check|unlink`,
-`/mode list|activate`, `/roster sync`, `/ledger_check`, `/priolist`, `/refresh`, `/removeprio`.
+`/mode list|activate`, `/roster sync`, `/ledger_check`, `/priolist`, `/refresh`, `/removeprio`,
+`/pingchannel`, `/removeping`.
 Anything that rewrites past ratings shows a preview and needs Confirm.
 
 ## Tables
@@ -423,7 +432,7 @@ Anything that rewrites past ratings shows a preview and needs Confirm.
 | Matches | `matches`, `match_participants`, `match_resources`, `match_transitions`, `draft_actions`, `captain_votes`, `sub_requests`, `sub_offers`, `early_leaves` |
 | Results | `result_submissions`, `match_results`, `match_awards`, `scoreboard_reads`, `player_match_stats`, `player_aliases`, `api_match_checks` |
 | Operations | `penalties`, `strike_adjustments`, `captain_overrides`, `outbox_effects` |
-| Bebot's tools | `quick_drafts`, `quick_draft_actions`, `prio_entries` |
+| Bebot's tools | `quick_drafts`, `quick_draft_actions`, `prio_entries`, `channel_pings` |
 
 For analytics, start at `result_submissions`. Screenshots are in the archive channel: use
 `archive_message_id` and `attachment_id` with the Discord API, because CDN URLs expire. Join
@@ -439,7 +448,7 @@ league/domain/    Pure rules, no Django or Discord: ratings (openskill_v1), stri
 league/models/    The tables
 league/services/  Transactions: queue, lobby, draft, results, ratings, corrections, awards,
                   standing, penalties, ocr, steam, api_results, calibration, deadlines,
-                  and Bebot's tools: quick_drafts, prio
+                  and Bebot's tools: quick_drafts, prio, pings
 league/integrations/  The deadlock-api client. Network only, no database
 league/web/       The staff calibration dashboard
 league/admin/     Django admin

@@ -15,6 +15,7 @@ from league.models import (
     CaptainOverride,
     CaptainVote,
     Champion,
+    ChannelPing,
     Community,
     DraftAction,
     DraftModeVersion,
@@ -401,4 +402,12 @@ class PrioEntryAdmin(ReadOnlyAdmin):
     """The voice priority list. Read-only: it follows the Waiting Room; use /removeprio."""
 
     list_display = ("display_name", "community", "discord_user_id", "queued_at", "grace_until")
+    list_filter = ("community",)
+
+
+@admin.register(ChannelPing)
+class ChannelPingAdmin(ReadOnlyAdmin):
+    """Named pings (/pingchannel). Managed from Discord, so their mentions are checked."""
+
+    list_display = ("name", "community", "channel_id", "timer_minutes", "last_ping_at")
     list_filter = ("community",)

@@ -14,6 +14,7 @@ from discord import app_commands
 from django.conf import settings
 
 from bot.commands import drafts, player, setup, staff
+from bot.commands import pings as ping_commands
 from bot.commands import prio as prio_commands
 from bot.db import db
 from bot.effects.gateway import ChannelGone, DiscordGateway
@@ -73,6 +74,7 @@ class DraftBot(discord.Client):
             *staff.COMMANDS,
             *drafts.COMMANDS,
             *prio_commands.COMMANDS,
+            *ping_commands.COMMANDS,
         )
         for command in commands:
             self.tree.add_command(command)
