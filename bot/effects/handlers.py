@@ -18,6 +18,7 @@ from bot.renderers.board import (
     render_voice_dm,
 )
 from bot.renderers.grid import GRID_MESSAGES
+from bot.renderers.prio import render_prio
 from bot.renderers.queue import render_queue
 from bot.renderers.quick_draft import render_draft, render_grid
 from bot.renderers.results import (
@@ -39,6 +40,7 @@ from league.services import (
     effects,
     lobby,
     ocr,
+    prio,
     quick_drafts,
     subs,
 )
@@ -426,6 +428,28 @@ async def render_queue_effect(env: Env) -> None:
     await db(community_service.save_wiring, community.pk, queue_message_id=message_id)
 
 
+@effect(prio.RENDER_KIND)
+async def render_prio_effect(env: Env) -> None:
+    """The /priolist message: edited in place, or posted again if someone deleted it."""
+    community = await db(_reload_community, env.community.pk)  # /priolist may have moved it.
+    channel_id = community.prio_channel_id
+    if not channel_id:
+        raise Skip("No priority list is set up.")
+    view = render_prio(await db(prio.prio_view, community.pk))
+    if community.prio_message_id:
+        try:
+            await env.gateway.edit_view(channel_id, community.prio_message_id, view)
+            return
+        except ChannelGone:
+            logger.warning("Priority list message is gone; posting a new one")
+    message_id = await env.gateway.send_view(channel_id, view)
+    await db(prio.save_display, community.pk, channel_id, message_id)
+
+
+def _reload_community(community_id: int) -> Community:
+    return Community.objects.get(pk=community_id)
+
+
 # --- Messages --------------------------------------------------------------------------------
 
 
@@ -732,6 +756,10 @@ async def cleanup_voice(env: Env) -> None:
                 await env.gateway.move_member(env.guild_id, user_id, waiting)
         await env.gateway.delete_channel(channel_id)
         await db(effects.mark_resource_deleted, env.match_id, kind)
+    if waiting:
+        # Everyone now in the Waiting Room goes on the back of the priority list, including
+        # anyone who was already there and so got no voice event for it.
+        await db(prio.reconcile, env.community.pk, env.gateway.voice_members(env.guild_id, waiting))
 
 
 @effect("delete_text_channel")

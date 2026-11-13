@@ -14,8 +14,9 @@ from discord import app_commands
 from django.conf import settings
 
 from bot.commands import drafts, player, setup, staff
+from bot.commands import prio as prio_commands
 from bot.db import db
-from bot.effects.gateway import DiscordGateway
+from bot.effects.gateway import ChannelGone, DiscordGateway
 from bot.effects.worker import EffectWorker
 
 # Importing the handlers registers them with the router.
@@ -26,7 +27,8 @@ from bot.handlers import quick_draft as _quick_draft  # noqa: F401
 from bot.handlers import results as _results  # noqa: F401
 from bot.handlers import subs as _subs  # noqa: F401
 from bot.routing import RouteButton, RouteSelect, RouteUserSelect
-from league.services import deadlines, effects
+from league.services import community as community_service
+from league.services import deadlines, effects, prio
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,7 @@ class DraftBot(discord.Client):
             *staff.GROUPS,
             *staff.COMMANDS,
             *drafts.COMMANDS,
+            *prio_commands.COMMANDS,
         )
         for command in commands:
             self.tree.add_command(command)
@@ -89,6 +92,9 @@ class DraftBot(discord.Client):
         logger.info("Startup grace applied", extra={"extended": extended})
         await db(effects.request_reconcile)
         await self._sweep_stale_channels()
+        # Before the deadline loop starts, or its first pass would expire the grace of anyone
+        # who came back to the Waiting Room while the bot was down.
+        await self._reconcile_prio()
         self._tasks = [
             asyncio.create_task(self._deadline_loop(), name="deadlines"),
             asyncio.create_task(self._effect_loop(), name="effects"),
@@ -102,6 +108,21 @@ class DraftBot(discord.Client):
                 await db(effects.mark_resource_deleted, match_id, kind)
             except discord.HTTPException:
                 logger.exception("Sweep failed", extra={"match": match_id, "channel": channel_id})
+
+    async def _reconcile_prio(self) -> None:
+        """Catch the priority list up with voice moves made while the bot was down."""
+        for community in await db(prio.tracked_communities):
+            try:
+                waiting = self.gateway.voice_members(
+                    community.discord_guild_id, community.waiting_room_channel_id
+                )
+                await db(prio.reconcile, community.pk, waiting)
+            except ChannelGone:
+                pass  # The bot has left that server.
+            except Exception:
+                logger.exception(
+                    "Priority list catch-up failed", extra={"guild": community.discord_guild_id}
+                )
 
     async def _deadline_loop(self) -> None:
         last_prune = time.monotonic()
@@ -144,7 +165,34 @@ class DraftBot(discord.Client):
         """Joining the Waiting Room after your lobby popped moves you straight into it."""
         if before.channel == after.channel:
             return  # Mute, deafen, stream and the like.
+        await self._update_prio(member, before.channel, after.channel)
         await self._auto_move(member, after.channel)
+
+    async def _update_prio(
+        self,
+        member: discord.Member,
+        before: discord.VoiceChannel | discord.StageChannel | None,
+        after: discord.VoiceChannel | discord.StageChannel | None,
+    ) -> None:
+        """The priority list follows the Waiting Room."""
+        try:
+            community = await db(community_service.get, member.guild.id)
+            if community is None or not community.waiting_room_channel_id:
+                return
+            await db(
+                prio.on_voice_state,
+                community.pk,
+                community.waiting_room_channel_id,
+                member.id,
+                member.display_name,
+                before.id if before else None,
+                after.id if after else None,
+            )
+            self.wake_effects()
+        except Exception:
+            logger.exception(
+                "Priority list update failed", extra={"user": member.id, "guild": member.guild.id}
+            )
 
     async def _auto_move(
         self, member: discord.Member, channel: discord.VoiceChannel | discord.StageChannel | None

@@ -31,6 +31,7 @@ from league.models import (
     PlayerAlias,
     PlayerMatchStat,
     PlayerRating,
+    PrioEntry,
     QueueEntry,
     QuickDraft,
     QuickDraftAction,
@@ -393,3 +394,11 @@ class QuickDraftAdmin(ReadOnlyAdmin):
     )
     list_filter = ("status",)
     inlines = (QuickDraftActionInline,)
+
+
+@admin.register(PrioEntry)
+class PrioEntryAdmin(ReadOnlyAdmin):
+    """The voice priority list. Read-only: it follows the Waiting Room; use /removeprio."""
+
+    list_display = ("display_name", "community", "discord_user_id", "queued_at", "grace_until")
+    list_filter = ("community",)

@@ -36,6 +36,10 @@ class Gateway(Protocol):
 
     def voice_member_ids(self, guild_id: int, channel_id: int | None) -> set[int]: ...
 
+    def voice_members(self, guild_id: int, channel_id: int | None) -> dict[int, str]:
+        """Who is in this voice channel: user ID to display name, blank where it isn't cached."""
+        ...
+
     async def move_member(self, guild_id: int, user_id: int, channel_id: int) -> bool:
         """False if the member isn't in voice (Discord error 40032). Not a failure."""
         ...
@@ -193,6 +197,14 @@ class DiscordGateway:
             return set()
         # A low-level mapping that works without the privileged Members intent.
         return set(channel.voice_states)
+
+    def voice_members(self, guild_id: int, channel_id: int | None) -> dict[int, str]:
+        found = {}
+        guild = self._guild(guild_id)
+        for user_id in self.voice_member_ids(guild_id, channel_id):
+            member = guild.get_member(user_id)
+            found[user_id] = member.display_name if member is not None else ""
+        return found
 
     async def move_member(self, guild_id: int, user_id: int, channel_id: int) -> bool:
         try:

@@ -15,6 +15,7 @@ from league.services import (
     draft,
     early_leave,
     lobby,
+    prio,
     queue,
     quick_drafts,
     results,
@@ -67,6 +68,7 @@ def tick() -> int:
     fired += early_leave.tick(moment)
     # Each of these can fail without stopping the others, or the queue pops below.
     fired += _side_tick("quick drafts", quick_drafts.tick, moment)
+    fired += _side_tick("priority list", prio.tick, moment)
 
     for community_id in Community.objects.values_list("pk", flat=True):
         try:

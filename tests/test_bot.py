@@ -623,6 +623,7 @@ class FakeGateway:
     fail_next: dict[str, Exception] = field(default_factory=dict)
     messages: dict[int, list[int]] = field(default_factory=dict)
     text_by_id: dict[int, str] = field(default_factory=dict)
+    names: dict[int, str] = field(default_factory=dict)  # Display names Discord has cached.
 
     def _id(self) -> int:
         self.next_id += 1
@@ -652,6 +653,12 @@ class FakeGateway:
 
     def voice_member_ids(self, guild_id, channel_id) -> set[int]:
         return set(self.voice.get(channel_id, set()))
+
+    def voice_members(self, guild_id, channel_id) -> dict[int, str]:
+        return {
+            user_id: self.names.get(user_id, "")
+            for user_id in self.voice_member_ids(guild_id, channel_id)
+        }
 
     async def move_member(self, guild_id, user_id, channel_id) -> bool:
         current = [c for c, users in self.voice.items() if user_id in users]

@@ -14,6 +14,7 @@ from league.models.moderation import CaptainOverride, Penalty, StrikeAdjustment
 from league.models.modes import DraftModeVersion
 from league.models.outbox import OutboxEffect
 from league.models.players import Player
+from league.models.prio import PrioEntry
 from league.models.queue import QueueEntry
 from league.models.quick_drafts import QuickDraft, QuickDraftAction
 from league.models.ratings import PlayerRating, RatingEvent, RatingRun, Season
@@ -42,6 +43,7 @@ __all__ = [
     "PlayerAlias",
     "PlayerMatchStat",
     "PlayerRating",
+    "PrioEntry",
     "QueueEntry",
     "QuickDraft",
     "QuickDraftAction",

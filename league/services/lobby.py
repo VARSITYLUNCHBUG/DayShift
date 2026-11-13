@@ -31,7 +31,7 @@ from league.models import (
 )
 from league.models.matches import RemovedReason, Source
 from league.models.moderation import PenaltyKind
-from league.services import champions, penalties, standing
+from league.services import champions, penalties, prio, standing
 from league.services.common import (
     active_participants,
     add_effect,
@@ -91,6 +91,7 @@ def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match |
         for entry in entries
     )
     QueueEntry.objects.filter(pk__in=[entry.pk for entry in entries]).delete()
+    _matched(community, [entry.player for entry in entries])
 
     add_effect(community, "create_lobby", match=match, dedupe_key=f"create_lobby:{match.pk}")
     for entry in entries:
@@ -98,6 +99,11 @@ def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match |
     render_queue(community)
     logger.info("Lobby created", extra={"match": match.pk})
     return match
+
+
+def _matched(community: Community, players: Sequence[Player]) -> None:
+    """They're in a match now: off the voice priority list. Every way into a match calls this."""
+    prio.drop_players(community.pk, [player.discord_user_id for player in players])
 
 
 def _gather(match: Match, player: Player, *, sub: bool = False) -> None:
@@ -181,6 +187,7 @@ def on_ready_timeout(match: Match) -> None:
         )
         _gather(match, entry.player)
     QueueEntry.objects.filter(pk__in=[entry.pk for entry in replacements]).delete()
+    _matched(community, [entry.player for entry in replacements])
 
     match.deadline_at = seconds_from_now(mode.ready_check.seconds)
     bump(match, "deadline_at")
@@ -475,6 +482,7 @@ def swap_player(match: Match, leaving: MatchParticipant, in_player: Player, *, r
     moment = now()
     community = lock_community(match.community_id)
     QueueEntry.objects.filter(community=community, player=in_player).delete()
+    _matched(community, [in_player])
     heir = _captaincy_heir(match, leaving, in_player) if leaving.is_captain else None
     MatchParticipant.objects.create(
         match=match,

@@ -61,6 +61,9 @@ class Community(models.Model):
     results_channel_id = models.BigIntegerField(null=True, blank=True)
     archive_channel_id = models.BigIntegerField(null=True, blank=True)
     match_category_id = models.BigIntegerField(null=True, blank=True)
+    # The voice priority list's message (/priolist).
+    prio_channel_id = models.BigIntegerField(null=True, blank=True)
+    prio_message_id = models.BigIntegerField(null=True, blank=True)
     max_concurrent_matches = models.PositiveSmallIntegerField(default=12)
     penalty_policy = models.JSONField(default=default_penalty_policy)
     # Reading report screenshots. Needs the `ocr` dependency group installed.
