@@ -19,6 +19,7 @@ from bot.handlers.common import community_of
 from bot.handlers.permissions import require_area
 from bot.renderers.quick_draft import render_random_draft
 from bot.routing import guarded, reply
+from league.domain import copy
 from league.domain.errors import InvalidAction
 from league.models.permissions import Area
 from league.services import quick_drafts
@@ -79,7 +80,7 @@ async def stopdraft_command(interaction: Interaction[Any]) -> None:
         community = await community_of(interaction)
         await require_area(interaction, community, Area.SCRIMS)
         await db(quick_drafts.stop, _channel_id(interaction), interaction.user.id, staff=True)
-        await reply(interaction, "Draft stopped.")
+        await reply(interaction, copy.DRAFT_STOPPED)
 
     await guarded(interaction, run)
 

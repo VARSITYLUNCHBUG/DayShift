@@ -11,7 +11,7 @@ from typing import Any
 
 from discord.ui import Container, LayoutView, TextDisplay
 
-from bot.renderers.bebot import AM_COLOUR
+from bot.renderers import style
 from league.services.prio import PrioView
 
 # A message holds 4000 characters of text; each line is about 110 with its two timestamps.
@@ -40,7 +40,7 @@ def render_prio(view_model: PrioView) -> LayoutView:
     box: Container[Any] = Container(
         TextDisplay(f"### Priority list\n{prio_text(view_model)}"),
         TextDisplay(LEGEND),
-        accent_colour=AM_COLOUR,
+        accent_colour=style.PRIO_COLOUR,
     )
     view = LayoutView(timeout=None)
     view.add_item(box)

@@ -87,7 +87,7 @@ def test_twelfth_player_pops_first_twelve_fifo(league: Community) -> None:
 
 def test_double_join_is_rejected(league: Community, players: list[Player]) -> None:
     queue.join(league.pk, players[0])
-    with pytest.raises(InvalidAction, match="already in the queue"):
+    with pytest.raises(InvalidAction, match="already in queue"):
         queue.join(league.pk, players[0])
 
 
@@ -373,7 +373,7 @@ def test_cannot_pick_already_drafted_player(popped: Match) -> None:
     draft.pick_player(match.pk, captain, 0, target.player_id)
     match = fresh(match)
     second = "B" if match.player_first_pick == "A" else "A"
-    with pytest.raises(InvalidAction, match="already been drafted"):
+    with pytest.raises(InvalidAction, match="already been picked"):
         draft.pick_player(match.pk, captain_of(match, second).player, 1, target.player_id)
 
 
@@ -488,7 +488,7 @@ def test_banned_champion_cannot_be_picked(popped: Match) -> None:
     champion = draft.available_champions(match)[0]
     draft.choose_champion(match.pk, acting_captain(match), match.step_index, champion)
     match = fresh(match)
-    with pytest.raises(InvalidAction, match="isn't available"):
+    with pytest.raises(InvalidAction, match="already been picked or banned"):
         draft.choose_champion(match.pk, acting_captain(match), match.step_index, champion)
 
 

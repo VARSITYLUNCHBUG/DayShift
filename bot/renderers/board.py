@@ -9,6 +9,7 @@ import discord
 from discord import ButtonStyle, SelectOption
 from discord.ui import ActionRow, Container, LayoutView, MediaGallery, Separator, TextDisplay
 
+from bot.renderers import style
 from bot.renderers.grid import BUTTONS_PER_ROW, SELECT_LIMIT, hero_emoji
 from bot.renderers.grid import chunks as _chunks
 from bot.renderers.grid import fits as grid_fits
@@ -19,10 +20,10 @@ from league.models.subs import SubStatus
 from league.services.boards import BoardState, ChampionOption, PlayerLine, SubLine
 from league.services.subs import OfferInfo
 
-ACCENT_LIVE = 0x5865F2
-ACCENT_ATTENTION = 0xFEE75C
-ACCENT_DONE = 0x57F287
-ACCENT_VOID = 0x80848E
+ACCENT_LIVE = style.LOBBY_COLOUR
+ACCENT_ATTENTION = style.ATTENTION_COLOUR
+ACCENT_DONE = style.DONE_COLOUR
+ACCENT_VOID = style.VOID_COLOUR
 
 STATUS_TITLES = {
     Status.READY_CHECK: "Ready check",
@@ -57,8 +58,8 @@ TIMER_LABELS = {
 }
 
 
-def _stamp(moment: datetime, style: str = "R") -> str:
-    return f"<t:{int(moment.timestamp())}:{style}>"
+def _stamp(moment: datetime, fmt: str = "R") -> str:
+    return f"<t:{int(moment.timestamp())}:{fmt}>"
 
 
 def countdown(state: BoardState) -> str:

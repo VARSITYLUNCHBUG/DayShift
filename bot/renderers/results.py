@@ -6,12 +6,11 @@ import discord
 from discord import ButtonStyle
 from discord.ui import ActionRow, Container, LayoutView, MediaGallery, Separator, TextDisplay
 
+from bot.renderers import style
 from bot.renderers.board import player_mention
 from bot.routing import RouteButton
 from league.services.boards import CorrectionView, LeaderboardRow, ResultRow, ResultsView
 
-ACCENT = 0x57F287
-ACCENT_CORRECTION = 0xFEE75C
 FIGURE_SPACE = "\u2007"  # As wide as a digit, and Discord doesn't collapse it.
 AWARD_MARKS = {"mvp": "🏅", "key": "⭐"}
 
@@ -74,7 +73,7 @@ def render_results(view_model: ResultsView, *, attachment_name: str | None) -> L
         f"## Match #{view_model.match_id}: {view_model.team_name(view_model.winner)} won\n"
         f"-# {view_model.team_name('A')} had a {view_model.expected_a:.0%} expected chance{tail}"
     )
-    box: Container[Any] = Container(TextDisplay(title), accent_colour=ACCENT)
+    box: Container[Any] = Container(TextDisplay(title), accent_colour=style.DONE_COLOUR)
     box.add_item(TextDisplay(_team_section(view_model, "A")))
     box.add_item(TextDisplay(_team_section(view_model, "B")))
     if view_model.bans:
@@ -100,7 +99,7 @@ def render_correction(view_model: CorrectionView) -> LayoutView:
             f"## Match #{view_model.match_id} corrected: {view_model.summary}\n"
             f"Reason: {view_model.reason or 'none given'}\n{changes}{extra}"
         ),
-        accent_colour=ACCENT_CORRECTION,
+        accent_colour=style.ATTENTION_COLOUR,
     )
     view = LayoutView(timeout=None)
     view.add_item(box)

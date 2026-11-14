@@ -6,6 +6,7 @@ from django.conf import settings
 
 from bot.db import db
 from bot.routing import Context, handles, reply
+from league.domain import copy
 from league.services import quick_drafts
 
 
@@ -25,7 +26,7 @@ async def claim_captain(ctx: Context) -> None:
         _name(ctx),
         allow_both=settings.DEBUG,  # Lets one person test both sides, as Bebot did.
     )
-    await reply(ctx.interaction, f"You are now captain of {label}!")
+    await reply(ctx.interaction, copy.now_captain(label))
 
 
 @handles("qd_coin")

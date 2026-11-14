@@ -12,7 +12,7 @@ import discord
 from discord import ButtonStyle, SelectOption
 from discord.ui import ActionRow, Container, LayoutView, MediaGallery, TextDisplay
 
-from bot.renderers import bebot, grid
+from bot.renderers import grid, style
 from bot.renderers.board import player_mention
 from bot.routing import RouteButton, RouteSelect
 from league.models.quick_drafts import QuickDraftStatus
@@ -55,29 +55,29 @@ def _captain_buttons(state: QuickDraftState) -> ActionRow[Any]:
             "qd_captain",
             state.id,
             "hk",
-            label=f"Become {bebot.HIDDEN_KING} Captain",
+            label=f"Become {style.HIDDEN_KING} Captain",
             style=ButtonStyle.danger,
             disabled=state.hk_captain_id is not None,
-            emoji=discord.PartialEmoji(name=bebot.HK_EMOJI),
+            emoji=discord.PartialEmoji(name=style.HK_EMOJI),
         ),
         RouteButton(
             "qd_captain",
             state.id,
             "am",
-            label=f"Become {bebot.ARCHMOTHER} Captain",
+            label=f"Become {style.ARCHMOTHER} Captain",
             style=ButtonStyle.primary,
             disabled=state.am_captain_id is not None,
-            emoji=discord.PartialEmoji(name=bebot.AM_EMOJI),
+            emoji=discord.PartialEmoji(name=style.AM_EMOJI),
         ),
     )
 
 
 def _captains_wanted(state: QuickDraftState) -> LayoutView:
-    lines = [f"## {bebot.draft_title(state.id)}", "Captains: claim a side."]
-    for side in bebot.SIDES:
+    lines = [f"## {style.draft_title(state.id)}", "Captains: claim a side."]
+    for side in style.SIDES:
         _user_id, name = state.captain(side)
-        lines.append(f"{bebot.side_emoji(side)} {bebot.side_name(side)}: {name or '-'}")
-    box: Container[Any] = Container(TextDisplay("\n".join(lines)), accent_colour=bebot.HK_COLOUR)
+        lines.append(f"{style.side_emoji(side)} {style.side_name(side)}: {name or '-'}")
+    box: Container[Any] = Container(TextDisplay("\n".join(lines)), accent_colour=style.HK_COLOUR)
     return _view(box, _captain_buttons(state))
 
 
@@ -89,11 +89,11 @@ _CHOICE_STYLE = {
     HIDDEN_KING: ButtonStyle.danger,
     ARCHMOTHER: ButtonStyle.primary,
 }
-_CHOICE_EMOJI = {HIDDEN_KING: bebot.HK_EMOJI, ARCHMOTHER: bebot.AM_EMOJI}
+_CHOICE_EMOJI = {HIDDEN_KING: style.HK_EMOJI, ARCHMOTHER: style.AM_EMOJI}
 
 
 def _coinflip(state: QuickDraftState) -> LayoutView:
-    title = f"### {bebot.COIN_EMOJI} Captain Coinflip"
+    title = f"### {style.COIN_EMOJI} Captain Coinflip"
     if not state.winner_choice:
         body = (
             f"**{state.coinflip_winner_name}** wins the flip!\n\n"
@@ -123,23 +123,23 @@ def _coinflip(state: QuickDraftState) -> LayoutView:
         for choice in state.options
     ]
     box: Container[Any] = Container(
-        TextDisplay(f"{title}\n{body}"), accent_colour=bebot.COINFLIP_COLOUR
+        TextDisplay(f"{title}\n{body}"), accent_colour=style.COINFLIP_COLOUR
     )
     return _view(box, ActionRow(*buttons))
 
 
 def _coinflip_done(state: QuickDraftState) -> LayoutView:
-    first = bebot.side_name(state.first_side)
+    first = style.side_name(state.first_side)
     box: Container[Any] = Container(
         TextDisplay(
-            f"### {bebot.COIN_EMOJI} Captain Coinflip - Complete\n"
+            f"### {style.COIN_EMOJI} Captain Coinflip - Complete\n"
             f"**{state.coinflip_winner_name}** chose: {CHOICE_LABELS[state.winner_choice]}\n"
             f"**{state.coinflip_loser_name}** chose: {CHOICE_LABELS[state.loser_choice]}\n\n"
-            f"{bebot.HK_EMOJI} {bebot.HIDDEN_KING}: {state.hk_captain_name}\n"
-            f"{bebot.AM_EMOJI} {bebot.ARCHMOTHER}: {state.am_captain_name}\n"
+            f"{style.HK_EMOJI} {style.HIDDEN_KING}: {state.hk_captain_name}\n"
+            f"{style.AM_EMOJI} {style.ARCHMOTHER}: {state.am_captain_name}\n"
             f"{first} bans and picks first. Ready to start the draft!"
         ),
-        accent_colour=bebot.COINFLIP_COLOUR,
+        accent_colour=style.COINFLIP_COLOUR,
     )
     start = RouteButton("qd_start", state.id, label="Start Draft", style=ButtonStyle.success)
     return _view(box, ActionRow(start))
@@ -149,17 +149,17 @@ def _coinflip_done(state: QuickDraftState) -> LayoutView:
 
 
 def _hero_text(choice: HeroChoice) -> str:
-    emoji = bebot.hero_emoji_text(choice.unicode_emoji)
-    return bebot.hero_line(emoji, choice.name, random_choice=choice.random_choice, auto=choice.auto)
+    emoji = style.hero_emoji_text(choice.unicode_emoji)
+    return style.hero_line(emoji, choice.name, random_choice=choice.random_choice, auto=choice.auto)
 
 
 def _captains(state: QuickDraftState, final: bool) -> str:
-    rows = [f"{bebot.CAPTAIN_EMOJI} **Captains**"]
-    for side in bebot.SIDES:
+    rows = [f"{style.CAPTAIN_EMOJI} **Captains**"]
+    for side in style.SIDES:
         user_id, name = state.captain(side)
-        emoji = bebot.side_emoji(side)
+        emoji = style.side_emoji(side)
         if not final and side == state.acting_side:
-            timer = bebot.countdown(state.deadline_at)
+            timer = style.countdown(state.deadline_at)
             rows.append(f"{emoji} {_mention(user_id, name)} {state.step_action} a hero!{timer}")
         else:
             rows.append(f"{emoji} {name}")
@@ -172,17 +172,17 @@ def summary_text(state: QuickDraftState, *, final: bool) -> str:
     parts = [
         _captains(state, final),
         "",
-        f"{bebot.BAN_EMOJI} **Bans**",
-        bebot.hero_list(bans),
+        f"{style.BAN_EMOJI} **Bans**",
+        style.hero_list(bans),
     ]
-    for side in bebot.SIDES:
+    for side in style.SIDES:
         picks = [_hero_text(c) for c in state.actions if c.action == "pick" and c.side == side]
-        parts += ["", f"{bebot.side_emoji(side)} **{bebot.side_name(side)}**"]
-        parts.append(bebot.hero_list(picks))
+        parts += ["", f"{style.side_emoji(side)} **{style.side_name(side)}**"]
+        parts.append(style.hero_list(picks))
     if final:
         parts += ["", "# GLHF"]
     else:
-        parts += ["", bebot.timeline_block(state.steps, state.step_index)]
+        parts += ["", style.timeline_block(state.steps, state.step_index)]
     return "\n".join(parts)
 
 
@@ -249,20 +249,20 @@ def render_grid(state: QuickDraftState) -> list[LayoutView]:
 
 
 def _drafting(state: QuickDraftState) -> LayoutView:
-    title = f"## {bebot.draft_title(state.id, state.draft_name)}"
+    title = f"## {style.draft_title(state.id, state.draft_name)}"
     box: Container[Any] = Container(
         TextDisplay(f"{title}\n{summary_text(state, final=False)}"),
-        accent_colour=bebot.side_colour(state.acting_side or state.first_side),
+        accent_colour=style.side_colour(state.acting_side or state.first_side),
     )
     return _view(box)
 
 
 def _completed(state: QuickDraftState) -> LayoutView:
     last_side = state.steps[-1][1] if state.steps else state.first_side
-    title = f"## {bebot.draft_title(state.id, state.draft_name)}"
+    title = f"## {style.draft_title(state.id, state.draft_name)}"
     box: Container[Any] = Container(
         TextDisplay(f"{title}\n{summary_text(state, final=True)}"),
-        accent_colour=bebot.side_colour(last_side),
+        accent_colour=style.side_colour(last_side),
     )
     if state.gif_url:
         box.add_item(MediaGallery(discord.MediaGalleryItem(state.gif_url)))
@@ -287,22 +287,22 @@ def render_draft(state: QuickDraftState) -> LayoutView:
 
 
 def _option_list(heroes: list[HeroOption]) -> str:
-    return bebot.hero_list(
-        [bebot.hero_line(bebot.hero_emoji_text(hero.unicode_emoji), hero.name) for hero in heroes]
+    return style.hero_list(
+        [style.hero_line(style.hero_emoji_text(hero.unicode_emoji), hero.name) for hero in heroes]
     )
 
 
 def render_random_draft(draft: RandomDraft) -> LayoutView:
-    parts = [f"## {bebot.DRAFT_TITLE} (Random)"]
-    for index, side in enumerate(bebot.SIDES):
+    parts = [f"## {style.DRAFT_TITLE} (Random)"]
+    for index, side in enumerate(style.SIDES):
         if index:
             parts.append("")
         parts += [
-            f"{bebot.side_emoji(side)} **{bebot.side_name(side)}**",
+            f"{style.side_emoji(side)} **{style.side_name(side)}**",
             "**Bans:**",
             _option_list(draft.bans[side]),
             "**Picks:**",
             _option_list(draft.picks[side]),
         ]
-    box: Container[Any] = Container(TextDisplay("\n".join(parts)), accent_colour=bebot.HK_COLOUR)
+    box: Container[Any] = Container(TextDisplay("\n".join(parts)), accent_colour=style.HK_COLOUR)
     return _view(box)

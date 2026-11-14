@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from django.db import IntegrityError, transaction
 
 from league import log_context
+from league.domain import copy
 from league.domain.draft_plan import PlanStep, champion_plan
 from league.domain.engine import auto_champion, draft_name, pick_gif, seeded_rng
 from league.domain.errors import DomainError, InvalidAction, NotAllowed, StaleAction
@@ -109,7 +110,7 @@ def _create(
 ) -> QuickDraft:
     community = lock_community(community_id)  # Serialises the per-server cap.
     if live_in_channel(channel_id) is not None:
-        raise InvalidAction("A draft is already running in this channel. Use /stopdraft first.")
+        raise InvalidAction(copy.DRAFT_RUNNING_HERE)
     live = QuickDraft.objects.filter(community=community, status__in=QUICK_DRAFT_LIVE).count()
     if live >= MAX_LIVE_DRAFTS:
         raise InvalidAction(
@@ -168,7 +169,7 @@ def start_coinflip(
 ) -> QuickDraft:
     """/captains_coinflip: flip between two captains. The winner chooses first."""
     if first[0] == second[0]:
-        raise InvalidAction("You can't flip a coin between the same player!")
+        raise InvalidAction(copy.SAME_PLAYER_COINFLIP)
     winner, loser = (first, second) if secrets.randbelow(2) == 0 else (second, first)
     return _create(
         community_id,
@@ -191,16 +192,16 @@ def claim_captain(draft_id: int, side: str, user_id: int, name: str, *, allow_bo
     """A Become Captain button. Returns the side's name. Both claimed starts the hero draft."""
     draft = _lock(draft_id)
     if draft.status != QuickDraftStatus.CAPTAINS:
-        raise StaleAction("Captain selection is already complete!")
+        raise StaleAction(copy.CAPTAINS_CHOSEN)
     if side not in Side.values:
         raise InvalidAction("That isn't a side.")
     label = Side(side).label
     if draft.captain_id(side) == user_id:
-        raise InvalidAction(f"You are already the captain of {label}!")
+        raise InvalidAction(copy.already_captain(label))
     if not allow_both and draft.captain_id(other_side(side)) == user_id:
-        raise InvalidAction("You can't captain both sides!")
+        raise InvalidAction(copy.CANT_CAPTAIN_BOTH)
     if draft.captain_id(side) is not None:
-        raise InvalidAction(f"{label} already has a captain!")
+        raise InvalidAction(copy.has_captain(label))
     if side == Side.HIDDEN_KING:
         draft.hk_captain_id, draft.hk_captain_name = user_id, name[:100]
     else:
@@ -251,7 +252,7 @@ def coinflip_choose(draft_id: int, user_id: int, choice: str) -> None:
     chooser = draft.coinflip_winner_id if winner_turn else draft.coinflip_loser_id
     if user_id != chooser:
         who = "winner" if winner_turn else "loser"
-        raise NotAllowed(f"Only the coinflip {who} can make this choice!")
+        raise NotAllowed(copy.coinflip_only(who))
     if choice not in coinflip_options(draft.winner_choice):
         raise InvalidAction("That choice isn't available.")
     if winner_turn:
@@ -286,7 +287,7 @@ def start_after_coinflip(draft_id: int, user_id: int) -> None:
     if draft.status != QuickDraftStatus.READY:
         raise StaleAction("This draft has already started.")
     if user_id not in (draft.hk_captain_id, draft.am_captain_id):
-        raise NotAllowed("Only the captains can start the draft.")
+        raise NotAllowed(copy.ONLY_CAPTAINS_START)
     _save(draft, *_begin(draft))
 
 
@@ -304,19 +305,19 @@ def _begin(draft: QuickDraft) -> list[str]:
 
 def _current(draft: QuickDraft, step_index: int | None) -> PlanStep:
     if draft.status != QuickDraftStatus.DRAFTING:
-        raise StaleAction("This draft is no longer taking picks.")
+        raise StaleAction(copy.NOT_TAKING_SELECTIONS)
     steps = champion_plan(_mode(draft))
     if step_index is not None and step_index != draft.step_index:
-        raise StaleAction("Too late: that step has already been taken.")
+        raise StaleAction(copy.STEP_TAKEN)
     if draft.step_index >= len(steps):
-        raise StaleAction("This draft is no longer taking picks.")
+        raise StaleAction(copy.NOT_TAKING_SELECTIONS)
     return steps[draft.step_index]
 
 
 def _require_turn(draft: QuickDraft, step: PlanStep, user_id: int) -> str:
     side = side_for_role(step.role, draft.first_side)
     if draft.captain_id(side) != user_id:
-        raise NotAllowed(f"It's not your turn to {step.action}.")
+        raise NotAllowed(copy.not_your_turn(step.action))
     return side
 
 
@@ -351,7 +352,7 @@ def _record(
                 created_at=now(),
             )
     except IntegrityError as exc:
-        raise StaleAction("Too late: that step has already been taken.") from exc
+        raise StaleAction(copy.STEP_TAKEN) from exc
 
 
 def _advance(draft: QuickDraft) -> None:
@@ -380,7 +381,8 @@ def choose_hero(
     step = _current(draft, step_index)
     side = _require_turn(draft, step, user_id)
     if champion_id not in available(draft):
-        raise InvalidAction("That hero isn't available.")
+        name = Champion.objects.filter(pk=champion_id).values_list("name", flat=True).first()
+        raise InvalidAction(copy.hero_taken(name) if name else "That hero isn't available.")
     _record(
         draft,
         step,
@@ -500,10 +502,10 @@ def stop(channel_id: int, user_id: int, *, staff: bool) -> None:
     """/stopdraft: the captains, whoever started it, or staff. Its messages are deleted."""
     found = live_in_channel(channel_id)
     if found is None:
-        raise InvalidAction("No draft is running in this channel.")
+        raise InvalidAction(copy.NO_DRAFT_HERE)
     draft = _lock(found.pk)
     if draft.status not in QUICK_DRAFT_LIVE:
-        raise InvalidAction("No draft is running in this channel.")
+        raise InvalidAction(copy.NO_DRAFT_HERE)
     allowed = {draft.started_by_id, draft.hk_captain_id, draft.am_captain_id}
     allowed |= {draft.coinflip_winner_id, draft.coinflip_loser_id}
     if not staff and user_id not in allowed:

@@ -1,7 +1,7 @@
-"""Bebot's look for the standalone draft: side names, emojis, colours and the turn strip.
+"""The bot's one look, Bebot's: side names, emojis, the colours of every screen, the turn strip.
 
-Ported from Bebot's bot/config/ui.py and bot/utils.py, so /startdraft reads the way the community
-knows it. The match board keeps its own look. Pure: no I/O.
+Ported from Bebot's bot/config/ui.py and bot/utils.py, so every screen reads the way the
+community knows it. Every renderer takes its colours from here. Pure: no I/O.
 """
 
 from __future__ import annotations
@@ -17,10 +17,19 @@ BAN_EMOJI = "🚫"
 CAPTAIN_EMOJI = "👑"
 COIN_EMOJI = "🪙"
 DRAFT_TITLE = "🏆 Draft 🏆"
-# discord.Color.orange() and discord.Color.blue(), which Bebot used for each side's turn.
+# Bebot's colours: discord.Color.orange() and .blue() for each side's turn, purple for the
+# coinflip, blue for the queue and priority list, green for the lobby and a finished draft.
 HK_COLOUR = 0xE67E22
 AM_COLOUR = 0x3498DB
 COINFLIP_COLOUR = 0x800080
+QUEUE_COLOUR = AM_COLOUR
+PRIO_COLOUR = AM_COLOUR
+LOBBY_COLOUR = 0x2ECC71
+DONE_COLOUR = 0x00FF00
+# Ours, in the same discord.Color family: a step waiting on someone, a void, a staff alert.
+ATTENTION_COLOUR = 0xF1C40F
+VOID_COLOUR = 0x95A5A6
+ALERT_COLOUR = 0xE74C3C
 # What Bebot appended to a hero chosen for the captain.
 RANDOM_CHOICE = " (random choice)"
 RANDOMED = " (randomed)"

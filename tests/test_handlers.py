@@ -184,7 +184,7 @@ def test_refusal_is_shown_to_the_clicker(wired: Community) -> None:
     click(fake_interaction(player), "join")
     interaction = fake_interaction(player)
     click(interaction, "join")
-    assert "already in the queue" in replies(interaction)[0]
+    assert "already in queue" in replies(interaction)[0]
     assert interaction.followup.send.call_args.kwargs["ephemeral"] is True
 
 
@@ -225,7 +225,7 @@ def test_ready_button_works_in_guild_and_dm(wired: Community) -> None:
 
     dm = fake_interaction(players[1], guild=False)
     click(dm, "ready", match.pk)
-    assert "You're ready" in replies(dm)[0]
+    assert "You are now ready!" in replies(dm)[0]
 
 
 def test_captain_vote_select(wired: Community) -> None:

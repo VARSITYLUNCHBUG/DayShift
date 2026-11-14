@@ -7,6 +7,7 @@ import re
 
 from django.db import IntegrityError, transaction
 
+from league.domain import copy
 from league.domain.draft_plan import PlanStep, build_plan, player_draft_length, team_for_role
 from league.domain.engine import (
     DraftablePlayer,
@@ -18,7 +19,7 @@ from league.domain.engine import (
 )
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import DraftMode
-from league.models import DraftAction, Match, Player
+from league.models import Champion, DraftAction, Match, Player
 from league.models.matches import Source
 from league.services.common import (
     active_participants,
@@ -45,7 +46,7 @@ LOBBY_CODE_PATTERN = re.compile(r"^[A-Za-z0-9-]{3,32}$")
 def _current_step(match: Match, mode: DraftMode, step_index: int | None) -> PlanStep:
     plan = build_plan(mode)
     if step_index is not None and step_index != match.step_index:
-        raise StaleAction("Too late: that step has already been taken.")
+        raise StaleAction(copy.STEP_TAKEN)
     if match.step_index >= len(plan):
         raise StaleAction("The draft has finished.")
     return plan[match.step_index]
@@ -84,7 +85,7 @@ def _record(
                 created_at=now(),
             )
     except IntegrityError as exc:
-        raise StaleAction("Too late: that step has already been taken.") from exc
+        raise StaleAction(copy.STEP_TAKEN) from exc
 
 
 def _undrafted(match: Match) -> list[DraftablePlayer]:
@@ -98,15 +99,15 @@ def _undrafted(match: Match) -> list[DraftablePlayer]:
 def _assign_player(match: Match, step: PlanStep, team: str, player_id: int) -> None:
     participant = active_participants(match).filter(player_id=player_id, team="").first()
     if participant is None:
-        raise InvalidAction("That player has already been drafted.")
+        raise InvalidAction(copy.PLAYER_TAKEN)
     participant.team = team
     participant.draft_pick_number = step.index + 1
     participant.save(update_fields=["team", "draft_pick_number"])
 
 
-def _require_acting_captain(match: Match, team: str, player: Player) -> None:
+def _require_acting_captain(match: Match, step: PlanStep, team: str, player: Player) -> None:
     if captain_of(match, team).player_id != player.pk:
-        raise NotAllowed("It's not your turn.")
+        raise NotAllowed(copy.not_your_turn(step.action))
 
 
 # --- Player draft ----------------------------------------------------------------------------
@@ -127,7 +128,7 @@ def pick_player(
     mode = mode_of(match)
     step = _current_step(match, mode, step_index)
     team = _acting_team(match, step)
-    _require_acting_captain(match, team, captain)
+    _require_acting_captain(match, step, team, captain)
     _assign_player(match, step, team, target_player_id)
     _record(
         match,
@@ -287,9 +288,10 @@ def choose_champion(
     mode = mode_of(match)
     step = _current_step(match, mode, step_index)
     team = _acting_team(match, step)
-    _require_acting_captain(match, team, captain)
+    _require_acting_captain(match, step, team, captain)
     if champion_id not in available_champions(match):
-        raise InvalidAction("That champion isn't available.")
+        name = Champion.objects.filter(pk=champion_id).values_list("name", flat=True).first()
+        raise InvalidAction(copy.hero_taken(name) if name else "That hero isn't available.")
     _record(
         match,
         step,
@@ -317,7 +319,7 @@ def choose_random_champion(
     mode = mode_of(match)
     step = _current_step(match, mode, step_index)
     team = _acting_team(match, step)
-    _require_acting_captain(match, team, captain)
+    _require_acting_captain(match, step, team, captain)
     champion = auto_champion(available_champions(match), match.rng_seed, step.index)
     _record(
         match,

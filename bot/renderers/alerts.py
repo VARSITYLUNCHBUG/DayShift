@@ -7,13 +7,10 @@ from typing import Any
 from discord import ButtonStyle
 from discord.ui import ActionRow, Container, LayoutView, TextDisplay
 
+from bot.renderers import style
 from bot.routing import RouteButton
 from league.models.alerts import AlertKind, AlertStatus
 from league.services.alerts import AlertCard
-
-OPEN_COLOUR = 0xE74C3C
-RESOLVED_COLOUR = 0x2ECC71
-DISMISSED_COLOUR = 0x95A5A6
 
 TITLES = {
     AlertKind.DISPUTE: "needs a decision",
@@ -77,9 +74,9 @@ def render_alert(card: AlertCard) -> LayoutView:
         lines.append(_closed_line(card))
     lines.append(_footer(card))
     colour = {
-        AlertStatus.OPEN: OPEN_COLOUR,
-        AlertStatus.RESOLVED: RESOLVED_COLOUR,
-        AlertStatus.DISMISSED: DISMISSED_COLOUR,
+        AlertStatus.OPEN: style.ALERT_COLOUR,
+        AlertStatus.RESOLVED: style.LOBBY_COLOUR,
+        AlertStatus.DISMISSED: style.VOID_COLOUR,
     }[card.status]
     box: Container[Any] = Container(TextDisplay("\n".join(lines)), accent_colour=colour)
     if is_open:

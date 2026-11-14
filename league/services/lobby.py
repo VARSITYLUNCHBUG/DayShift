@@ -9,6 +9,7 @@ from collections.abc import Collection, Sequence
 from django.db import transaction
 from django.db.models import Max, Q
 
+from league.domain import copy
 from league.domain.engine import (
     LIVE,
     TERMINAL,
@@ -135,7 +136,7 @@ def mark_ready(match_id: int, player: Player) -> None:
     require_not_on_hold(match)
     participant = require_participant(match, player)
     if participant.ready_at is not None:
-        raise InvalidAction("You're already marked as ready.")
+        raise InvalidAction(copy.ALREADY_READY)
     participant.ready_at = now()
     participant.save(update_fields=["ready_at"])
     bump(match)
