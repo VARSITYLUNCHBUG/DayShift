@@ -40,21 +40,20 @@ from league.domain.errors import InvalidAction
 from league.models import Community, Match, OutboxEffect, Player
 from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
-from league.services import boards, community, dev, effects, integrity, lobby, queue
+from league.services import boards, common, community, effects, integrity, lobby, queue
 from league.services import draft as draft_service
-from league.services import results as results_service
 from league.services.boards import ResultRow
 from league.services.common import add_effect, captain_of, get_or_create_player, mode_of
 from league.services.common import render_queue as request_queue
-from tests.conftest import make_player, publish_presets
+from tests.conftest import Clock, make_player, publish_presets
 from tests.helpers import (
     acting_captain,
-    claim_sides,
     finish,
     fresh,
     ready_all,
     run_champion_draft,
     run_player_draft,
+    settle_coinflip_for,
     to_champion_draft,
     to_in_progress,
     vote_captains,
@@ -125,7 +124,7 @@ def test_button_and_select_ids_match_their_templates() -> None:
     import re
 
     assert re.fullmatch(BUTTON_TEMPLATE, button_id("ready", 42))
-    assert re.fullmatch(BUTTON_TEMPLATE, button_id("claim_side", 42, "hk"))
+    assert re.fullmatch(BUTTON_TEMPLATE, button_id("coin_choice", 42, "first_pick"))
     assert re.fullmatch(SELECT_TEMPLATE, select_id("pick_champion", 42, "12.1"))
     assert not re.fullmatch(BUTTON_TEMPLATE, select_id("pick_champion", 42, "12.1"))
     assert BUTTON_TEMPLATE != SELECT_TEMPLATE
@@ -145,7 +144,7 @@ def test_every_rendered_action_has_a_handler(league: Community, players: list[Pl
     states.append(boards.board_state(match.pk))
     match = run_player_draft(vote_captains(match))
     states.append(boards.board_state(match.pk))
-    match = claim_sides(match)
+    match = settle_coinflip_for(match)
     states.append(boards.board_state(match.pk))
     actions = registered_actions()
     for state in states:
@@ -183,7 +182,7 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
     check(match)
     match = run_player_draft(match)
     check(match)
-    match = claim_sides(match)
+    match = settle_coinflip_for(match)
     check(match)
     match = run_champion_draft(match)
     check(match)
@@ -204,7 +203,7 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
         Status.READY_CHECK,
         Status.CAPTAIN_PHASE,
         Status.PLAYER_DRAFT,
-        Status.SIDE_SELECT,
+        Status.COINFLIP,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,
@@ -291,7 +290,37 @@ def test_champion_board_says_how_far_along_the_draft_is(popped: Match) -> None:
     match = to_champion_draft(popped)
     state = boards.board_state(match.pk)
     payload = str(render_board(state).to_components())
-    assert f"**{state.acting_captain_name}** is banning: ban 1 of 4." in payload
+    assert "Ban 1 of 4." in payload
+    # Bebot's "@Pike ban a hero!": a mention, which a board never pings.
+    assert f"<@{acting_captain(match).discord_user_id}> ban a hero! ⌛ <t:" in payload
+
+
+@pytest.mark.django_db
+def test_champion_board_is_bebots_draft(popped: Match) -> None:
+    """Bebot's title, captains, bans, each side's heroes and turn strip, plus each team's rating."""
+    match = to_champion_draft(popped)
+    captain = acting_captain(match)
+    draft_service.choose_random_champion(match.pk, captain, match.step_index)
+    state = boards.board_state(fresh(match).pk)
+    text = str(render_board(state).to_components())
+    assert f"🏆 Draft #{match.pk}: {state.draft_name} 🏆" in text
+    assert "👑 **Captains**" in text and "🚫 **Bans**" in text
+    assert "🔶 **The Hidden King**" in text and "🔷 **The Archmother**" in text
+    assert " (random choice)" in text  # The 🎲 ban, in Bebot's words.
+    assert "Bans\\n" in text and "Picks\\n" in text  # The turn strip, in a code block.
+    assert "avg " in text and "to win" in text  # Our extra: each team's rating.
+    # The Hidden King's side comes first, as in Bebot.
+    assert text.index("🔶 **The Hidden King**") < text.index("🔷 **The Archmother**")
+
+
+@pytest.mark.django_db
+def test_champion_board_takes_the_acting_sides_colour(popped: Match) -> None:
+    from bot.renderers import style
+
+    match = to_champion_draft(popped)
+    state = boards.board_state(match.pk)
+    side = state.side_of(state.acting_team)
+    assert render_board(state).to_components()[0]["accent_color"] == style.side_colour(side)
 
 
 @pytest.mark.django_db
@@ -403,7 +432,7 @@ def test_game_on_board_reports_with_a_button_per_team() -> None:
         (Status.READY_CHECK, "", "Ready check closes"),
         (Status.PLAYER_DRAFT, "player_pick", "Auto-pick"),
         (Status.CAPTAIN_PHASE, "", "Vote closes"),
-        (Status.SIDE_SELECT, "", "Coin flip"),
+        (Status.COINFLIP, "", "Random choice"),
         (Status.CHAMPION_DRAFT, "ban", "Auto-pick"),
         (Status.CHAMPION_DRAFT, "pick", "Auto-pick"),
         (Status.AWAITING_CONFIRMATION, "", "Confirms automatically"),
@@ -429,11 +458,10 @@ def test_timers_say_what_happens_when_they_run_out(status: str, action: str, lab
     assert "<t:" in countdown(state)
 
 
-def test_fake_player_is_not_rendered_as_a_broken_mention() -> None:
+def test_player_mention_is_a_discord_mention() -> None:
     from bot.renderers.board import player_mention
 
-    assert player_mention(2, "Fake 2") == "@Fake 2"
-    assert player_mention(123456789, "MDMT") == "<@123456789>"
+    assert player_mention(123456789) == "<@123456789>"
 
 
 def test_candidate_format_note_is_kept_off_the_players_board() -> None:
@@ -533,10 +561,6 @@ def test_results_lines_are_quotes_with_mentions_and_bold_deltas() -> None:
     assert "```" not in table
 
 
-def test_fake_players_show_a_name_rather_than_a_broken_mention() -> None:
-    assert team_table([_row("Fake 3", 3, 1000, 988)]) == "> **-12** | __988__ | @Fake 3"
-
-
 def test_single_digit_change_is_padded_so_pipes_line_up() -> None:
     from bot.renderers.results import render_correction
     from league.services.boards import CorrectionLine, CorrectionView
@@ -618,11 +642,16 @@ class FakeGateway:
     granted: list[tuple[int, int]] = field(default_factory=list)
     revoked: list[tuple[int, int]] = field(default_factory=list)
     members_seen: dict[int, list[int]] = field(default_factory=dict)
+    staff_seen: dict[int, list[int]] = field(default_factory=dict)  # Staff roles per channel.
+    role_pings: list[list[int]] = field(default_factory=list)
+    view_pings: dict[int, list[int]] = field(default_factory=dict)  # Roles a view pinged.
+    view_user_pings: dict[int, list[int]] = field(default_factory=dict)
     closed_dms: set[int] = field(default_factory=set)
     next_id: int = 500_000
     fail_next: dict[str, Exception] = field(default_factory=dict)
     messages: dict[int, list[int]] = field(default_factory=dict)
     text_by_id: dict[int, str] = field(default_factory=dict)
+    names: dict[int, str] = field(default_factory=dict)  # Display names Discord has cached.
 
     def _id(self) -> int:
         self.next_id += 1
@@ -633,25 +662,33 @@ class FakeGateway:
             raise self.fail_next.pop(method)
 
     async def create_text_channel(
-        self, guild_id, category_id, name, member_ids, staff_role_id
+        self, guild_id, category_id, name, member_ids, staff_role_ids
     ) -> int:
         self._maybe_fail("create_text_channel")
         channel_id = self._id()
         self.channels[channel_id] = name
         self.members_seen[channel_id] = list(member_ids)
+        self.staff_seen[channel_id] = list(staff_role_ids)
         return channel_id
 
     async def create_voice_channel(
-        self, guild_id, category_id, name, member_ids, staff_role_id
+        self, guild_id, category_id, name, member_ids, staff_role_ids
     ) -> int:
         channel_id = self._id()
         self.channels[channel_id] = name
         self.voice[channel_id] = set()
         self.members_seen[channel_id] = list(member_ids)
+        self.staff_seen[channel_id] = list(staff_role_ids)
         return channel_id
 
     def voice_member_ids(self, guild_id, channel_id) -> set[int]:
         return set(self.voice.get(channel_id, set()))
+
+    def voice_members(self, guild_id, channel_id) -> dict[int, str]:
+        return {
+            user_id: self.names.get(user_id, "")
+            for user_id in self.voice_member_ids(guild_id, channel_id)
+        }
 
     async def move_member(self, guild_id, user_id, channel_id) -> bool:
         current = [c for c, users in self.voice.items() if user_id in users]
@@ -671,13 +708,17 @@ class FakeGateway:
         self.dms.append((user_id, view))
         return True
 
-    async def send_view(self, channel_id, view, *, file=None) -> int:
+    async def send_view(
+        self, channel_id, view, *, file=None, ping_role_ids=(), ping_user_ids=()
+    ) -> int:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
         self._maybe_fail("send_view")
         message_id = self._id()
         self.views[message_id] = view
         self.posted_files.append((channel_id, file))
+        self.view_pings[message_id] = list(ping_role_ids)
+        self.view_user_pings[message_id] = list(ping_user_ids)
         self.messages.setdefault(channel_id, []).append(message_id)
         return message_id
 
@@ -690,11 +731,12 @@ class FakeGateway:
         self.edited.add(message_id)
 
     async def send_text(
-        self, channel_id, text, *, user_ids: Iterable[int] = (), role_id=None
+        self, channel_id, text, *, user_ids: Iterable[int] = (), role_ids: Iterable[int] = ()
     ) -> int:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
         self.texts.append((channel_id, text, list(user_ids)))
+        self.role_pings.append(list(role_ids))
         message_id = self._id()
         self.text_by_id[message_id] = text
         self.messages.setdefault(channel_id, []).append(message_id)
@@ -716,6 +758,7 @@ class FakeGateway:
     async def delete_message(self, channel_id, message_id) -> None:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
+        self._maybe_fail("delete_message")
         if message_id in self.messages.get(channel_id, []):
             self.messages[channel_id].remove(message_id)
 
@@ -813,18 +856,15 @@ def test_closed_dms_fall_back_to_a_lobby_mention(wired: Community) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_lobby_channels_grant_real_members_only(wired: Community) -> None:
-    fakes = dev.fake_players(11)
-    real = make_player(1)
+def test_lobby_channels_grant_the_lobby_members(wired: Community) -> None:
+    players = [make_player(n) for n in range(1, 13)]
     gateway = FakeGateway()
-    for player in [real, *fakes]:
+    for player in players:
         queue.join(wired.pk, player)
     drain(gateway)
     match = Match.objects.get()
-    assert gateway.members_seen[resource(match, ResourceKind.TEXT)] == [real.discord_user_id]
-    # Fake players ready themselves up, so only the real player is outstanding.
-    waiting = match.participants.filter(is_active=True, ready_at__isnull=True)
-    assert [row.player_id for row in waiting] == [real.pk]
+    seen = gateway.members_seen[resource(match, ResourceKind.TEXT)]
+    assert sorted(seen) == sorted(p.discord_user_id for p in players)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -837,10 +877,69 @@ def test_joining_waiting_room_after_pop_targets_the_lobby(wired: Community) -> N
     match = Match.objects.get()
     lobby_voice = resource(match, ResourceKind.LOBBY_VOICE)
     user_id = players[0].discord_user_id
-    assert effects.voice_target(user_id, WAITING_ROOM) == (999, lobby_voice)
-    assert effects.voice_target(user_id, lobby_voice) is None
-    assert effects.voice_target(user_id, 12345) is None  # Their own business.
-    assert effects.voice_target(make_player(50).discord_user_id, WAITING_ROOM) is None
+    assert effects.on_voice_join(user_id, WAITING_ROOM) == (999, lobby_voice)
+    assert effects.on_voice_join(user_id, lobby_voice) is None
+    assert effects.on_voice_join(user_id, 12345) is None  # Their own business.
+    assert effects.on_voice_join(make_player(50).discord_user_id, WAITING_ROOM) is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_waiting_room_only_pulls_a_player_in_once(wired: Community) -> None:
+    players = [make_player(n) for n in range(1, 13)]
+    gateway = FakeGateway()
+    for player in players:
+        queue.join(wired.pk, player)
+    drain(gateway)
+    match = Match.objects.get()
+    lobby_voice = resource(match, ResourceKind.LOBBY_VOICE)
+    first, second = players[0].discord_user_id, players[1].discord_user_id
+    # The first time, the Waiting Room sends them on to the lobby.
+    assert effects.on_voice_join(first, WAITING_ROOM) == (999, lobby_voice)
+    assert effects.on_voice_join(first, lobby_voice) is None  # The move lands: they've arrived.
+    assert match.participants.get(player=players[0]).voice_joined_at is not None
+    # Coming back later, they stay where they chose to be.
+    assert effects.on_voice_join(first, WAITING_ROOM) is None
+    # Joining the lobby through the invite counts as arriving too.
+    assert effects.on_voice_join(second, lobby_voice) is None
+    assert effects.on_voice_join(second, WAITING_ROOM) is None
+    # Someone who never arrived is still pulled in.
+    third = players[2].discord_user_id
+    assert effects.on_voice_join(third, WAITING_ROOM) == (999, lobby_voice)
+    # Once teams have their own channels, someone who never arrived goes straight to their team.
+    match = to_champion_draft(match)
+    drain(gateway)
+    late = match.participants.get(player=players[2])
+    team_kind = ResourceKind.TEAM_A_VOICE if late.team == "A" else ResourceKind.TEAM_B_VOICE
+    team_voice = resource(match, team_kind)
+    assert effects.on_voice_join(third, WAITING_ROOM) == (999, team_voice)
+    assert effects.on_voice_join(third, team_voice) is None
+    assert effects.on_voice_join(third, WAITING_ROOM) is None  # Arrived: left alone now.
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_retrying_panel_only_holds_up_its_own_server(wired: Community) -> None:
+    other = community.ensure(1000, "Other")
+    request_queue(wired)
+    request_queue(other)
+    stuck = OutboxEffect.objects.get(community=wired, kind="render_queue")
+    stuck.attempts = 1
+    stuck.save(update_fields=["attempts"])
+    request_queue(wired)  # Queued behind the retry: it must wait its turn.
+    groups = effects.due_by_match()
+    lanes = {effects.lane_of(group[0]): [effect.pk for effect in group] for group in groups}
+    assert lanes[f"render_queue:{other.pk}"] == [
+        OutboxEffect.objects.get(community=other, kind="render_queue").pk
+    ]
+    assert lanes[f"render_queue:{wired.pk}"] == [stuck.pk]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_renders_of_different_lanes_do_not_coalesce(wired: Community) -> None:
+    common.request_render(wired, "render_thing", lane="thing:1")
+    common.request_render(wired, "render_thing", lane="thing:1")
+    common.request_render(wired, "render_thing", lane="thing:2")
+    rows = OutboxEffect.objects.filter(kind="render_thing").order_by("lane")
+    assert [row.lane for row in rows] == ["thing:1", "thing:2"]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -1167,15 +1266,13 @@ def test_board_stays_last_and_only_current_pings_survive_a_whole_match(wired: Co
     drain(gateway)
     assert_board_last(gateway, match)
     assert live_notice_texts(gateway, match) == [
-        "teams are set. Claim a side: Hidden King bans and picks first."
+        "teams are set and you won the coinflip! Choose First Pick, Last Pick or a side."
     ]
 
-    match = claim_sides(match)
+    match = settle_coinflip_for(match)
     drain(gateway)
     assert_board_last(gateway, match)
-    assert live_notice_texts(gateway, match) == [
-        "you're Hidden King. You ban first. The champion draft is on."
-    ]
+    assert live_notice_texts(gateway, match) == ["you ban first. The champion draft is on."]
 
     match = to_in_progress(match)
     drain(gateway)
@@ -1416,20 +1513,6 @@ def test_a_new_lobby_host_replaces_the_first_hosts_prompt(wired: Community) -> N
 
 
 @pytest.mark.django_db(transaction=True)
-def test_repeat_staff_requests_replace_each_other(wired: Community) -> None:
-    gateway = FakeGateway()
-    match = to_in_progress(popped_match(wired, gateway))
-    results_service.on_in_progress_timeout(fresh(match))
-    drain(gateway)
-    assert "needs a decision" in live_notice_texts(gateway, match)[0]
-    results_service.on_disputed_timeout(fresh(match))
-    drain(gateway)
-    notices = live_notice_texts(gateway, match)
-    assert len(notices) == 1
-    assert "still needs a decision" in notices[0]
-
-
-@pytest.mark.django_db(transaction=True)
 def test_a_failed_board_move_does_not_ping_twice(wired: Community) -> None:
     gateway = FakeGateway()
     match = ready_all(popped_match(wired, gateway))
@@ -1458,9 +1541,9 @@ def test_only_other_peoples_server_messages_count_as_chat(
         )
 
     async def scenario() -> None:
-        await DraftBot.on_message(bot, message(object(), 1, 5))  # type: ignore[arg-type]
+        await DraftBot.on_message(bot, message(SimpleNamespace(id=9), 1, 5))  # type: ignore[arg-type]
         await DraftBot.on_message(bot, message(None, 2, 6))  # type: ignore[arg-type]
-        await DraftBot.on_message(bot, message(object(), 2, 7))  # type: ignore[arg-type]
+        await DraftBot.on_message(bot, message(SimpleNamespace(id=9), 2, 7))  # type: ignore[arg-type]
 
     asyncio.run(scenario())
     assert seen == [7]
@@ -1509,7 +1592,7 @@ def test_sub_offer_dm_says_who_asked_and_has_both_answers() -> None:
         pending=True,
         discord_user_id=10_000_077,
         player_id=77,
-        leaving_name="Fake 3",
+        leaving_name="P3",
         team="A",
         status=Status.IN_PROGRESS,
         source="invite",
@@ -1526,7 +1609,8 @@ def test_sub_offer_dm_says_who_asked_and_has_both_answers() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_sub_offer_is_dmd_and_closed_dms_move_down_the_queue(wired: Community) -> None:
+def test_an_offer_nobody_can_reach_moves_down_the_queue(wired: Community) -> None:
+    """Closed DMs and no channel to mention them in: the next person is asked."""
     from league.models import SubOffer
     from league.models.subs import OfferStatus
     from league.services import subs
@@ -1540,6 +1624,7 @@ def test_sub_offer_is_dmd_and_closed_dms_move_down_the_queue(wired: Community) -
         queue.join(wired.pk, player)
     drain(gateway)
     match = Match.objects.get()
+    community.save_wiring(wired.pk, queue_channel_id=None)
     request = subs.request_sub_out(match.pk, players[3], players[3].pk)
     gateway.closed_dms.add(waiting[0].discord_user_id)
     subs.offer_to_queue(request.pk, players[3])
@@ -1603,21 +1688,97 @@ def test_sub_not_in_voice_gets_a_dm_with_voice_and_channel_links(wired: Communit
 
 
 @pytest.mark.django_db(transaction=True)
-def test_fake_players_in_the_queue_take_a_sub_spot(wired: Community, settings) -> None:
+def test_match_channels_let_in_the_roles_that_look_after_matches(wired: Community) -> None:
+    from league.models import Area
+    from league.services import permissions
+
+    permissions.grant(wired.pk, 71, [Area.MATCH_CONTROL], granted_by=None)
+    permissions.grant(wired.pk, 72, [Area.DISPUTES, Area.RATINGS], granted_by=None)
+    permissions.grant(wired.pk, 73, [Area.SCRIMS, Area.COMMUNITY], granted_by=None)
+    gateway = FakeGateway()
+    for n in range(1, 13):
+        queue.join(wired.pk, make_player(n))
+    drain(gateway)
+    match = Match.objects.get()
+    assert gateway.staff_seen[resource(match, ResourceKind.TEXT)] == [71, 72]
+    assert gateway.staff_seen[resource(match, ResourceKind.LOBBY_VOICE)] == [71, 72]
+
+
+def test_an_offer_is_a_dm_and_a_mention_that_goes_once_answered(wired: Community) -> None:
+    from league.models import SubOffer
     from league.services import subs
 
     players = [make_player(n) for n in range(1, 13)]
     gateway = FakeGateway()
     for player in players:
         queue.join(wired.pk, player)
-    fake = dev.fake_players(1)[0]
-    queue.join(wired.pk, fake)
+    spare = make_player(13)
+    queue.join(wired.pk, spare)
     drain(gateway)
     match = Match.objects.get()
     request = subs.request_sub_out(match.pk, players[3], players[3].pk)
     subs.offer_to_queue(request.pk, players[3])
     drain(gateway)
-    assert fresh(match).participants.filter(player=fake, is_active=True).exists()
+    offer = SubOffer.objects.get(player=spare)
+    assert offer.notice_channel_id == QUEUE_CHANNEL  # No priority list here: the queue's.
+    assert gateway.view_user_pings[offer.notice_message_id] == [spare.discord_user_id]
+    assert offer.notice_message_id in gateway.messages[QUEUE_CHANNEL]
+    notice = str(gateway.views[offer.notice_message_id].to_components())
+    assert f"<@{spare.discord_user_id}>" in notice and "sub_accept" in notice
+    subs.answer_offer(offer.pk, spare, True)
+    drain(gateway)
+    assert offer.notice_message_id not in gateway.messages[QUEUE_CHANNEL]
+
+
+def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_lobby(
+    wired: Community, clock: Clock
+) -> None:
+    from league.services import deadlines, subs
+
+    gateway = FakeGateway()
+    match = to_champion_draft(popped_match(wired, gateway))
+    drain(gateway)
+    text = resource(match, ResourceKind.TEXT)
+    team_voice = resource(match, ResourceKind.TEAM_A_VOICE)
+    sitting = captain_of(match, "A").player.discord_user_id
+    gateway.voice[team_voice] = {sitting}
+    leaving = match.participants.filter(is_active=True, is_captain=False).first().player
+    subs.request_sub_out(match.pk, leaving, leaving.pk)
+    drain(gateway)
+    clock.advance(mode_of(match).subs.max_wait_seconds + 1)
+    deadlines.tick()
+    drain(gateway)
+    successor = Match.objects.get(restarted_from=match)
+    assert resource(successor, ResourceKind.TEXT) == text and text not in gateway.deleted
+    lobby_voice = resource(successor, ResourceKind.LOBBY_VOICE)  # Its own: teams had formed.
+    assert team_voice in gateway.deleted
+    assert sitting in gateway.voice[lobby_voice]
+    board = gateway.views[resource(successor, ResourceKind.BOARD_MESSAGE)]
+    assert f"Restarted from match #{match.pk}" in str(board.to_components())
+    # Found in the live run: the empty seat showed as an ordinary sub out, with Name a sub.
+    assert "1 spot open after the restart" in str(board.to_components())
+    assert "sub_invite_open" not in str(board.to_components())
+
+
+def test_a_queued_player_offered_a_sub_spot_can_take_it(wired: Community) -> None:
+    from league.models import SubOffer
+    from league.services import subs
+
+    players = [make_player(n) for n in range(1, 13)]
+    gateway = FakeGateway()
+    for player in players:
+        queue.join(wired.pk, player)
+    spare = make_player(13)
+    queue.join(wired.pk, spare)
+    drain(gateway)
+    match = Match.objects.get()
+    request = subs.request_sub_out(match.pk, players[3], players[3].pk)
+    subs.offer_to_queue(request.pk, players[3])
+    drain(gateway)
+    offer = SubOffer.objects.get(player=spare)
+    assert any(user_id == spare.discord_user_id for user_id, _view in gateway.dms)
+    subs.answer_offer(offer.pk, spare, True)
+    assert fresh(match).participants.filter(player=spare, is_active=True).exists()
 
 
 def test_ready_dm_links_the_match_channel() -> None:
@@ -1675,11 +1836,21 @@ def test_vote_board_has_a_two_choice_select(voting: Match, players: list[Player]
 
 
 @pytest.mark.django_db
-def test_side_board_has_both_claim_buttons(voting: Match) -> None:
+def test_coinflip_board_offers_the_winner_all_four_then_the_loser_two(voting: Match) -> None:
     match = run_player_draft(vote_captains(voting))
-    labels = [button.get("label") for button in all_buttons(_check(match))]
-    assert "Become Hidden King captain" in labels
-    assert "Become Archmother captain" in labels
+    text = str(_check(match))
+    assert "Captain Coinflip" in text and "wins the flip!" in text
+
+    def coin_labels(match: Match) -> list[str]:
+        buttons = all_buttons(_check(match))
+        return [b["label"] for b in buttons if ":coin_choice:" in b.get("custom_id", "")]
+
+    assert coin_labels(match) == ["First Pick", "Last Pick", "Hidden King", "Archmother"]
+    draft_service.choose_coinflip(
+        match.pk, captain_of(match, match.coinflip_winner).player, "first_pick"
+    )
+    assert coin_labels(fresh(match)) == ["Hidden King", "Archmother"]
+    assert "Chose: First Pick" in str(_check(fresh(match)))
 
 
 @pytest.mark.django_db

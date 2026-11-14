@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 
 from django.db.models import Max
 
-from league.domain.draft_plan import PlanStep, build_plan, team_for_role
-from league.domain.engine import TERMINAL, Status, draft_name, pick_gif
+from league.domain.draft_plan import PlanStep, build_plan, player_draft_length, team_for_role
+from league.domain.engine import TERMINAL, Status, coinflip_options, draft_name, pick_gif
 from league.domain.mode_schema import parse_mode
 from league.models import (
     Champion,
@@ -23,6 +23,7 @@ from league.models import (
     ResultSubmission,
     Season,
 )
+from league.models.matches import MatchKind
 from league.models.subs import UNRESOLVED, OfferSource, OfferStatus, SubRequest, SubStatus
 from league.services import awards as award_service
 from league.services import ocr, ratings, standing
@@ -75,6 +76,7 @@ class DraftLine:
     label: str
     auto: bool
     random_choice: bool = False
+    emoji: str = ""  # A champion's plain emoji: text never shows custom ones.
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +93,9 @@ class SubLine:
     name_until: datetime | None = None
     offer_name: str = ""
     offer_from_queue: bool = False
+    offer_from_prio: bool = False
     offer_deadline_at: datetime | None = None
+    reason: str = "sub_out"
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +104,7 @@ class ChampionOption:
     name: str
     emoji_id: int | None = None
     taken: bool = False  # Banned or picked. It stays on the grid, so nothing shifts.
+    unicode_emoji: str = ""  # Shown when there's no custom emoji.
 
 
 @dataclass(slots=True)
@@ -120,6 +125,12 @@ class BoardState:
     turn_total: int = 0
     champions: list[ChampionOption] = field(default_factory=list)
     hidden_king_team: str = ""
+    champion_first_pick: str = ""
+    # The captain coinflip: the winner's team, each captain's choice, and the buttons on turn.
+    coinflip_winner: str = ""
+    coinflip_winner_choice: str = ""
+    coinflip_loser_choice: str = ""
+    coinflip_options: tuple[str, ...] = ()
     host_name: str = ""
     lobby_code: str = ""
     winner: str = ""
@@ -154,6 +165,17 @@ class BoardState:
     # The draft summary: a name for the draft and a GIF.
     draft_name: str = ""
     gif_url: str | None = None
+    # Bebot's turn strip: (action, side) for each ban and pick, and the one on turn.
+    champion_steps: tuple[tuple[str, str], ...] = ()
+    champion_step: int | None = None
+    # "ranked" or "scrim". A scrim shows Bebot's screens only, in a public channel.
+    kind: str = "ranked"
+    # The match this one restarted, keeping its lobby.
+    restarted_from: int | None = None
+
+    @property
+    def is_scrim(self) -> bool:
+        return self.kind == "scrim"
 
     @property
     def hold_until(self) -> datetime | None:
@@ -167,6 +189,15 @@ class BoardState:
 
     def team_name(self, team: str) -> str:
         return team_name(self.captains.get(team, "Captain"))
+
+    def side_of(self, team: str) -> str:
+        """ "hk" or "am", once the coinflip has set the sides."""
+        return "hk" if team == self.hidden_king_team else "am"
+
+    @property
+    def side_order(self) -> tuple[str, str]:
+        """The teams in Bebot's order: The Hidden King's first."""
+        return ("A", "B") if self.hidden_king_team != "B" else ("B", "A")
 
 
 def _turn_progress(plan: tuple[PlanStep, ...], index: int) -> tuple[int, int]:
@@ -221,6 +252,17 @@ def board_state(match_id: int) -> BoardState:
         step_index=match.step_index,
         players=players,
         hidden_king_team=match.hidden_king_team,
+        champion_first_pick=match.champion_first_pick,
+        kind=match.kind,
+        restarted_from=match.restarted_from_id,
+        coinflip_winner=match.coinflip_winner,
+        coinflip_winner_choice=match.coinflip_winner_choice,
+        coinflip_loser_choice=match.coinflip_loser_choice,
+        coinflip_options=(
+            coinflip_options(match.coinflip_winner_choice)
+            if match.status == Status.COINFLIP
+            else ()
+        ),
         lobby_code=match.lobby_code,
         winner=match.winner,
         is_terminal=match.status in TERMINAL,
@@ -236,6 +278,7 @@ def board_state(match_id: int) -> BoardState:
         state.host_name = match.lobby_code_host.display_name
 
     champion_names = dict(Champion.objects.values_list("pk", "name"))
+    champion_emojis = dict(Champion.objects.values_list("pk", "unicode_emoji"))
     actions = match.draft_actions.select_related("target_player").order_by("step_index")
     for action in actions:
         if action.target_player is not None:
@@ -246,12 +289,25 @@ def board_state(match_id: int) -> BoardState:
             label = "skipped"
         state.actions.append(
             DraftLine(
-                action.action, action.team, label, action.source == "timeout", action.random_choice
+                action.action,
+                action.team,
+                label,
+                action.source == "timeout",
+                action.random_choice,
+                emoji=champion_emojis.get(action.target_champion_id or 0, "") or "",
             )
         )
 
     plan = build_plan(mode)
     state.steps_total = len(plan)
+    if match.hidden_king_team and match.champion_first_pick:
+        start = player_draft_length(mode)
+        state.champion_steps = tuple(
+            (step.action, state.side_of(team_for_role(step.role, match.champion_first_pick)))
+            for step in plan[start:]
+        )
+        if match.status == Status.CHAMPION_DRAFT:
+            state.champion_step = match.step_index - start
     if match.status in {Status.PLAYER_DRAFT, Status.CHAMPION_DRAFT} and match.step_index < len(
         plan
     ):
@@ -273,7 +329,15 @@ def board_state(match_id: int) -> BoardState:
         )
         rows = Champion.objects.filter(pk__in=match.champion_pool).order_by("name")
         state.champions = [
-            ChampionOption(row.pk, row.name, row.discord_emoji_id, row.pk in used) for row in rows
+            ChampionOption(
+                row.pk,
+                row.name,
+                # Where the bot can't use external emojis, buttons fall back to the plain one.
+                row.discord_emoji_id if match.custom_emojis else None,
+                taken=row.pk in used,
+                unicode_emoji=row.unicode_emoji,
+            )
+            for row in rows
         ]
 
     report = match.submissions.filter(verdict="report").select_related("captain").first()
@@ -316,7 +380,7 @@ def board_state(match_id: int) -> BoardState:
     state.draft_name = draft_name(match.rng_seed)
     state.gif_url = pick_gif(match.rng_seed, draft_gifs())
     state.on_hold = match.held_seconds is not None
-    state.can_request_sub = match.status in SUBBABLE
+    state.can_request_sub = match.kind == MatchKind.RANKED and match.status in SUBBABLE
     state.subs = _sub_lines(match)
     return state
 
@@ -359,13 +423,15 @@ def _sub_lines(match: Match) -> list[SubLine]:
                 status=row.status,
                 leaving_name=row.leaving.display_name,
                 team=teams.get(row.leaving_id, ""),
-                requested_by_name=row.requested_by.display_name,
+                requested_by_name=row.requested_by.display_name if row.requested_by else "",
                 is_self=row.is_self,
                 deadline_at=row.deadline_at,
                 name_until=row.name_until,
                 offer_name=offer.player.display_name if offer else "",
                 offer_from_queue=bool(offer and offer.source == OfferSource.QUEUE),
+                offer_from_prio=bool(offer and offer.source == OfferSource.PRIO),
                 offer_deadline_at=offer.deadline_at if offer else None,
+                reason=row.reason,
             )
         )
     return lines
@@ -389,7 +455,9 @@ def queue_view(community: Community) -> QueueView:
         capacity=mode.lobby_size,
         players=[entry.player.display_name for entry in entries],
         mode_name=mode.name,
-        live_matches=Match.objects.filter(community=community).exclude(status__in=TERMINAL).count(),
+        live_matches=Match.objects.filter(community=community, kind=MatchKind.RANKED)
+        .exclude(status__in=TERMINAL)
+        .count(),
         waiting_room_channel_id=community.waiting_room_channel_id,
     )
 

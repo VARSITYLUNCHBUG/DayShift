@@ -1,6 +1,9 @@
 ## Acknowledgments
 Thank you to \_bacon_ for the base build. This project started from their Bebot draft bot. Without their work made, PUGs would in rigor mortis and none of our current community would be possible.
 
+Thanks to datsir for porting Bebot's standalone draft, priority list, pings and error channel,
+which these versions are built from.
+
 A big shout out to the ZA Deadlock community for playing in the inhouses, giving feedback and helping shape how the bot works.
 
 ---
@@ -35,8 +38,9 @@ match flow, draft modes, subs, ratings, commands, architecture, operations and d
    ```bash
    docker compose up -d --build
    ```
-5. In Discord, run `/setup` (optionally `staff_role:@YourStaffRole`). It creates the queue, Waiting
-   Room, results and archive channels, and it is safe to run again.
+5. In Discord, run `/setup` as the server owner or an Administrator. It creates the queue,
+   Waiting Room, results, archive and staff-alerts channels, and it is safe to run again. Then
+   give your staff roles their areas with `/permissions grant` (see [Permissions](#permissions)).
 6. Create an admin login for `http://127.0.0.1:8000/admin/`:
    ```bash
    docker compose exec web python manage.py createsuperuser
@@ -45,19 +49,23 @@ match flow, draft modes, subs, ratings, commands, architecture, operations and d
 The admin binds to localhost. Put a TLS reverse proxy in front of it before exposing it, and set
 `BEHIND_TLS_PROXY=true`, `SECURE_COOKIES=true` and `CSRF_TRUSTED_ORIGINS`.
 
+**Upgrading an older install.** The migrations were squashed into one `0001_initial` when scrims,
+staff areas and the staff channel came in. A database created before that can't be migrated
+forward: back it up, start a fresh one, and run `/setup` and `/permissions grant` again.
+
 ## How a match runs
 
 | Step | What happens | Clock and fallback |
 |---|---|---|
 | Queue | Join and Leave buttons, FIFO. Voice isn't required | Blocked by a cooldown or a live match |
 | Pop at 12 | Creates a private text channel and lobby voice channel | Queue waits at `max_concurrent_matches` |
-| Gather | In the Waiting Room: moved. Anywhere else: DM with invite and Ready button. DMs closed: mention in the lobby channel | Joining the Waiting Room later moves them |
-| Ready | Ready button on the board and in the DM | 180 s. A miss brings in the next in queue. No replacement: cancel and requeue |
+| Gather | In the Waiting Room: moved. Anywhere else: DM with invite and Ready button. DMs closed: mention in the lobby channel | Joining the Waiting Room later moves them, until they've been in the match's voice once. After that, where they go is up to them |
+| Ready | Ready button on the board and in the DM | 180 s. A miss frees the spot, offered to the priority list, then the queue. Unfilled in 2 min: cancel, and everyone left goes back to the front of the queue |
 | Captain vote | Everyone votes for up to two captains, themselves included, from players with 5 completed matches. Most votes wins; rating breaks ties and fills any gap. Two or fewer eligible: no vote | 45 s, or closes early once everyone has voted |
 | Player draft | `FSSFFSSFFS`, lower-rated captain first. Last player is assigned | 45 s, then highest rated |
 | Team voice | Creates team channels and moves anyone in the lobby voice. Everyone else gets a DM invite | Never blocks the draft |
-| Sides | A captain presses Become Hidden King captain or Become Archmother captain. The first press decides both sides | 20 s, then a coin flip |
-| Champion draft | The mode's ban and pick order. Hidden King bans and picks first. 🎲 Random takes a champion on purpose | 40 s a turn. A timeout takes a random champion, for bans too |
+| Captain coinflip | Bebot's: the winner chooses First Pick, Last Pick, 🔶 Hidden King or 🔷 Archmother, and the loser chooses from the other kind. Between them the sides and who bans and picks first are set | 20 s each, then a random choice |
+| Champion draft | The mode's ban and pick order, from the team the coinflip put first. 🎲 Random takes a champion on purpose | 40 s a turn. A timeout takes a random champion, for bans too |
 | Draft summary | Named like "Crimson Wolf", with a GIF from `presets/draft_gifs.json` and GLHF, above the lobby code prompt | |
 | Lobby code | A random captain enters it; it's posted with the settings checklist. With automatic lobbies, deadlock-api's bot creates it and a captain presses Start match | 3 min, then the other captain, then cancel |
 | Report | Press the team that won, then add the screenshot, and optionally the Deadlock match ID, MVP and key players. With score OCR on, the screenshot is read | 3 h without a report goes to staff |
@@ -71,12 +79,13 @@ judgements, not published standards.
 | Mode | Champion draft |
 |---|---|
 | `bebot_2ban` (default) | Bebot's 16-step, 2-ban order, 40 s a turn |
-| `dcs_s3_2ban` | The same 16 steps, 30 s a turn |
 | `threeban_1win_2026` | The 1win 18-step table, 3 bans a team, 30 s a turn |
 
 Switch with `/mode activate slug:<slug>`. Bebot's custom hero emojis are in
 `presets/champion_emojis.yaml`. Load them with `manage.py load_champion_emojis`. The bot must be in
-the server that owns them.
+the server that owns them. Heroes Bebot showed with a plain emoji (Apollo 🗡️, Billy 🐐 and so on)
+are in the same file's `unicode` section. `load_presets` loads those on every start, filling only
+heroes that have none, so an edit in the admin is kept.
 
 ### Subs
 
@@ -88,15 +97,36 @@ reported. There are two separate flows:
 | Sub out, yourself | Opens the slot straight away | The match pauses until the slot is filled |
 | Sub out, a teammate | A captain asks for one of their own players or an undrafted one. Not another captain | The other captain approves within 60 s, or the player stays |
 | Sub in, named | The leaving player or their captain picks someone, who gets a DM to accept | 45 s to name someone, 60 s for them to accept |
-| Sub in, queue | If nobody is named, or the named person says no, the queue is asked in order | 30 s each, and the queue is retried as people join |
+| Sub in, offered | If nobody is named, or the named person says no, the spot is offered: first to whoever has waited longest in the Waiting Room, then down the queue | 60 s each, and it's retried as people join |
 
 While any request is pending, the timer is parked and the board hides the phase's buttons (except
 the result buttons once the game is on). The sub takes the leaving player's team, captaincy,
 lobby-host role and result. The timer resumes where it stopped, with at least 15 s. Nobody in
 3 minutes means the match is cancelled with no rating change, and everyone except the leaving
-player goes back into the queue. Subbing yourself out after the ready check is a dodge, and once the
+player goes back into the queue (or, once captains are set and before the game, a restart). Subbing yourself out after the ready check is a dodge, and once the
 game is on it's a leaver; cancelling the request costs nothing. See Captains and dodge strikes. At most 4 requests can be pending at once. All of these timers
 live in the draft mode's `subs` section.
+
+### Filling an opening
+
+The queue is the way into matches; being in the Waiting Room never stops anyone playing. The
+priority list only decides who gets an opening first. An opening (a missed ready check, a sub out
+nobody named, or a restart) is offered to whoever has been in the Waiting Room longest, isn't in a
+match and hasn't stepped out, then to the head of the queue. Each offer is a DM and a mention in
+the priority list's channel (or the queue's) with **I'll sub in** and **Can't right now**, for
+60 s, then the next person. Each person is offered one spot at a time.
+
+A missed ready check keeps the lobby: the players who missed it are taken out (with their usual
+missed-ready cooldown), their spots are offered for 2 minutes (`ready_check.refill_seconds`), and
+once they're filled the captain vote starts. If they aren't, the lobby is cancelled and everyone
+still in it goes back to the front of the queue.
+
+A sub out nobody fills after captains are set, but before the game starts, restarts the lobby
+rather than cancelling it. The match is voided (its draft history is kept exactly as it was) and
+a successor match takes over its channels and everyone who stayed. The empty seats are offered
+the same way, and once they're filled a fresh captain vote starts. Unfilled, it's cancelled as
+above. Before captains are set, an unfilled sub out still cancels; once the game is on, the
+early-leave rules apply.
 
 ## The match channel
 
@@ -110,8 +140,14 @@ Players can chat freely, and the board stays at the bottom:
   20 s after the third message if chat doesn't stop. A board that moves mid-click could cost a
   captain a wrong ban, so it doesn't move on every message. Change this with the `BOARD_MOVE_*`
   values in `league/services/effects.py`.
-- **Choices are buttons**, so everything is visible at once. Drafted players and taken champions
-  stay in place, greyed out, so nothing shifts under a click. The champion grid has messages of
+- **The champion draft is Bebot's board**: 🏆 Draft #N with its name, 👑 Captains with the
+  timer on the captain whose turn it is, 🚫 Bans, each side's heroes one per line ("(random
+  choice)" for 🎲, "(randomed)" for a timeout), and the bracketed turn strip, in the acting
+  side's colour. Under it, each team's rating and chance to win, and "Ban 3 of 4. Next: Pike
+  picks." The finished draft ends in `# GLHF` with a GIF.
+- **Choices are buttons**, so everything is visible at once. Champions are red to ban and green
+  to pick. Drafted players and taken champions stay in place, greyed out, so nothing shifts under
+  a click. The champion grid has messages of
   its own directly below the board, split evenly over two because Discord allows 40 components per
   message, with Random at the end. They are posted afresh each turn rather than edited, so no
   "(edited)" tag splits the grid. A roster above 55 falls back to dropdowns.
@@ -354,15 +390,119 @@ cooldown's strikes too, unless told to keep them, and `/penalty strikes` adds or
 hand. All the numbers are in each server's `penalty_policy`, editable in admin. They are starting
 judgements.
 
+## Scrims and Bebot's tools
+
+Alongside the match flow, the server keeps Bebot's other tools. None of them touches ratings.
+
+### Scrims
+
+`/startdraft` runs a hero ban and pick in any channel, for scrims or anything outside the queue.
+Two people press **Become The Hidden King Captain** and **Become The Archmother Captain**, then the
+active mode's bans and picks run, The Hidden King first. `/captains_coinflip captain1 captain2`
+flips a coin instead: the winner chooses First Pick, Last Pick, 🔶 Hidden King or 🔷 Archmother,
+the loser chooses from the other kind, and either captain presses **Start Draft**.
+
+A scrim is a match of its own kind, run by the same engine as a ranked one, so it looks and
+behaves the same: Bebot's board, the red-to-ban, green-to-pick grid below it, 🎲 Random, a random
+pick when a turn runs out, and the board following the chat. It ends at `# GLHF` with a GIF.
+
+- It's recorded (every ban and pick is kept) and never rated. Its captains aren't held by it, so
+  they can queue for ranked meanwhile, and it doesn't count against the server's match capacity.
+- Scrims are staff-run: `/startdraft`, `/captains_coinflip` and `/stopdraft` need the Scrims area.
+  `/stopdraft` deletes the scrim's messages. `/randomdraft` posts a random ban and pick for both
+  sides, for anyone.
+- One scrim per channel, and at most 10 at once per server. One whose captains never show up frees
+  the channel after 15 minutes.
+- The bot never creates, moves or deletes the channel a scrim runs in. It needs View Channel, Send
+  Messages and Read Message History there, and Use External Emojis for the hero icons. Without
+  that last one, heroes show their plain emoji.
+
+### Priority list
+
+Bebot's voice queue, for running inhouses by hand. It follows the Waiting Room set up by
+`/setup` and the match lifecycle:
+
+| What happens | The list |
+|---|---|
+| You join the Waiting Room | You go on (🟢), longest wait first |
+| You leave it | You keep your place for 5 minutes (⏳). Come back in time and it's still yours |
+| You're put in a match (it pops, you replace someone in the ready check, or you sub in) | You come off. Until it ends, your voice moves don't count |
+| The match ends | Players still in its voice are moved back to the Waiting Room, and everyone there goes on the back. A void counts the same, even a no-fault one |
+
+`/priolist` posts the list in a channel (Community area). Waits are Discord timestamps, so they count up
+on their own and the message only changes when the list does. `/prio` shows it to you,
+`/refresh` re-posts it below the chat and `/removeprio` takes someone off (Community area). It catches up
+with the Waiting Room when the bot starts or reconnects, and when someone leaves a match early. Bots
+in the Waiting Room aren't listed, and a match in another server doesn't count.
+
+### Pings
+
+`/pingchannel channel name mention timer [required_role]` sets up a named ping, such as `pugs`
+mentioning @PUGS at most every 15 minutes (Community area). Members send it with `/ping message [name]`,
+and `/pings` lists a channel's pings and when each is ready. Only the roles and members staff
+chose can be pinged: @everyone, @here and anything typed into the message never are. If Discord
+refuses a ping, its cooldown isn't used. `/removeping` deletes one.
+
+### Error channel
+
+`/seterrorchannel channel` posts this server's bot errors in a channel, summarised, at most 10 a
+minute (Setup area). Only this server's own errors go there. `/clearerrorchannel` stops it. Whoever
+runs the bot can also set `ERROR_LOG_CHANNEL_ID` to get every error, from every server, with its
+full traceback.
+
+## Permissions
+
+Staff commands are grouped into areas, and each server grants areas to its own roles: a main admin
+role might hold every area, a junior admin Match control and Scrims, a dispute team Disputes. A
+member holds every area any of their roles is granted. The server owner and Administrators hold
+every area without a grant, so a new server is never locked out.
+
+`/permissions grant role area` and `/permissions revoke role area` change grants (either takes
+"Every area"), and `/permissions list` shows them. Only the owner and Administrators can use
+`/permissions`; the grants are also editable under Communities in the Django admin. Match staff
+(Match control, Disputes and Ratings) can see every match channel and the scoreboard archive.
+
+Discord can't hide commands by these grants, so staff commands are visible to everyone and
+refused when they run without the area. `/permissions` alone is hidden from non-Administrators.
+
+### Staff channel
+
+Everything staff should look at arrives as a card in `#staff-alerts`, which only staff roles can
+see. Each card is tagged with an area and pings the roles holding it:
+
+| Card | Area | Closed by |
+|---|---|---|
+| A disputed result, or no result reported | Disputes | Its buttons: either team won, or Void. Any Disputes holder can rule |
+| A possible early leave the captains disagree on or didn't answer | Disputes | Dismiss, or the match being voided |
+| deadlock-api disagrees with the result, or shows an abandon | Disputes | Dismiss |
+| The scoreboard shows the other team won | Disputes | Dismiss |
+| A player's award share is frozen | Ratings | Dismiss |
+| Discord refused to create a lobby | Setup | Dismiss |
+
+A dispute still open after its re-ping time is posted again at the bottom, pinging again, and the
+old card is removed. A closed card stays, edited to say who closed it and how. The match channel
+gets a short note for disputes and early leaves, without pinging anyone. On a server whose staff
+channel isn't set up yet, cards go to the match channel instead.
+
 ## Commands
 
-**Players:** `/leaderboard`, `/stats`, `/rating history`, `/queue status`, `/link`, `/unlink`,
-`/submit` (fallback for when the report form's upload fails).
+**Everyone:** `/leaderboard`, `/stats`, `/queue status`, `/link`, `/unlink`, `/submit` (fallback
+for when the report form's upload fails), `/randomdraft`, `/prio`, `/ping`, `/pings`.
 
-**Staff:** `/setup`, `/match status|void|rescore|sub|explain|awards|names|early_leave`,
-`/rating seed|adjust`, `/queue kick|clear`, `/penalty add|revoke|strikes`,
-`/captain allow|bar|clear`, `/ocr mode|status`, `/deadlock settings|status|check|unlink`,
-`/mode list|activate`, `/roster sync`, `/ledger_check`.
+**Staff, by area:**
+
+| Area | Commands |
+|---|---|
+| Setup | `/setup`, `/seterrorchannel`, `/clearerrorchannel`, `/mode list\|activate`, `/ocr mode\|status`, `/roster sync`, `/deadlock settings\|status` |
+| Match control | `/match status`, `/match void\|sub` on a live match, `/match explain`, `/queue_admin kick\|clear` |
+| Disputes | Dispute buttons, `/match rescore\|names\|early_leave`, `/match void\|sub` on a finished match, `/match explain`, matching any scoreboard name, `/deadlock check` |
+| Ratings | `/rating seed\|adjust`, `/match awards`, `/ledger_check` |
+| Moderation | `/penalty add\|revoke\|strikes`, `/captain allow\|bar\|clear`, `/deadlock unlink` |
+| Community | `/priolist`, `/refresh`, `/removeprio`, `/pingchannel`, `/removeping` |
+| Scrims | `/startdraft`, `/captains_coinflip`, `/stopdraft` |
+
+**Owner and Administrators:** `/permissions grant|revoke|list`.
+
 Anything that rewrites past ratings shows a preview and needs Confirm.
 
 ## Tables
@@ -370,11 +510,12 @@ Anything that rewrites past ratings shows a preview and needs Confirm.
 | Group | Tables |
 |---|---|
 | Players and ratings | `players`, `seasons`, `player_ratings`, `rating_runs`, `rating_events` |
-| Champions and config | `champions`, `draft_mode_versions`, `communities` |
+| Champions and config | `champions`, `draft_mode_versions`, `communities`, `community_role_grants` |
 | Queue | `queue_entries` |
 | Matches | `matches`, `match_participants`, `match_resources`, `match_transitions`, `draft_actions`, `captain_votes`, `sub_requests`, `sub_offers`, `early_leaves` |
 | Results | `result_submissions`, `match_results`, `match_awards`, `scoreboard_reads`, `player_match_stats`, `player_aliases`, `api_match_checks` |
-| Operations | `penalties`, `strike_adjustments`, `captain_overrides`, `outbox_effects` |
+| Operations | `penalties`, `strike_adjustments`, `captain_overrides`, `staff_alerts`, `outbox_effects` |
+| Bebot's tools | `prio_entries`, `channel_pings` (scrims are `matches` with `kind = scrim`) |
 
 For analytics, start at `result_submissions`. Screenshots are in the archive channel: use
 `archive_message_id` and `attachment_id` with the Discord API, because CDN URLs expire. Join
@@ -387,16 +528,21 @@ works with `GET https://api.deadlock-api.com/v1/matches/{id}/metadata`.
 ```
 league/domain/    Pure rules, no Django or Discord: ratings (openskill_v1), strikes and
                   captain eligibility (standing), Steam IDs, mode schema, draft plan, engine
+                  (statuses, transitions per kind, the captain coinflip), copy (what players read)
 league/models/    The tables
 league/services/  Transactions: queue, lobby, draft, results, ratings, corrections, awards,
-                  standing, penalties, ocr, steam, api_results, calibration, deadlines
+                  standing, penalties, ocr, steam, api_results, calibration, deadlines,
+                  permissions, alerts (the staff channel), and Bebot's tools: scrims, prio, pings
 league/integrations/  The deadlock-api client. Network only, no database
 league/web/       The staff calibration dashboard
 league/admin/     Django admin
-bot/handlers/     Clicks and modals: validate, call a service, acknowledge
+bot/handlers/     Clicks and modals: validate, call a service, acknowledge. permissions.py holds
+                  the staff area checks every command and button uses
 bot/commands/     Slash commands
-bot/renderers/    State to Discord components, with no I/O
+bot/renderers/    State to Discord components, with no I/O. style.py is the one look (Bebot's
+                  colours, titles and turn strip); board.py renders ranked matches and scrims
 bot/effects/      Runs Discord side effects from the outbox, with retries
+bot/error_log.py  Posts ERROR logs to each server's /seterrorchannel channel
 scoreocr/         Scoreboard screenshot reader, used through league/services/ocr.py when installed
 ```
 
@@ -408,7 +554,9 @@ The rules that keep it reliable:
 - **Timers are rows.** A poller applies timeouts through the same path as a click. After downtime,
   past-due deadlines get 60 s of grace.
 - **Discord calls happen after commit.** State changes write `outbox_effects` in the same transaction,
-  and a worker runs them in order per match, retrying on server errors.
+  and a worker runs them in order per lane, retrying on server errors. Each match (or scrim) is a lane,
+  and other work gets one lane per kind and server, so one that keeps
+  failing never holds up another.
 
 ## Operations
 
@@ -463,30 +611,6 @@ DEBUG=true uv run python manage.py load_presets
 ```bash
 DEBUG=true uv run python manage.py runbot
 ```
-
-### Testing alone
-
-With `DEBUG=true` and `DEV_FAKE_PLAYERS=true`, this fills the queue with fake players. They ready up
-by themselves, and Discord calls for them are skipped:
-
-```bash
-DEBUG=true DEV_FAKE_PLAYERS=true uv run python manage.py dev_fill_queue --count 11
-```
-
-Join the queue yourself as the twelfth. Fake players have no completed matches, so nobody here can
-captain under the 5-match rule and captains are chosen by experience. To captain your own test
-lobby, run `/captain allow` on yourself, then vote for yourself. Fake captains' turns and side claims time out on the normal clocks, so a match still reaches
-you. The bot process needs `DEV_FAKE_PLAYERS=true` too. It's refused outside `DEBUG`.
-
-To watch a whole match with no clicking, run this alongside the bot. It puts every real player who
-has played into the lobby, holds at each stage for screenshots, and reuses an archived scoreboard, so
-one match must already have been reported by hand:
-
-```bash
-DEBUG=true DEV_FAKE_PLAYERS=true uv run python manage.py dev_autoplay --pause 20 --step 2
-```
-
-It stands in for the people clicking, so it doesn't test the buttons themselves.
 
 ## Check before launch
 

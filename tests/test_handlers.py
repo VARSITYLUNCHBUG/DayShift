@@ -18,8 +18,8 @@ from django.db import connections
 
 from bot.client import DraftBot
 from bot.commands import player as player_commands
-from bot.commands import setup as setup_commands
 from bot.commands import staff
+from bot.commands.registry import all_commands
 from bot.db import db
 from bot.handlers.draft import LobbyCodeModal
 from bot.handlers.results import DisputeModal, ReportModal, process_report
@@ -27,7 +27,8 @@ from bot.routing import Context, _dispatch
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
 from league.models import Community, DraftModeVersion, Match, Player, QueueEntry, ResultSubmission
-from league.services import community, integrity, queue, ratings
+from league.models.permissions import Area
+from league.services import community, integrity, permissions, queue, ratings
 from league.services.common import captain_of, open_season
 from tests.conftest import make_player, publish_presets
 from tests.helpers import (
@@ -183,7 +184,7 @@ def test_refusal_is_shown_to_the_clicker(wired: Community) -> None:
     click(fake_interaction(player), "join")
     interaction = fake_interaction(player)
     click(interaction, "join")
-    assert "already in the queue" in replies(interaction)[0]
+    assert "already in queue" in replies(interaction)[0]
     assert interaction.followup.send.call_args.kwargs["ephemeral"] is True
 
 
@@ -224,7 +225,7 @@ def test_ready_button_works_in_guild_and_dm(wired: Community) -> None:
 
     dm = fake_interaction(players[1], guild=False)
     click(dm, "ready", match.pk)
-    assert "You're ready" in replies(dm)[0]
+    assert "You are now ready!" in replies(dm)[0]
 
 
 def test_captain_vote_select(wired: Community) -> None:
@@ -241,19 +242,24 @@ def test_captain_vote_select(wired: Community) -> None:
     assert "not in this match" in replies(outsider)[0]
 
 
-def test_side_claim_buttons(wired: Community) -> None:
+def test_coinflip_buttons(wired: Community) -> None:
     match, _players = lobby_of_twelve(wired)
     match = run_player_draft(vote_captains(ready_all(match)))
-    assert match.status == Status.SIDE_SELECT
-    other = match.participants.filter(is_captain=False).first().player
-    refused = fake_interaction(other)
-    click(refused, "claim_side", match.pk, "hk")
-    assert "Only a captain" in replies(refused)[0]
+    assert match.status == Status.COINFLIP
+    winner = match.coinflip_winner
+    loser = "B" if winner == "A" else "A"
+    refused = fake_interaction(captain_of(match, loser).player)
+    click(refused, "coin_choice", match.pk, "first_pick")
+    assert replies(refused)[0] == "Only the coinflip winner can make this choice!"
 
-    click(fake_interaction(captain_of(match, "B").player), "claim_side", match.pk, "am")
+    click(
+        fake_interaction(captain_of(match, winner).player), "coin_choice", match.pk, "hidden_king"
+    )
+    click(fake_interaction(captain_of(match, loser).player), "coin_choice", match.pk, "first_pick")
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
-    assert match.hidden_king_team == "A"
+    assert match.hidden_king_team == winner
+    assert match.champion_first_pick == loser
 
 
 def test_random_champion_button(wired: Community) -> None:
@@ -466,7 +472,7 @@ def test_dispute_modal_then_staff_buttons(wired: Community) -> None:
 
     outsider = fake_interaction(make_player(90))
     click(outsider, "resolve_b", match.pk)
-    assert "Only staff" in replies(outsider)[0]
+    assert "It needs Disputes access" in replies(outsider)[0]
     assert fresh(match).status == Status.DISPUTED
 
     admin = fake_interaction(make_player(91), administrator=True)
@@ -476,8 +482,8 @@ def test_dispute_modal_then_staff_buttons(wired: Community) -> None:
     assert match.winner == "B"
 
 
-def test_staff_role_counts_as_staff(wired: Community) -> None:
-    Community.objects.filter(pk=wired.pk).update(staff_role_id=555)
+def test_a_disputes_role_can_rule_on_a_dispute(wired: Community) -> None:
+    permissions.grant(wired.pk, 555, [Area.DISPUTES], granted_by=None)
     match = in_progress(wired)
     captain_a = captain_of(match, "A").player
     captain_b = captain_of(match, "B").player
@@ -565,12 +571,12 @@ def test_staff_commands_refuse_non_staff(wired: Community) -> None:
     target = make_player(2)
     interaction = fake_interaction(make_player(1))
     run_command(
-        subcommand(player_commands.rating_group, "seed"),
+        subcommand(staff.rating_group, "seed"),
         interaction,
         player=member(target),
         band=app_commands.Choice(name="High", value="high"),
     )
-    assert "Only staff" in replies(interaction)[0]
+    assert "It needs Ratings access" in replies(interaction)[0]
     assert open_season(wired).ratings.count() == 0
 
 
@@ -579,7 +585,7 @@ def test_seed_and_adjust_commands(wired: Community) -> None:
     target = make_player(2)
     interaction = fake_interaction(admin, administrator=True)
     run_command(
-        subcommand(player_commands.rating_group, "seed"),
+        subcommand(staff.rating_group, "seed"),
         interaction,
         player=member(target),
         band=app_commands.Choice(name="High", value="high"),
@@ -587,7 +593,7 @@ def test_seed_and_adjust_commands(wired: Community) -> None:
     assert "seeded high" in replies(interaction)[0]
     interaction = fake_interaction(admin, administrator=True)
     run_command(
-        subcommand(player_commands.rating_group, "adjust"),
+        subcommand(staff.rating_group, "adjust"),
         interaction,
         player=member(target),
         delta=40,
@@ -687,9 +693,9 @@ def test_mode_commands(wired: Community) -> None:
     assert "(active)" in replies(interaction)[0]
 
     interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="dcs_s3_2ban")
+    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="threeban_1win_2026")
     wired.refresh_from_db()
-    assert wired.active_mode == DraftModeVersion.objects.get(slug="dcs_s3_2ban")
+    assert wired.active_mode == DraftModeVersion.objects.get(slug="threeban_1win_2026")
 
     interaction = fake_interaction(admin, administrator=True)
     run_command(subcommand(staff.mode_group, "activate"), interaction, slug="nope")
@@ -701,11 +707,11 @@ def test_queue_kick_and_clear_commands(wired: Community) -> None:
     target = make_player(1)
     queue.join(wired.pk, target)
     interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(player_commands.queue_group, "kick"), interaction, player=member(target))
+    run_command(subcommand(staff.queue_admin_group, "kick"), interaction, player=member(target))
     assert replies(interaction) == ["Removed."]
     queue.join(wired.pk, target)
     interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(player_commands.queue_group, "clear"), interaction)
+    run_command(subcommand(staff.queue_admin_group, "clear"), interaction)
     assert QueueEntry.objects.count() == 0
 
 
@@ -765,21 +771,27 @@ def test_ledger_check_command(wired: Community) -> None:
 def test_every_command_serialises_for_discord() -> None:
     client = discord.Client(intents=discord.Intents.none())
     tree = app_commands.CommandTree(client)
-    for command in (
-        *player_commands.COMMANDS,
-        setup_commands.setup_command,
-        *staff.GROUPS,
-        *staff.COMMANDS,
-    ):
+    for command in all_commands():
         tree.add_command(command)
     payloads = [command.to_dict(tree) for command in tree.get_commands()]
     names = {payload["name"] for payload in payloads}
-    assert {"queue", "rating", "match", "penalty", "mode", "roster", "setup", "submit"} <= names
+    assert {"queue", "queue_admin", "rating", "match", "penalty", "mode", "roster"} <= names
+    assert {"setup", "submit", "permissions"} <= names
     assert {"link", "unlink", "captain", "ocr", "deadlock"} <= names
+    assert {"startdraft", "stopdraft", "captains_coinflip", "randomdraft"} <= names
+    assert "coinflip" not in names
+    assert {"priolist", "prio", "refresh", "removeprio"} <= names
+    assert {"pingchannel", "removeping", "pings", "ping"} <= names
+    assert {"seterrorchannel", "clearerrorchannel"} <= names
     rating = next(payload for payload in payloads if payload["name"] == "rating")
-    assert {option["name"] for option in rating["options"]} == {"history", "seed", "adjust"}
+    assert {option["name"] for option in rating["options"]} == {"seed", "adjust"}
     queue_payload = next(payload for payload in payloads if payload["name"] == "queue")
-    assert {option["name"] for option in queue_payload["options"]} == {"status", "kick", "clear"}
+    assert {option["name"] for option in queue_payload["options"]} == {"status"}
+    queue_admin = next(payload for payload in payloads if payload["name"] == "queue_admin")
+    assert {option["name"] for option in queue_admin["options"]} == {"kick", "clear"}
+    # Discord can't show commands by our grants, so only /permissions is hidden by default.
+    hidden = {p["name"] for p in payloads if p.get("default_member_permissions") is not None}
+    assert hidden == {"permissions"}
 
 
 def test_bot_uses_only_unprivileged_intents() -> None:

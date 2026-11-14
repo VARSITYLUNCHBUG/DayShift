@@ -16,6 +16,7 @@ from typing import Any, cast
 import discord
 from discord import ButtonStyle, Interaction, SelectOption
 
+from league import log_context
 from league.domain.errors import DomainError
 
 logger = logging.getLogger(__name__)
@@ -71,17 +72,18 @@ async def reply(interaction: Interaction[Any], text: str) -> None:
 
 async def guarded(interaction: Interaction[Any], call: Callable[[], Awaitable[None]]) -> None:
     """Show expected refusals to the user. Anything else is logged and never leaks details."""
-    try:
-        await call()
-    except DomainError as exc:
-        await reply(interaction, exc.message)
-    except Exception:
-        logger.exception("Interaction failed", extra={"interaction": interaction.id})
-        await reply(interaction, "Something went wrong on our side. Please try again.")
-    finally:
-        wake = getattr(interaction.client, "wake_effects", None)
-        if wake is not None:
-            wake()
+    with log_context.bind(guild=interaction.guild_id, interaction=interaction.id):
+        try:
+            await call()
+        except DomainError as exc:
+            await reply(interaction, exc.message)
+        except Exception:
+            logger.exception("Interaction failed", extra={"interaction": interaction.id})
+            await reply(interaction, "Something went wrong on our side. Please try again.")
+        finally:
+            wake = getattr(interaction.client, "wake_effects", None)
+            if wake is not None:
+                wake()
 
 
 async def _dispatch(context: Context) -> None:

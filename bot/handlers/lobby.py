@@ -3,6 +3,7 @@ from __future__ import annotations
 from bot.db import db
 from bot.handlers.common import actor
 from bot.routing import Context, handles, reply
+from league.domain import copy
 from league.services import lobby
 
 
@@ -11,7 +12,7 @@ async def ready(ctx: Context) -> None:
     await ctx.interaction.response.defer()
     await db(lobby.mark_ready, ctx.match_id, await actor(ctx.interaction))
     if ctx.interaction.guild_id is None:
-        await reply(ctx.interaction, "You're ready. See you in the lobby.")  # No board in a DM.
+        await reply(ctx.interaction, copy.NOW_READY)  # No board in a DM.
 
 
 @handles("captain_vote")

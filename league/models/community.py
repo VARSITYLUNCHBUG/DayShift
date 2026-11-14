@@ -54,13 +54,19 @@ class Community(models.Model):
     active_mode = models.ForeignKey(
         "league.DraftModeVersion", on_delete=models.PROTECT, related_name="+"
     )
-    staff_role_id = models.BigIntegerField(null=True, blank=True)
     queue_channel_id = models.BigIntegerField(null=True, blank=True)
     queue_message_id = models.BigIntegerField(null=True, blank=True)
     waiting_room_channel_id = models.BigIntegerField(null=True, blank=True)
     results_channel_id = models.BigIntegerField(null=True, blank=True)
     archive_channel_id = models.BigIntegerField(null=True, blank=True)
     match_category_id = models.BigIntegerField(null=True, blank=True)
+    # The voice priority list's message (/priolist).
+    prio_channel_id = models.BigIntegerField(null=True, blank=True)
+    prio_message_id = models.BigIntegerField(null=True, blank=True)
+    # Staff alert cards: disputes and everything else staff should look at (/setup).
+    staff_channel_id = models.BigIntegerField(null=True, blank=True)
+    # This server's error summaries are posted here (/seterrorchannel).
+    error_channel_id = models.BigIntegerField(null=True, blank=True)
     max_concurrent_matches = models.PositiveSmallIntegerField(default=12)
     penalty_policy = models.JSONField(default=default_penalty_policy)
     # Reading report screenshots. Needs the `ocr` dependency group installed.

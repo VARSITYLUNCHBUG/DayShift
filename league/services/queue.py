@@ -7,10 +7,12 @@ from dataclasses import dataclass
 
 from django.db import transaction
 
+from league.domain import copy
 from league.domain.engine import LIVE
 from league.domain.errors import InvalidAction
 from league.domain.mode_schema import parse_mode
 from league.models import Community, Match, MatchParticipant, Player, QueueEntry
+from league.models.matches import MatchKind
 from league.services import lobby, penalties
 from league.services.common import lock_community, now, render_queue
 
@@ -44,7 +46,7 @@ def join(community_id: int, player: Player) -> QueueStatus:
         community=community, player=player, defaults={"joined_at": now()}
     )
     if not created:
-        raise InvalidAction("You're already in the queue.")
+        raise InvalidAction(copy.ALREADY_QUEUED)
     render_queue(community)
     match = try_pop(community)
     if match is not None and match.participants.filter(player=player).exists():
@@ -57,7 +59,7 @@ def leave(community_id: int, player: Player) -> None:
     community = lock_community(community_id)
     deleted, _ = QueueEntry.objects.filter(community=community, player=player).delete()
     if not deleted:
-        raise InvalidAction("You're not in the queue.")
+        raise InvalidAction(copy.NOT_QUEUED)
     render_queue(community)
 
 
@@ -90,7 +92,7 @@ def status(community: Community, player: Player) -> QueueStatus:
 def try_pop(community: Community) -> Match | None:
     """Start a lobby if the queue is full and capacity allows. Requires the community lock."""
     mode = parse_mode(community.active_mode.body)
-    live = Match.objects.filter(community=community, status__in=LIVE).count()
+    live = Match.objects.filter(community=community, kind=MatchKind.RANKED, status__in=LIVE).count()
     if live >= community.max_concurrent_matches:
         return None
     entries = list(

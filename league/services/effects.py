@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from league.domain.engine import LIVE
-from league.models import Community, Match, MatchParticipant, MatchResource, OutboxEffect
-from league.models.matches import ResourceKind
+from league.domain.engine import TIMED, Status
+from league.models import (
+    Community,
+    Match,
+    MatchParticipant,
+    MatchResource,
+    OutboxEffect,
+)
+from league.models.matches import MatchKind, ResourceKind
 from league.models.outbox import EffectStatus
-from league.services.common import add_effect, now, render_board, render_queue
+from league.services.common import (
+    add_effect,
+    now,
+    render_board,
+    render_queue,
+)
 
 MAX_ATTEMPTS = 8
 MAX_BACKOFF_SECONDS = 300
@@ -24,32 +36,52 @@ BOARD_MOVE_MAX_WAIT_SECONDS = 20
 BOARD_MOVE_IDLE_SECONDS = 3600
 
 
-def due_by_match(limit: int = 200) -> list[list[OutboxEffect]]:
-    """Due effects grouped so each match runs its effects in order.
+Lane = int | str
 
-    If an earlier effect of a match is waiting on a retry, later ones of that match wait too,
-    unless they were created with a future `run_after`, such as the reminder and final cleanup,
-    which are independent of the immediate work.
+
+def lane_key(match_id: int | None, lane: str, kind: str, community_id: int) -> Lane:
+    """Which effects must run in order with this one.
+
+    A match's effects share its lane, scrims included. Work outside a match runs in the lane it
+    names (a server's staff alerts, say), or else one lane per kind and server, so a queue panel
+    that keeps failing in one server never holds up another server or another kind of work.
+    """
+    if match_id is not None:
+        return match_id
+    return lane or f"{kind}:{community_id}"
+
+
+def lane_of(effect: OutboxEffect) -> Lane:
+    return lane_key(effect.match_id, effect.lane, effect.kind, effect.community_id)
+
+
+def due_by_match(limit: int = 200) -> list[list[OutboxEffect]]:
+    """Due effects grouped by lane (see `lane_key`), so each lane runs its effects in order.
+
+    If an earlier effect of a lane is waiting on a retry, later ones of that lane wait too.
     """
     moment = now()
-    retrying: dict[object, int] = {}
+    retrying: dict[Lane, int] = {}
     waiting = OutboxEffect.objects.filter(status=EffectStatus.PENDING, attempts__gt=0).order_by(
         "id"
     )
-    for match_id, effect_id in waiting.values_list("match_id", "id"):
-        retrying.setdefault(match_id, effect_id)
+    for match_id, lane, kind, community_id, effect_id in waiting.values_list(
+        "match_id", "lane", "kind", "community_id", "id"
+    ):
+        retrying.setdefault(lane_key(match_id, lane, kind, community_id), effect_id)
 
-    groups: dict[object, list[OutboxEffect]] = defaultdict(list)
+    groups: dict[Lane, list[OutboxEffect]] = defaultdict(list)
     due = (
         OutboxEffect.objects.filter(status=EffectStatus.PENDING, run_after__lte=moment)
         .select_related("community", "match")
         .order_by("id")[:limit]
     )
     for effect in due:
-        blocker = retrying.get(effect.match_id)
+        key = lane_of(effect)
+        blocker = retrying.get(key)
         if blocker is not None and effect.pk > blocker:
             continue
-        groups[effect.match_id].append(effect)
+        groups[key].append(effect)
     return list(groups.values())
 
 
@@ -132,8 +164,39 @@ def mark_notice_deleted(match_id: int, message_id: int) -> None:
     ).update(deleted_at=now())
 
 
+@dataclass(frozen=True, slots=True)
+class MoveTiming:
+    after_messages: int
+    quiet_seconds: int
+    max_wait_seconds: int
+    idle_seconds: int
+
+
+BOARD_MOVE = MoveTiming(
+    BOARD_MOVE_AFTER_MESSAGES,
+    BOARD_MOVE_QUIET_SECONDS,
+    BOARD_MOVE_MAX_WAIT_SECONDS,
+    BOARD_MOVE_IDLE_SECONDS,
+)
+# A scrim runs in an ordinary channel, which is busier than a match's own, and each move reposts
+# three messages, so it waits for more chat before following it.
+SCRIM_MOVE = MoveTiming(after_messages=5, quiet_seconds=5, max_wait_seconds=30, idle_seconds=600)
+
+
+def board_channel(match_id: int) -> int | None:
+    """Where a match's board is: its own text channel, or the public channel a scrim runs in."""
+    text_id = resource_id(match_id, ResourceKind.TEXT)
+    if text_id is not None:
+        return text_id
+    return (
+        Match.objects.filter(pk=match_id, kind=MatchKind.SCRIM)
+        .values_list("host_channel_id", flat=True)
+        .first()
+    )
+
+
 def note_chat(channel_id: int) -> None:
-    """Count a chat message in a match channel towards moving the board back below the chat."""
+    """Count a chat message towards moving a match board, or a scrim's, back below it."""
     resource = (
         MatchResource.objects.filter(
             kind=ResourceKind.TEXT, discord_id=channel_id, deleted_at__isnull=True
@@ -141,43 +204,81 @@ def note_chat(channel_id: int) -> None:
         .select_related("match__community")
         .first()
     )
-    if resource is None:
-        return  # Any other channel in the server.
-    match = resource.match
+    if resource is not None:
+        match = resource.match
+        _debounce_move(match.community, "move_board", BOARD_MOVE, match=match)
+        return
+    scrim = (
+        Match.objects.filter(
+            kind=MatchKind.SCRIM, host_channel_id=channel_id, status=Status.CHAMPION_DRAFT
+        )
+        .select_related("community")
+        .first()
+    )
+    if scrim is not None and resource_id(scrim.pk, ResourceKind.BOARD_MESSAGE) is not None:
+        _debounce_move(scrim.community, "move_board", SCRIM_MOVE, match=scrim)
+    # Any other channel in the server: nothing to keep in view.
+
+
+def _debounce_move(
+    community: Community,
+    kind: str,
+    timing: MoveTiming,
+    *,
+    match: Match | None = None,
+    lane: str | None = None,
+    payload: dict[str, object] | None = None,
+) -> None:
+    """Move once chat is pushing the message out of view, after a quiet moment. Non-stop chat
+    can only hold that off for so long; a message or two left below moves it much later."""
     moment = now()
     pending = OutboxEffect.objects.filter(
-        match=match, kind="move_board", status=EffectStatus.PENDING, attempts=0
+        match=match, lane=lane or "", kind=kind, status=EffectStatus.PENDING, attempts=0
     ).first()
     if pending is None:
         add_effect(
-            match.community,
-            "move_board",
-            {"messages": 1},
+            community,
+            kind,
+            {**(payload or {}), "messages": 1},
             match=match,
-            run_after=moment + timedelta(seconds=BOARD_MOVE_IDLE_SECONDS),
+            lane=lane,
+            run_after=moment + timedelta(seconds=timing.idle_seconds),
         )
         return
     messages = int(pending.payload.get("messages", 0)) + 1
     pending.payload["messages"] = messages
-    if messages >= BOARD_MOVE_AFTER_MESSAGES:
-        latest = moment + timedelta(seconds=BOARD_MOVE_MAX_WAIT_SECONDS)
+    if messages >= timing.after_messages:
+        latest = moment + timedelta(seconds=timing.max_wait_seconds)
         move_by = datetime.fromisoformat(pending.payload.setdefault("move_by", latest.isoformat()))
-        pending.run_after = min(moment + timedelta(seconds=BOARD_MOVE_QUIET_SECONDS), move_by)
+        pending.run_after = min(moment + timedelta(seconds=timing.quiet_seconds), move_by)
     pending.save(update_fields=["payload", "run_after"])
 
 
+def cancel_moves(kind: str, *, match_id: int | None = None, lane: str | None = None) -> None:
+    """The message has just moved to the bottom, so chat before now no longer counts."""
+    pending = OutboxEffect.objects.filter(
+        lane=lane or "", kind=kind, status=EffectStatus.PENDING, attempts=0
+    )
+    if match_id is None:
+        pending = pending.filter(match__isnull=True)
+    else:
+        pending = pending.filter(match_id=match_id)
+    pending.update(status=EffectStatus.SKIPPED, done_at=now())
+
+
 def cancel_board_moves(match_id: int) -> None:
-    """The board has just moved to the bottom, so chat before now no longer counts."""
-    OutboxEffect.objects.filter(
-        match_id=match_id, kind="move_board", status=EffectStatus.PENDING, attempts=0
-    ).update(status=EffectStatus.SKIPPED, done_at=now())
+    cancel_moves("move_board", match_id=match_id)
 
 
-def voice_target(discord_user_id: int, joined_channel_id: int) -> tuple[int, int] | None:
-    """Where a player joining this channel should be sent: (guild ID, channel ID), or None.
+def on_voice_join(discord_user_id: int, joined_channel_id: int) -> tuple[int, int] | None:
+    """A member joined a voice channel. Returns where to send them: (guild ID, channel ID), or None.
 
-    Covers someone who joins the Waiting Room after their lobby popped, or the lobby voice after
-    teams moved on. Anyone else is left alone, wherever they are.
+    - Joining your match's lobby or team voice records that you've arrived.
+    - The Waiting Room sends you on to your match's voice only until you've arrived. After that,
+      coming back to the Waiting Room (to requeue, say) leaves you there.
+    - The lobby voice always sends you on to your team's voice once teams have their own.
+
+    Anyone else is left alone, wherever they are.
     """
     participant = (
         MatchParticipant.objects.filter(player__discord_user_id=discord_user_id, is_active=True)
@@ -193,17 +294,29 @@ def voice_target(discord_user_id: int, joined_channel_id: int) -> tuple[int, int
     )
     team_channel = channels.get(team_kind) if team_kind else None
     lobby_channel = channels.get(ResourceKind.LOBBY_VOICE)
+    match_voice = {channel for channel in (team_channel, lobby_channel) if channel is not None}
+    arrived = participant.voice_joined_at is not None
+    if joined_channel_id in match_voice and not arrived:
+        # Moved in by the bot or joined through the invite: either way, they've arrived.
+        MatchParticipant.objects.filter(pk=participant.pk, voice_joined_at__isnull=True).update(
+            voice_joined_at=now()
+        )
+        arrived = True
     target = team_channel or lobby_channel
     if target is None or target == joined_channel_id:
         return None
-    if joined_channel_id not in {match.community.waiting_room_channel_id, lobby_channel}:
+    if joined_channel_id == lobby_channel:
+        return match.community.discord_guild_id, target  # The lobby voice is on its way out.
+    if joined_channel_id != match.community.waiting_room_channel_id or arrived:
         return None
     return match.community.discord_guild_id, target
 
 
 def stale_resources() -> list[tuple[int, str, int]]:
     """Channels of finished matches whose delete effect has failed for good."""
-    finished = Match.objects.filter(status__in=("completed", "voided"), ended_at__isnull=False)
+    finished = Match.objects.filter(
+        kind=MatchKind.RANKED, status__in=("completed", "voided"), ended_at__isnull=False
+    )
     failed = OutboxEffect.objects.filter(
         match__in=finished,
         kind__in=("cleanup_voice", "delete_text_channel"),
@@ -223,7 +336,7 @@ def request_reconcile() -> int:
     for community in Community.objects.all():
         render_queue(community)
         count += 1
-    live = Match.objects.filter(status__in=LIVE).select_related("community")
+    live = Match.objects.filter(status__in=TIMED).select_related("community")
     for match in live:
         render_board(match)
         count += 1

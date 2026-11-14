@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
 
 from bot.db import db
+from bot.effects import flow
 from bot.effects.gateway import ChannelGone, Gateway
+from bot.renderers.alerts import match_notice, render_alert
 from bot.renderers.board import (
     render_board,
     render_pickers,
     render_ready_dm,
     render_sub_offer_dm,
+    render_sub_offer_notice,
     render_voice_dm,
 )
+from bot.renderers.prio import render_prio
 from bot.renderers.queue import render_queue
 from bot.renderers.results import (
     render_correction,
@@ -24,11 +28,22 @@ from bot.renderers.results import (
     render_scoreboard_notice,
 )
 from league.domain.engine import Status
-from league.domain.errors import DomainError
 from league.integrations import deadlock_api
-from league.models import Community, Match, OutboxEffect, Player
+from league.models import Community, Match, OutboxEffect
+from league.models.alerts import AlertStatus
 from league.models.matches import ResourceKind
-from league.services import api_results, boards, dev, draft, effects, lobby, ocr, subs
+from league.services import (
+    alerts,
+    api_results,
+    boards,
+    draft,
+    effects,
+    ocr,
+    permissions,
+    prio,
+    scrims,
+    subs,
+)
 from league.services.common import add_effect
 from league.services.common import render_board as request_board
 
@@ -39,7 +54,7 @@ INVITE_MAX_AGE_SECONDS = 1800
 
 
 class Skip(Exception):
-    """Nothing to do, and that's fine: for example, a fake player has no Discord account."""
+    """Nothing to do, and that's fine: for example, the channel was already deleted."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,10 +91,6 @@ def effect(kind: str) -> Callable[[Handler], Handler]:
     return register
 
 
-def _real(user_ids: list[int]) -> list[int]:
-    return [user_id for user_id in user_ids if not dev.is_fake(user_id)]
-
-
 def _active_user_ids(match: Match) -> list[int]:
     return list(
         match.participants.filter(is_active=True).values_list("player__discord_user_id", flat=True)
@@ -106,17 +117,22 @@ def _reload(match_id: int) -> Match:
 
 
 async def _notice(
-    env: Env, text: str, *, user_ids: Iterable[int] = (), role_id: int | None = None
+    env: Env, text: str, *, user_ids: Iterable[int] = (), role_ids: Iterable[int] = ()
 ) -> None:
     """Post a message about the flow. It stays until the match moves on, with the board below it.
 
     The board moves in its own effect, so a failed move can't retry this and ping people twice.
     """
     message_id = await env.gateway.send_text(
-        await _text_channel(env), text, user_ids=user_ids, role_id=role_id
+        await _text_channel(env), text, user_ids=user_ids, role_ids=role_ids
     )
     await db(effects.record_notice, env.match_id, message_id)
     await db(_request_board, env.match_id)
+
+
+def _match_staff_roles(community_id: int) -> list[int]:
+    """Roles that see every match's channels: whoever looks after matches."""
+    return permissions.role_ids_with(community_id, permissions.MATCH_STAFF_AREAS)
 
 
 def _request_board(match_id: int) -> None:
@@ -129,7 +145,7 @@ def _request_board(match_id: int) -> None:
 @effect("create_lobby")
 async def create_lobby(env: Env) -> None:
     existing = await db(effects.resources, env.match_id)
-    members = _real(await db(_active_user_ids, env.required_match))
+    members = await db(_active_user_ids, env.required_match)
     community = env.community
     if ResourceKind.TEXT not in existing:
         text_id = await env.gateway.create_text_channel(
@@ -137,7 +153,7 @@ async def create_lobby(env: Env) -> None:
             community.match_category_id,
             f"match-{env.match_id}",
             members,
-            community.staff_role_id,
+            await db(_match_staff_roles, community.pk),
         )
         await db(effects.record_resource, env.match_id, ResourceKind.TEXT, text_id)
     if ResourceKind.LOBBY_VOICE not in existing:
@@ -146,7 +162,7 @@ async def create_lobby(env: Env) -> None:
             community.match_category_id,
             f"Match {env.match_id} Lobby",
             members,
-            community.staff_role_id,
+            await db(_match_staff_roles, community.pk),
         )
         await db(effects.record_resource, env.match_id, ResourceKind.LOBBY_VOICE, voice_id)
     await _notice(env, "your lobby is ready. Press **Ready** on the board below.", user_ids=members)
@@ -162,10 +178,6 @@ async def gather_player(env: Env) -> None:
     """In the Waiting Room: move them. Anywhere else: DM an invite. They choose when to join."""
     user_id = int(env.effect.payload["discord_user_id"])
     is_sub = bool(env.effect.payload.get("sub"))
-    if dev.is_fake(user_id):
-        if not is_sub:
-            await db(_auto_ready, env.match_id, int(env.effect.payload["player_id"]))
-        raise Skip("Fake player")
     resources = await db(effects.resources, env.match_id)
     link = channel_url(env.guild_id, resources.get(ResourceKind.TEXT))
     if is_sub:
@@ -232,17 +244,38 @@ def _needs_ready(match_id: int, user_id: int) -> bool:
 
 @effect("sub_offer")
 async def sub_offer(env: Env) -> None:
-    """DM the offer of an open spot. If they can't be reached, the next person gets asked."""
+    """Offer an open spot: a DM, and a mention with the same buttons in the priority list's
+    channel (or the queue's). Only if neither reaches them is the next person asked."""
     offer_id = int(env.effect.payload["offer_id"])
     info = await db(subs.offer_info, offer_id)
     if not info.pending:
         raise Skip("The offer has closed.")
-    if dev.is_fake(info.discord_user_id):
-        await db(_auto_accept_offer, offer_id, info.player_id)
-        raise Skip("Fake player")
     team = await db(_team_label, env.match_id, info.team)
-    if not await env.gateway.send_dm(info.discord_user_id, render_sub_offer_dm(info, team)):
+    reached = await env.gateway.send_dm(info.discord_user_id, render_sub_offer_dm(info, team))
+    channel_id = await db(subs.offer_notice_channel, offer_id)
+    if channel_id is not None and info.notice_message_id is None:
+        try:
+            message_id = await env.gateway.send_view(
+                channel_id,
+                render_sub_offer_notice(info, team),
+                ping_user_ids=[info.discord_user_id],
+            )
+            await db(subs.record_offer_notice, offer_id, channel_id, message_id)
+            reached = True
+        except ChannelGone:
+            logger.info("Offer channel is gone", extra={"offer": offer_id})
+    if not reached:
         await db(subs.fail_offer, offer_id)
+
+
+@effect("close_sub_offer")
+async def close_sub_offer(env: Env) -> None:
+    info = await db(subs.offer_info, int(env.effect.payload["offer_id"]))
+    if info.notice_channel_id is None or info.notice_message_id is None:
+        raise Skip("No mention was posted.")
+    with contextlib.suppress(ChannelGone):
+        await env.gateway.delete_message(info.notice_channel_id, info.notice_message_id)
+    await db(subs.record_offer_notice, info.offer_id, None, None)
 
 
 def _team_label(match_id: int, team: str) -> str:
@@ -250,27 +283,9 @@ def _team_label(match_id: int, team: str) -> str:
     return boards.team_name(captains[team]) if team in captains else ""
 
 
-def _auto_accept_offer(offer_id: int, player_id: int) -> None:
-    """Smoke tests only: a fake player in the queue takes any spot offered to them."""
-    try:
-        subs.answer_offer(offer_id, Player.objects.get(pk=player_id), True)
-    except DomainError:
-        logger.debug("Fake player could not sub in", extra={"offer": offer_id})
-
-
-def _auto_ready(match_id: int, player_id: int) -> None:
-    """Smoke tests only: fake players can't click, so they ready up as soon as they're gathered."""
-    try:
-        lobby.mark_ready(match_id, Player.objects.get(pk=player_id))
-    except DomainError:
-        logger.debug("Fake player could not ready", extra={"match": match_id})
-
-
 @effect("grant_access")
 async def grant_access(env: Env) -> None:
     user_id = int(env.effect.payload["discord_user_id"])
-    if dev.is_fake(user_id):
-        raise Skip("Fake player")
     resources = await db(effects.resources, env.match_id)
     team = await db(_team_of, env.match_id, user_id)
     kinds = (ResourceKind.TEXT, ResourceKind.LOBBY_VOICE, _team_voice_kind(team))
@@ -296,8 +311,6 @@ def _team_voice_kind(team: str) -> str:
 @effect("remove_player")
 async def remove_player(env: Env) -> None:
     user_id = int(env.effect.payload["discord_user_id"])
-    if dev.is_fake(user_id):
-        raise Skip("Fake player")
     resources = await db(effects.resources, env.match_id)
     voice_kinds = {
         ResourceKind.LOBBY_VOICE,
@@ -323,62 +336,56 @@ async def remove_player(env: Env) -> None:
 GRID_KINDS = (ResourceKind.PICKER_MESSAGE, ResourceKind.PICKER_MESSAGE_2)
 
 
-def _last_message(resources: dict[str, int]) -> int | None:
-    """The bottom of the flow: the last grid message, or the board when there is no grid."""
-    for kind in reversed(GRID_KINDS):
-        if kind in resources:
-            return resources[kind]
-    return resources.get(ResourceKind.BOARD_MESSAGE)
+def _match_flow(resources: dict[str, int], text_id: int) -> flow.FlowMessages:
+    return flow.FlowMessages(
+        text_id,
+        resources.get(ResourceKind.BOARD_MESSAGE),
+        tuple(resources.get(kind) for kind in GRID_KINDS),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _MatchFlowStore:
+    """A match's board and grid messages live in its resources."""
+
+    match_id: int
+
+    async def save_board(self, message_id: int) -> None:
+        await db(effects.record_resource, self.match_id, ResourceKind.BOARD_MESSAGE, message_id)
+
+    async def save_grid(self, index: int, message_id: int | None) -> None:
+        kind = GRID_KINDS[index]
+        if message_id is None:
+            await db(effects.mark_resource_deleted, self.match_id, kind)
+        else:
+            await db(effects.record_resource, self.match_id, kind, message_id)
+
+    async def delete_later(self, channel_id: int, message_id: int) -> None:
+        await db(_queue_delete, channel_id, message_id, match_id=self.match_id)
 
 
 async def _render_board(env: Env) -> None:
     resources = await db(effects.resources, env.match_id)
-    text_id = resources.get(ResourceKind.TEXT)
-    if text_id is None:
+    channel_id = await db(effects.board_channel, env.match_id)
+    if channel_id is None:
         raise Skip("Lobby channel isn't up yet; creating it renders the board.")
     state = await db(boards.board_state, env.match_id)
-    board = render_board(state)
-    grid = render_pickers(state)
-    board_id = resources.get(ResourceKind.BOARD_MESSAGE)
-    in_place = False
-    if board_id is not None and await env.gateway.latest_message_id(text_id) == _last_message(
-        resources
-    ):
-        try:
-            await env.gateway.edit_view(text_id, board_id, board)
-        except ChannelGone:
-            logger.info("The board was deleted; posting it again", extra={"match": env.match_id})
-        else:
-            in_place = True
-    if not in_place:
-        # Post before deleting, so the flow is never missing. Old buttons stay safe in between:
-        # they carry their step, and a stale click gets a polite refusal. Each old message goes
-        # as soon as its replacement is recorded, so a retry can't leave one behind.
-        message_id = await env.gateway.send_view(text_id, board)
-        await db(effects.record_resource, env.match_id, ResourceKind.BOARD_MESSAGE, message_id)
-        if board_id is not None:
-            await env.gateway.delete_message(text_id, board_id)
-    await _repost_grid(env, text_id, resources, grid)
-    if not in_place:
+    try:
+        reposted = await flow.render(
+            env.gateway,
+            _MatchFlowStore(env.match_id),
+            _match_flow(resources, channel_id),
+            render_board(state),
+            render_pickers(state),
+            log_extra={"match": env.match_id},
+        )
+    except ChannelGone:
+        if state.is_scrim:
+            # Its channel is gone, or was never ours to post in: free it rather than block it.
+            await db(scrims.close_gone, env.match_id)
+        raise
+    if reposted:
         await db(effects.cancel_board_moves, env.match_id)  # Chat now starts counting afresh.
-
-
-async def _repost_grid(env: Env, text_id: int, resources: dict[str, int], grid: list[Any]) -> None:
-    """Post the champion grid afresh below the board, then remove the old one.
-
-    The grid is never edited: an edited message gets an "(edited)" tag, which would split it.
-    Each old message goes as soon as its replacement is recorded, so a retry can't leave one
-    behind, and the new messages end up in order directly below the board.
-    """
-    for index, kind in enumerate(GRID_KINDS):
-        old_id = resources.get(kind)
-        if index < len(grid):
-            message_id = await env.gateway.send_view(text_id, grid[index])
-            await db(effects.record_resource, env.match_id, kind, message_id)
-        elif old_id is not None:
-            await db(effects.mark_resource_deleted, env.match_id, kind)
-        if old_id is not None:
-            await env.gateway.delete_message(text_id, old_id)
 
 
 @effect("render_board")
@@ -390,11 +397,16 @@ async def render_board_effect(env: Env) -> None:
 async def move_board(env: Env) -> None:
     """Chat has built up below the board, unless a state change has already moved it since."""
     resources = await db(effects.resources, env.match_id)
-    text_id = resources.get(ResourceKind.TEXT)
-    if text_id is None:
+    channel_id = await db(effects.board_channel, env.match_id)
+    if channel_id is None or ResourceKind.BOARD_MESSAGE not in resources:
         raise Skip("The channel has closed.")
-    last_id = _last_message(resources)
-    if last_id is not None and await env.gateway.latest_message_id(text_id) == last_id:
+    try:
+        bottom = await flow.at_bottom(env.gateway, _match_flow(resources, channel_id))
+    except ChannelGone:
+        if await db(scrims.is_host_channel, channel_id):
+            await db(scrims.close_gone, env.match_id)
+        raise
+    if bottom:
         raise Skip("The board is already last.")
     await _render_board(env)
 
@@ -429,6 +441,28 @@ async def render_queue_effect(env: Env) -> None:
     await db(community_service.save_wiring, community.pk, queue_message_id=message_id)
 
 
+@effect(prio.RENDER_KIND)
+async def render_prio_effect(env: Env) -> None:
+    """The /priolist message: edited in place, or posted again if someone deleted it."""
+    community = await db(_reload_community, env.community.pk)  # /priolist may have moved it.
+    channel_id = community.prio_channel_id
+    if not channel_id:
+        raise Skip("No priority list is set up.")
+    view = render_prio(await db(prio.prio_view, community.pk))
+    if community.prio_message_id:
+        try:
+            await env.gateway.edit_view(channel_id, community.prio_message_id, view)
+            return
+        except ChannelGone:
+            logger.warning("Priority list message is gone; posting a new one")
+    message_id = await env.gateway.send_view(channel_id, view)
+    await db(prio.save_display, community.pk, channel_id, message_id)
+
+
+def _reload_community(community_id: int) -> Community:
+    return Community.objects.get(pk=community_id)
+
+
 # --- Messages --------------------------------------------------------------------------------
 
 
@@ -437,7 +471,7 @@ async def ping(env: Env) -> None:
     await _notice(
         env,
         str(env.effect.payload["text"]),
-        user_ids=_real([int(uid) for uid in env.effect.payload["user_ids"]]),
+        user_ids=[int(uid) for uid in env.effect.payload["user_ids"]],
     )
 
 
@@ -446,19 +480,54 @@ async def ping_lobby(env: Env) -> None:
     await _notice(env, str(env.effect.payload["text"]))
 
 
-@effect("ping_staff")
-async def ping_staff(env: Env) -> None:
-    await _notice(
-        env,
-        f"Match #{env.match_id} {env.effect.payload['text']}",
-        role_id=env.community.staff_role_id,
-    )
+# --- Staff alerts --------------------------------------------------------------------------
+
+
+@effect(alerts.POST_KIND)
+async def post_staff_alert(env: Env) -> None:
+    """Post the card, pinging the roles that hold its area. A re-ping posts it again at the
+    bottom and only then deletes the old one, so the card is never missing."""
+    alert_id = int(env.effect.payload["alert_id"])
+    reping = bool(env.effect.payload.get("reping"))
+    card = await db(alerts.card, alert_id)
+    if card.status != AlertStatus.OPEN:
+        raise Skip("Alert already closed.")
+    target, old_channel, old_message = await db(alerts.where_to_post, alert_id)
+    if target is None:
+        raise Skip("No staff channel and no match channel to post the alert in.")
+    if reping or old_message is None:
+        message_id = await env.gateway.send_view(
+            target, render_alert(card), ping_role_ids=card.ping_role_ids
+        )
+        await db(alerts.record_card, alert_id, target, message_id)
+        if old_channel is not None and old_message is not None:
+            with contextlib.suppress(ChannelGone):
+                await env.gateway.delete_message(old_channel, old_message)
+    if not reping and card.kind in alerts.MATCH_NOTICE_KINDS and env.match is not None:
+        staff_channel = env.community.staff_channel_id
+        if staff_channel is not None and staff_channel == target:
+            with contextlib.suppress(Skip):
+                await _notice(env, match_notice(card))
+
+
+@effect(alerts.REFRESH_KIND)
+async def refresh_staff_alert(env: Env) -> None:
+    alert_id = int(env.effect.payload["alert_id"])
+    _target, channel_id, message_id = await db(alerts.where_to_post, alert_id)
+    if channel_id is None or message_id is None:
+        raise Skip("The card was never posted.")
+    try:
+        await env.gateway.edit_view(
+            channel_id, message_id, render_alert(await db(alerts.card, alert_id))
+        )
+    except ChannelGone as exc:
+        raise Skip("The card is gone.") from exc
 
 
 @effect("announce_lobby_code")
 async def announce_lobby_code(env: Env) -> None:
     match = await db(_reload, env.match_id)
-    members = _real(await db(_active_user_ids, match))
+    members = await db(_active_user_ids, match)
     await _notice(env, f"Lobby code: `{match.lobby_code}`", user_ids=members)
     resources = await db(effects.resources, env.match_id)
     for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
@@ -476,7 +545,7 @@ async def report_reminder(env: Env) -> None:
     await _notice(
         env,
         "if your game has ended, press the team that won on the board and add the scoreboard.",
-        user_ids=_real(captains),
+        user_ids=captains,
     )
 
 
@@ -524,8 +593,8 @@ async def create_team_voice(env: Env) -> None:
             env.guild_id,
             community.match_category_id,
             boards.team_name(captains.get(team, f"Match {env.match_id}"))[:100],
-            _real(members),
-            community.staff_role_id,
+            members,
+            await db(_match_staff_roles, community.pk),
         )
         await db(effects.record_resource, env.match_id, kind, channel_id)
     await db(_enqueue_team_moves, env.match_id, assignments)
@@ -535,8 +604,6 @@ async def create_team_voice(env: Env) -> None:
 async def team_move_player(env: Env) -> None:
     """In the lobby VC: move them. Anywhere else: DM an invite to their team's channel."""
     user_id = int(env.effect.payload["discord_user_id"])
-    if dev.is_fake(user_id):
-        raise Skip("Fake player")
     resources = await db(effects.resources, env.match_id)
     team_channel = resources.get(_team_voice_kind(str(env.effect.payload["team"])))
     if team_channel is None:
@@ -722,6 +789,34 @@ async def post_correction(env: Env) -> None:
 # --- Cleanup ---------------------------------------------------------------------------------
 
 
+@effect("restart_voice")
+async def restart_voice(env: Env) -> None:
+    """A restart: teams are gone, so everyone goes back to a lobby voice and the old match's team
+    channels are deleted. Runs in the successor's lane, before anyone new is gathered. Once teams
+    had formed the old lobby voice was gone, so the successor gets one of its own."""
+    old_id = int(env.effect.payload["old_id"])
+    lobby_voice = await db(effects.resource_id, env.match_id, ResourceKind.LOBBY_VOICE)
+    if lobby_voice is None:
+        community = env.community
+        lobby_voice = await env.gateway.create_voice_channel(
+            env.guild_id,
+            community.match_category_id,
+            f"Match {env.match_id} Lobby",
+            await db(_active_user_ids, env.required_match),
+            await db(_match_staff_roles, community.pk),
+        )
+        await db(effects.record_resource, env.match_id, ResourceKind.LOBBY_VOICE, lobby_voice)
+    resources = await db(effects.resources, old_id)
+    for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
+        channel_id = resources.get(kind)
+        if channel_id is None:
+            continue
+        for user_id in env.gateway.voice_member_ids(env.guild_id, channel_id):
+            await env.gateway.move_member(env.guild_id, user_id, lobby_voice)
+        await env.gateway.delete_channel(channel_id)
+        await db(effects.mark_resource_deleted, old_id, kind)
+
+
 @effect("cleanup_voice")
 async def cleanup_voice(env: Env) -> None:
     resources = await db(effects.resources, env.match_id)
@@ -735,6 +830,35 @@ async def cleanup_voice(env: Env) -> None:
                 await env.gateway.move_member(env.guild_id, user_id, waiting)
         await env.gateway.delete_channel(channel_id)
         await db(effects.mark_resource_deleted, env.match_id, kind)
+    if waiting:
+        # Everyone now in the Waiting Room goes on the back of the priority list, including
+        # anyone who was already there and so got no voice event for it.
+        await _reconcile_prio(env, waiting)
+
+
+async def _reconcile_prio(env: Env, waiting: int) -> None:
+    members = env.gateway.voice_members(env.guild_id, waiting)
+    if members is None:
+        # Discord hasn't sent the room. Treating that as empty would start everyone's grace.
+        logger.info("Waiting Room not loaded; priority list left as it is")
+        return
+    await db(prio.reconcile, env.community.pk, members)
+
+
+@effect(prio.RECONCILE_KIND)
+async def reconcile_prio_effect(env: Env) -> None:
+    """Someone left a live match while sitting in the Waiting Room: put them back on."""
+    community = await db(_reload_community, env.community.pk)
+    if not community.waiting_room_channel_id:
+        raise Skip("No Waiting Room.")
+    await _reconcile_prio(env, community.waiting_room_channel_id)
+
+
+@effect(prio.DELETE_KIND)
+async def delete_prio_message(env: Env) -> None:
+    """The list was posted afresh; the old message goes."""
+    payload = env.effect.payload
+    await env.gateway.delete_message(int(payload["channel_id"]), int(payload["message_id"]))
 
 
 @effect("delete_text_channel")
@@ -742,5 +866,49 @@ async def delete_text_channel(env: Env) -> None:
     channel_id = await db(effects.resource_id, env.match_id, ResourceKind.TEXT)
     if channel_id is None:
         raise Skip("Already deleted.")
+    if await db(scrims.is_host_channel, channel_id):
+        raise Skip("A public channel a scrim ran in: never the bot's to delete.")
     await env.gateway.delete_channel(channel_id)
     await db(effects.mark_resource_deleted, env.match_id, ResourceKind.TEXT)
+
+
+# --- Scrims ------------------------------------------------------------------------------------
+
+
+@effect(scrims.DELETE_KIND)
+async def delete_board(env: Env) -> None:
+    """A stopped scrim: delete its board and grid, as Bebot did. Runs after any render in flight,
+    so it reads the message IDs that render recorded."""
+    channel_id = await db(effects.board_channel, env.match_id)
+    if channel_id is None:
+        raise Skip("No channel.")
+    resources = await db(effects.resources, env.match_id)
+    store = _MatchFlowStore(env.match_id)
+    for index, kind in reversed(list(enumerate(GRID_KINDS))):
+        message_id = resources.get(kind)
+        if message_id is not None:
+            with contextlib.suppress(ChannelGone):
+                await env.gateway.delete_message(channel_id, message_id)
+            await store.save_grid(index, None)
+    board_id = resources.get(ResourceKind.BOARD_MESSAGE)
+    if board_id is not None:
+        with contextlib.suppress(ChannelGone):
+            await env.gateway.delete_message(channel_id, board_id)
+        await db(effects.mark_resource_deleted, env.match_id, ResourceKind.BOARD_MESSAGE)
+
+
+def _queue_delete(channel_id: int, message_id: int, *, match_id: int) -> None:
+    """A delete that failed mid-render, retried as a job of its own in the match's lane."""
+    match = Match.objects.select_related("community").get(pk=match_id)
+    add_effect(
+        match.community,
+        "delete_message",
+        {"channel_id": channel_id, "message_id": message_id},
+        match=match,
+    )
+
+
+@effect("delete_message")
+async def delete_message_effect(env: Env) -> None:
+    payload = env.effect.payload
+    await env.gateway.delete_message(int(payload["channel_id"]), int(payload["message_id"]))

@@ -15,7 +15,9 @@ from league.models import (
     CaptainOverride,
     CaptainVote,
     Champion,
+    ChannelPing,
     Community,
+    CommunityRoleGrant,
     DraftAction,
     DraftModeVersion,
     EarlyLeave,
@@ -31,12 +33,14 @@ from league.models import (
     PlayerAlias,
     PlayerMatchStat,
     PlayerRating,
+    PrioEntry,
     QueueEntry,
     RatingEvent,
     RatingRun,
     ResultSubmission,
     ScoreboardRead,
     Season,
+    StaffAlert,
     StrikeAdjustment,
 )
 from league.services import modes
@@ -69,7 +73,7 @@ class ReadOnlyInline(admin.TabularInline):
 
 @admin.register(Champion)
 class ChampionAdmin(admin.ModelAdmin):
-    list_display = ("name", "id", "is_enabled", "updated_at")
+    list_display = ("name", "id", "unicode_emoji", "is_enabled", "updated_at")
     list_editable = ("is_enabled",)
     list_filter = ("is_enabled",)
     search_fields = ("name", "aliases")
@@ -117,6 +121,15 @@ class DraftModeVersionAdmin(admin.ModelAdmin):
         obj._state.adding = False
 
 
+class RoleGrantInline(admin.TabularInline):
+    """Staff areas by Discord role, as /permissions grants them."""
+
+    model = CommunityRoleGrant
+    extra = 0
+    fields = ("role_id", "area", "granted_by_discord_id", "created_at")
+    readonly_fields = ("granted_by_discord_id", "created_at")
+
+
 @admin.register(Community)
 class CommunityAdmin(admin.ModelAdmin):
     list_display = (
@@ -126,6 +139,7 @@ class CommunityAdmin(admin.ModelAdmin):
         "max_concurrent_matches",
         "score_ocr",
     )
+    inlines = (RoleGrantInline,)
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
@@ -169,6 +183,13 @@ class PlayerAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
+
+
+@admin.register(StaffAlert)
+class StaffAlertAdmin(ReadOnlyAdmin):
+    list_display = ("created_at", "community", "match", "kind", "area", "status", "closed_by")
+    list_filter = ("status", "kind", "area")
+    search_fields = ("text", "outcome")
 
 
 @admin.register(Penalty)
@@ -230,7 +251,7 @@ class ResultInline(ReadOnlyInline):
 @admin.register(Match)
 class MatchAdmin(ReadOnlyAdmin):
     list_display = ("id", "status", "winner", "mode_version", "created_at", "ended_at")
-    list_filter = ("status", "season")
+    list_filter = ("kind", "status", "season")
     inlines = (
         ParticipantInline,
         DraftActionInline,
@@ -297,7 +318,7 @@ class MatchResourceAdmin(ReadOnlyAdmin):
 
 @admin.register(OutboxEffect)
 class OutboxEffectAdmin(ReadOnlyAdmin):
-    list_display = ("id", "kind", "match", "status", "attempts", "run_after", "last_error")
+    list_display = ("id", "kind", "match", "lane", "status", "attempts", "run_after", "last_error")
     list_filter = ("status", "kind")
 
 
@@ -369,3 +390,19 @@ class ApiMatchCheckAdmin(ReadOnlyAdmin):
 class EarlyLeaveAdmin(ReadOnlyAdmin):
     list_display = ("match", "leaver", "requested_by", "status", "resolved_by", "created_at")
     list_filter = ("status",)
+
+
+@admin.register(PrioEntry)
+class PrioEntryAdmin(ReadOnlyAdmin):
+    """The voice priority list. Read-only: it follows the Waiting Room; use /removeprio."""
+
+    list_display = ("display_name", "community", "discord_user_id", "queued_at", "grace_until")
+    list_filter = ("community",)
+
+
+@admin.register(ChannelPing)
+class ChannelPingAdmin(ReadOnlyAdmin):
+    """Named pings (/pingchannel). Managed from Discord, so their mentions are checked."""
+
+    list_display = ("name", "community", "channel_id", "timer_minutes", "last_ping_at")
+    list_filter = ("community",)

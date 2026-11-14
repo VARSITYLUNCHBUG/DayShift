@@ -41,12 +41,22 @@ def save_wiring(community_id: int, **ids: int | None) -> None:
         "results_channel_id",
         "archive_channel_id",
         "match_category_id",
-        "staff_role_id",
+        "error_channel_id",
+        "staff_channel_id",
     }
     unknown = set(ids) - allowed
     if unknown:
         raise ValueError(f"Unknown wiring fields: {sorted(unknown)}")
     Community.objects.filter(pk=community_id).update(**ids)
+
+
+def error_channel(guild_id: int) -> int | None:
+    """Where this server's error summaries go (/seterrorchannel), if anywhere."""
+    return (
+        Community.objects.filter(discord_guild_id=guild_id)
+        .values_list("error_channel_id", flat=True)
+        .first()
+    )
 
 
 @transaction.atomic

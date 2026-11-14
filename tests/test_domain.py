@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from league.domain import engine
 from league.domain.draft_plan import build_plan, team_for_role
 from league.domain.engine import (
     CaptainCandidate,
@@ -24,7 +25,6 @@ from league.domain.mode_schema import DraftMode, ModeValidationError, parse_mode
 
 PRESETS = Path(__file__).resolve().parent.parent / "presets"
 THREE_BAN = yaml.safe_load((PRESETS / "threeban_1win_2026.yaml").read_text(encoding="utf-8"))
-DCS = yaml.safe_load((PRESETS / "dcs_s3_2ban.yaml").read_text(encoding="utf-8"))
 BEBOT = yaml.safe_load((PRESETS / "bebot_2ban.yaml").read_text(encoding="utf-8"))
 
 
@@ -35,17 +35,16 @@ def body(**changes: object) -> dict[str, object]:
 # --- Mode schema ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("raw", [BEBOT, THREE_BAN, DCS])
+@pytest.mark.parametrize("raw", [BEBOT, THREE_BAN])
 def test_presets_parse(raw: dict[str, object]) -> None:
     assert isinstance(parse_mode(raw), DraftMode)
 
 
-def test_bebot_preset_is_dcs_order_at_40_seconds() -> None:
+def test_bebot_preset_timers() -> None:
     mode = parse_mode(BEBOT)
     assert mode.captains.vote_seconds == 45
-    assert mode.champion_draft.side_seconds == 20
+    assert mode.champion_draft.coinflip_seconds == 20
     assert mode.champion_draft.seconds == 40
-    assert BEBOT["champion_draft"]["steps"] == DCS["champion_draft"]["steps"]
 
 
 @pytest.mark.parametrize(
@@ -91,8 +90,8 @@ def test_three_ban_expands_to_exact_1win_table() -> None:
     ]
 
 
-def test_dcs_preset_matches_rulebook_16_steps() -> None:
-    plan = build_plan(parse_mode(DCS))
+def test_bebot_preset_runs_its_16_steps() -> None:
+    plan = build_plan(parse_mode(BEBOT))
     champion_steps = "".join(
         ("b" if step.action == "ban" else "p") + step.role[0].upper() for step in plan[10:]
     )
@@ -212,7 +211,7 @@ def test_transitions_forbid_skipping_phases() -> None:
     assert can_transition(Status.READY_CHECK, Status.CAPTAIN_PHASE)
     assert not can_transition(Status.READY_CHECK, Status.PLAYER_DRAFT)
     assert not can_transition(Status.PLAYER_DRAFT, Status.CHAMPION_DRAFT)
-    assert can_transition(Status.PLAYER_DRAFT, Status.SIDE_SELECT)
+    assert can_transition(Status.PLAYER_DRAFT, Status.COINFLIP)
     assert not can_transition(Status.IN_PROGRESS, Status.COMPLETED)
     assert can_transition(Status.AWAITING_CONFIRMATION, Status.COMPLETED)
 
@@ -220,3 +219,41 @@ def test_transitions_forbid_skipping_phases() -> None:
 def test_team_for_role() -> None:
     assert team_for_role("first", "B") == "B"
     assert team_for_role("second", "B") == "A"
+
+
+# --- Captain coinflip ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("winner_choice", "loser_choice", "expected"),
+    [
+        (engine.FIRST_PICK, engine.HIDDEN_KING, ("am", "hk", "am")),
+        (engine.FIRST_PICK, engine.ARCHMOTHER, ("hk", "am", "hk")),
+        (engine.LAST_PICK, engine.HIDDEN_KING, ("am", "hk", "hk")),
+        (engine.LAST_PICK, engine.ARCHMOTHER, ("hk", "am", "am")),
+        (engine.HIDDEN_KING, engine.FIRST_PICK, ("hk", "am", "am")),
+        (engine.HIDDEN_KING, engine.LAST_PICK, ("hk", "am", "hk")),
+        (engine.ARCHMOTHER, engine.FIRST_PICK, ("am", "hk", "hk")),
+        (engine.ARCHMOTHER, engine.LAST_PICK, ("am", "hk", "am")),
+    ],
+)
+def test_every_coinflip_pair(
+    winner_choice: str, loser_choice: str, expected: tuple[str, str, str]
+) -> None:
+    """(winner's side, loser's side, side that goes first)."""
+    assert engine.settle_coinflip(winner_choice, loser_choice) == expected
+
+
+def test_the_coinflip_sets_sides_and_first_pick_by_team() -> None:
+    # Team B won and took Last Pick; team A then took The Archmother. B is Hidden King, and A,
+    # whose side wasn't chosen to go last, bans and picks first.
+    assert engine.apply_coinflip("B", engine.LAST_PICK, engine.ARCHMOTHER) == ("B", "A")
+    assert engine.apply_coinflip("A", engine.HIDDEN_KING, engine.FIRST_PICK) == ("A", "B")
+
+
+def test_a_timed_out_coinflip_choice_is_one_on_offer_and_reproducible() -> None:
+    first = engine.auto_coinflip_choice(7, "")
+    assert first in engine.coinflip_options("")
+    assert first == engine.auto_coinflip_choice(7, "")
+    second = engine.auto_coinflip_choice(7, engine.FIRST_PICK)
+    assert second in engine.SIDE_CHOICES

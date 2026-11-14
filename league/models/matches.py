@@ -16,7 +16,7 @@ class MatchStatus(models.TextChoices):
     READY_CHECK = S.READY_CHECK, "Ready check"
     CAPTAIN_PHASE = S.CAPTAIN_PHASE, "Captain vote"
     PLAYER_DRAFT = S.PLAYER_DRAFT, "Player draft"
-    SIDE_SELECT = S.SIDE_SELECT, "Choosing sides"
+    COINFLIP = S.COINFLIP, "Captain coinflip"
     CHAMPION_DRAFT = S.CHAMPION_DRAFT, "Champion draft"
     LOBBY_CODE = S.LOBBY_CODE, "Lobby code"
     IN_PROGRESS = S.IN_PROGRESS, "In progress"
@@ -24,6 +24,15 @@ class MatchStatus(models.TextChoices):
     DISPUTED = S.DISPUTED, "Disputed"
     COMPLETED = S.COMPLETED, "Completed"
     VOIDED = S.VOIDED, "Voided"
+    CAPTAIN_CLAIM = S.CAPTAIN_CLAIM, "Scrim: claiming sides"
+    READY_TO_DRAFT = S.READY_TO_DRAFT, "Scrim: ready to draft"
+    DRAFTED = S.DRAFTED, "Scrim: drafted"
+
+
+class MatchKind(models.TextChoices):
+    RANKED = "ranked", "Ranked"
+    # /startdraft and /captains_coinflip: the champion draft only, in a public channel, unrated.
+    SCRIM = "scrim", "Scrim"
 
 
 class Source(models.TextChoices):
@@ -40,6 +49,19 @@ class Match(models.Model):
         "league.DraftModeVersion", on_delete=models.PROTECT, related_name="+"
     )
     status = models.CharField(max_length=24, choices=MatchStatus.choices)
+    kind = models.CharField(max_length=8, choices=MatchKind.choices, default=MatchKind.RANKED)
+    # A scrim runs in the public channel it was started in. Never one of the match's own
+    # resources, so nothing ever deletes it.
+    host_channel_id = models.BigIntegerField(null=True, blank=True)
+    # Whether the bot can use custom hero emojis there (Use External Emojis).
+    custom_emojis = models.BooleanField(default=True)
+    started_by = models.ForeignKey(
+        "league.Player", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    # A restart: the match this one took over from, keeping its channels and players.
+    restarted_from = models.OneToOneField(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="restarted_as"
+    )
     version = models.PositiveIntegerField(default=0)
     step_index = models.PositiveSmallIntegerField(default=0)
     deadline_at = models.DateTimeField(null=True, blank=True)
@@ -48,6 +70,10 @@ class Match(models.Model):
     player_first_pick = models.CharField(max_length=1, choices=Team.choices, blank=True)
     champion_first_pick = models.CharField(max_length=1, choices=Team.choices, blank=True)
     hidden_king_team = models.CharField(max_length=1, choices=Team.choices, blank=True)
+    # The captain coinflip after the player draft: its winner's team, then each captain's choice.
+    coinflip_winner = models.CharField(max_length=1, choices=Team.choices, blank=True)
+    coinflip_winner_choice = models.CharField(max_length=12, blank=True)
+    coinflip_loser_choice = models.CharField(max_length=12, blank=True)
     lobby_code = models.CharField(max_length=32, blank=True)
     lobby_code_host = models.ForeignKey(
         "league.Player", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
@@ -78,6 +104,17 @@ class Match(models.Model):
             models.Index(fields=("community", "status"), name="match_community_status_idx"),
             models.Index(fields=("season", "ended_at", "id"), name="match_season_timeline_idx"),
         ]
+        constraints = [
+            # One live scrim per channel. Also the index chat lookups use.
+            models.UniqueConstraint(
+                fields=("host_channel_id",),
+                condition=Q(
+                    kind="scrim",
+                    status__in=("captain_claim", "coinflip", "ready_to_draft", "champion_draft"),
+                ),
+                name="uniq_live_scrim_per_channel",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"Match #{self.pk} ({self.status})"
@@ -103,6 +140,9 @@ class MatchParticipant(models.Model):
     # Blank means the player is on the roster. Rated rosters are `team` set and this blank.
     removed_reason = models.CharField(max_length=16, choices=RemovedReason.choices, blank=True)
     removed_at = models.DateTimeField(null=True, blank=True)
+    # When they were first in one of the match's voice channels. Until then, joining the Waiting
+    # Room sends them in; after that, where they go in voice is up to them.
+    voice_joined_at = models.DateTimeField(null=True, blank=True)
     # Left the game while it was on: subbed out, voided as an early leaver, or abandoned per
     # deadlock-api.
     left_early = models.BooleanField(default=False)

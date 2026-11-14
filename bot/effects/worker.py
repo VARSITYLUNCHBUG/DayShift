@@ -1,7 +1,8 @@
-"""Runs outbox effects, in order per match, with retry and backoff.
+"""Runs outbox effects, in order per lane, with retry and backoff.
 
 Each match gets its own lane, so a slow Discord call in one match (deleting voice channels,
-uploading a screenshot, waiting out a rate limit) never holds up another match's board.
+uploading a screenshot, waiting out a rate limit) never holds up another match's board. Work
+outside a match is split the same way (see `effects.lane_key`).
 """
 
 from __future__ import annotations
@@ -16,9 +17,10 @@ import discord
 from bot.db import db
 from bot.effects.gateway import ChannelGone, Gateway
 from bot.effects.handlers import HANDLERS, Env, Skip
+from league import log_context
 from league.models import OutboxEffect
 from league.models.outbox import EffectStatus
-from league.services import effects, lobby
+from league.services import effects, lobby, scrims
 
 logger = logging.getLogger(__name__)
 
@@ -31,22 +33,22 @@ class EffectWorker:
         self.gateway = gateway
         # Called when a lane finishes, since its effects may have queued more work.
         self.on_lane_done = on_lane_done
-        # One running task per match (the None key holds effects that belong to no match).
-        self._lanes: dict[int | None, asyncio.Task[int]] = {}
+        # One running task per lane: a match ID, or a key for work outside any match.
+        self._lanes: dict[effects.Lane, asyncio.Task[int]] = {}
 
     @property
-    def busy_matches(self) -> set[int | None]:
+    def busy_matches(self) -> set[effects.Lane]:
         return set(self._lanes)
 
     async def dispatch(self) -> int:
-        """Start a lane for each match that has due effects and no lane running. Doesn't wait.
+        """Start a task for each lane that has due effects and no task running. Doesn't wait.
 
-        A match whose lane is still busy is left alone: its due effects are picked up once the
-        lane finishes, which keeps that match's effects in order.
+        A lane that is still busy is left alone: its due effects are picked up once its task
+        finishes, which keeps that lane's effects in order.
         """
         started = 0
         for group in await db(effects.due_by_match):
-            key = group[0].match_id
+            key = effects.lane_of(group[0])
             if key in self._lanes:
                 continue
             task = asyncio.create_task(self._run_group(group), name=f"effects:{key}")
@@ -63,11 +65,11 @@ class EffectWorker:
         counts = await asyncio.gather(*self._lanes.values())
         return sum(counts)
 
-    def _lane_done(self, key: int | None, task: asyncio.Task[int]) -> None:
+    def _lane_done(self, key: effects.Lane, task: asyncio.Task[int]) -> None:
         if self._lanes.get(key) is task:
             del self._lanes[key]
         if not task.cancelled() and (error := task.exception()) is not None:
-            logger.error("Effect lane crashed", extra={"match": key}, exc_info=error)
+            logger.error("Effect lane crashed", extra={"lane": key}, exc_info=error)
         if self.on_lane_done is not None:
             self.on_lane_done()
 
@@ -86,10 +88,16 @@ class EffectWorker:
         for effect in group:
             ran += 1
             if not await self._run_effect(effect):
-                break  # Keep this match's effects in order: later ones wait for the retry.
+                break  # Keep this lane's effects in order: later ones wait for the retry.
         return ran
 
     async def _run_effect(self, effect: OutboxEffect) -> bool:
+        # So an error is posted to its own server's error channel, and nobody else's.
+        guild = getattr(effect.community, "discord_guild_id", None)
+        with log_context.bind(guild=guild, match=effect.match_id, effect=effect.pk):
+            return await self._run_bound(effect)
+
+    async def _run_bound(self, effect: OutboxEffect) -> bool:
         handler = HANDLERS.get(effect.kind)
         if handler is None:
             await db(effects.mark_failed, effect.pk, f"No handler for {effect.kind}")
@@ -110,7 +118,10 @@ class EffectWorker:
                 return True
             return await self._retry(effect, f"{exc.status} {exc.code}: {exc.text}")
         except Exception as exc:
-            logger.exception("Effect failed", extra={"kind": effect.kind, "effect": effect.pk})
+            # A warning: it will be retried. Only failing for good is logged as an error.
+            logger.warning(
+                "Effect raised", extra={"kind": effect.kind, "effect": effect.pk}, exc_info=True
+            )
             return await self._retry(effect, repr(exc))
         await db(effects.mark_done, effect.pk)
         return True
@@ -140,3 +151,7 @@ class EffectWorker:
         if effect.kind == "create_lobby" and effect.match_id is not None:
             # With no lobby, nobody can continue: cancel and put everyone back in line.
             await db(lobby.fail_lobby_setup, effect.match_id, "Discord couldn't create the lobby")
+        if effect.kind == "render_board" and effect.match_id is not None:
+            # A scrim nobody can see would hold its channel: close it so they can start again.
+            # A failed move doesn't count: the board is still there, just higher up.
+            await db(scrims.close_gone, effect.match_id)

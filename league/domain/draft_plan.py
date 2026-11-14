@@ -39,6 +39,15 @@ def player_draft_length(mode: DraftMode) -> int:
     return len(mode.player_draft.order)
 
 
+def champion_plan(mode: DraftMode) -> tuple[PlanStep, ...]:
+    """Just the bans and picks, indexed from 0: what a scrim drafts."""
+    champion_steps = build_plan(mode)[player_draft_length(mode) :]
+    return tuple(
+        PlanStep(index, step.action, step.role, step.seconds)
+        for index, step in enumerate(champion_steps)
+    )
+
+
 def team_for_role(role: Role, first_team: str) -> str:
     """Map a mode's first/second role to a concrete team, A or B."""
     if first_team not in {"A", "B"}:

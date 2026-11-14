@@ -9,15 +9,16 @@ from django.db import transaction
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.models import Match, MatchResult, Player, ResultSubmission
+from league.models.alerts import AlertKind
 from league.models.matches import Source
+from league.models.permissions import Area
 from league.models.results import Verdict
 from league.models.scoreboards import AwardSource
-from league.services import api_results, ratings, standing
+from league.services import alerts, api_results, ratings, standing
 from league.services import awards as award_service
 from league.services.boards import outcome_label
 from league.services.common import (
     add_effect,
-    clear_notices,
     close_subs,
     lock_community,
     lock_match,
@@ -61,10 +62,6 @@ def check_can_report(match_id: int, player: Player) -> None:
     _captain_team(match, player)
     if match.submissions.filter(captain=player).exists():
         raise InvalidAction("You've already responded for this match.")
-
-
-def _ping_staff(match: Match, text: str) -> None:
-    add_effect(match.community, "ping_staff", {"text": text}, match=match)
 
 
 def _create_submission(
@@ -259,7 +256,7 @@ def _dispute(match: Match, actor: Player | None, reason: str) -> None:
         deadline_at=seconds_from_now(STAFF_REPING_SECONDS),
     )
     save_transition(match)
-    _ping_staff(match, f"needs a decision: {reason}")
+    alerts.raise_alert(match.community, AlertKind.DISPUTE, Area.DISPUTES, reason, match=match)
     render_board(match)
 
 
@@ -292,8 +289,7 @@ def on_disputed_timeout(match: Match) -> None:
     match.deadline_at = seconds_from_now(STAFF_REPING_SECONDS)
     match.version += 1
     match.save(update_fields=["deadline_at", "version"])
-    clear_notices(match)  # One open request for staff, however long it waits.
-    _ping_staff(match, "still needs a decision.")
+    alerts.reping_dispute(match)
 
 
 def _finalise(
@@ -319,6 +315,9 @@ def _finalise(
     transition(match, Status.COMPLETED, source=source, actor=actor)
     save_transition(match, "winner", "ended_at")
     ratings.apply_live_result(match, outcome, revision)
+    alerts.settle_for_match(
+        match, (AlertKind.DISPUTE,), actor, f"{outcome_label(match, outcome)} won"
+    )
     _announce_strikes(match, on_roster, strikes_before)
     match.participants.filter(is_active=True).update(is_active=False)
     add_effect(community, "post_results", match=match, dedupe_key=f"post_results:{match.pk}")

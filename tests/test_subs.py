@@ -30,6 +30,7 @@ from tests.helpers import (
     image,
     ready_all,
     run_player_draft,
+    settle_coinflip_for,
     to_champion_draft,
     to_in_progress,
     vote_captains,
@@ -401,7 +402,7 @@ def test_captain_subbing_out_hands_the_role_to_the_sub(popped: Match) -> None:
     assert captain_of(match, "A").player == sub
     assert match.participants.get(player=sub, is_active=True).is_captain
     run_player_draft(match)
-    assert fresh(match).status == Status.SIDE_SELECT
+    assert fresh(match).status == Status.COINFLIP
 
 
 def test_a_sub_during_the_vote_drops_the_leavers_votes(
@@ -419,17 +420,16 @@ def test_a_sub_during_the_vote_drops_the_leavers_votes(
     lobby.cast_captain_votes(match.pk, sub, [sub.pk])
 
 
-def test_a_sub_during_the_side_claim_resumes_it(voting: Match) -> None:
+def test_a_sub_during_the_coinflip_resumes_it(voting: Match) -> None:
     match = run_player_draft(vote_captains(voting))
     leaving = non_captain(match)
     request = self_sub(match, leaving)
     sub = make_player(61)
     subs.answer_offer(invite(request, leaving, sub).pk, sub, True)
     match = fresh(match)
-    assert match.status == Status.SIDE_SELECT
+    assert match.status == Status.COINFLIP
     assert match.deadline_at is not None
-    draft.claim_side(match.pk, captain_of(match, "A").player, "hk")
-    assert fresh(match).status == Status.CHAMPION_DRAFT
+    assert settle_coinflip_for(match).status == Status.CHAMPION_DRAFT
 
 
 def test_lobby_host_subbing_out_makes_the_sub_host(popped: Match) -> None:
@@ -506,3 +506,137 @@ def test_downtime_extends_sub_deadlines(popped: Match, players: list[Player], cl
     deadlines.tick()
     request.refresh_from_db()
     assert request.status == SubStatus.OPEN
+
+
+# --- Openings go to the priority list first ------------------------------------------------------
+
+
+def _waiting_room(
+    community: Community, people: list[Player], *, grace: Player | None = None
+) -> None:
+    """Put them on the priority list in this order, as if they'd joined the Waiting Room."""
+    from datetime import timedelta
+
+    from league.models import PrioEntry
+    from league.services.common import now
+
+    start = now() - timedelta(minutes=30)
+    for index, player in enumerate(people):
+        PrioEntry.objects.create(
+            community=community,
+            discord_user_id=player.discord_user_id,
+            display_name=player.display_name,
+            queued_at=start + timedelta(minutes=index),
+            grace_until=now() + timedelta(minutes=5) if player == grace else None,
+        )
+
+
+def test_an_opening_goes_to_the_priority_list_before_the_queue(
+    popped: Match, players: list[Player], league: Community
+) -> None:
+    stepped_out, longest, second = make_player(70), make_player(71), make_player(72)
+    _waiting_room(league, [stepped_out, players[0], longest, second], grace=stepped_out)
+    queued = queue_up(league, range(80, 81))[0]
+    match = in_draft(popped)
+    leaving = non_captain(match)
+    request = self_sub(match, leaving)
+    subs.offer_to_queue(request.pk, leaving)
+    # Not the one who stepped out, nor someone already in this match: the longest wait.
+    offer = SubOffer.objects.get(request=request, status=OfferStatus.PENDING)
+    assert offer.player == longest and offer.source == OfferSource.PRIO
+    subs.answer_offer(offer.pk, longest, False)
+    assert SubOffer.objects.get(request=request, status=OfferStatus.PENDING).player == second
+    subs.answer_offer(SubOffer.objects.get(player=second).pk, second, False)
+    offer = SubOffer.objects.get(request=request, status=OfferStatus.PENDING)
+    assert offer.player == queued and offer.source == OfferSource.QUEUE
+
+
+def test_each_person_is_offered_one_spot_at_a_time(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    only = queue_up(league, range(80, 81))[0]
+    for player in players[:10]:
+        lobby.mark_ready(popped.pk, player)
+    clock.advance(181)
+    deadlines.tick()
+    pending = SubOffer.objects.filter(request__match=popped, status=OfferStatus.PENDING)
+    assert [offer.player for offer in pending] == [only]  # The second spot waits for someone.
+    assert SubRequest.objects.filter(match=popped, status=SubStatus.OPEN).count() == 2
+
+
+def test_a_ready_check_spot_is_never_penalised_twice(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    for player in players[:11]:
+        lobby.mark_ready(popped.pk, player)
+    clock.advance(181)
+    deadlines.tick()
+    clock.advance(mode_of(popped).ready_check.refill_seconds + 1)
+    deadlines.tick()
+    assert fresh(popped).status == Status.VOIDED
+    assert Penalty.objects.filter(player=players[11]).count() == 1  # For missing it, only.
+
+
+# --- A restart, when nobody takes the seat before the game ---------------------------------------
+
+
+def _expire_sub_out(match: Match, leaving: Player, clock: Clock) -> Match:
+    self_sub(match, leaving)
+    clock.advance(mode_of(match).subs.max_wait_seconds + 1)
+    deadlines.tick()
+    return fresh(match)
+
+
+def test_an_unfilled_sub_out_in_the_draft_restarts_the_lobby(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    match = in_draft(popped)
+    first = captain_of(match, match.player_first_pick).player
+    target = match.participants.filter(is_active=True, team="").order_by("id").first()
+    draft.pick_player(match.pk, first, match.step_index, target.player_id)
+    picks_before = list(match.draft_actions.values_list("pk", "target_player_id"))
+    leaving = non_captain(match)
+    old = _expire_sub_out(fresh(match), leaving, clock)
+
+    assert old.status == Status.VOIDED
+    # The draft history is append-only: the old match keeps it exactly as it was.
+    assert list(old.draft_actions.values_list("pk", "target_player_id")) == picks_before
+    successor = Match.objects.get(restarted_from=old)
+    assert successor.status == Status.READY_CHECK and successor.held_seconds is not None
+    stayed = successor.participants.filter(is_active=True)
+    assert stayed.count() == 11 and not stayed.filter(player=leaving).exists()
+    assert not stayed.filter(ready_at__isnull=True).exists()
+    assert not stayed.filter(is_captain=True).exists()  # A fresh captain vote, once full.
+    assert Penalty.objects.filter(player=leaving, kind=PenaltyKind.DODGE).exists()
+    assert not QueueEntry.objects.filter(player__in=[p.player for p in stayed]).exists()
+
+    spare = queue_up(league, range(90, 91))[0]
+    deadlines.tick()  # The empty seat is offered to whoever turns up.
+    offer = SubOffer.objects.get(request__match=successor, status=OfferStatus.PENDING)
+    assert offer.player == spare
+    subs.answer_offer(offer.pk, spare, True)
+    successor = fresh(successor)
+    assert successor.status == Status.CAPTAIN_PHASE
+    assert successor.participants.filter(is_active=True).count() == 12
+
+
+def test_a_restart_nobody_fills_is_cancelled_and_requeued(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    match = in_draft(popped)
+    leaving = non_captain(match)
+    old = _expire_sub_out(match, leaving, clock)
+    successor = Match.objects.get(restarted_from=old)
+    clock.advance(mode_of(successor).ready_check.refill_seconds + 1)
+    deadlines.tick()
+    assert fresh(successor).status == Status.VOIDED
+    assert QueueEntry.objects.count() == 11 and not QueueEntry.objects.filter(player=leaving)
+
+
+def test_a_sub_out_before_captains_are_set_still_cancels(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    leaving = players[3]
+    match = _expire_sub_out(popped, leaving, clock)  # Still in the ready check.
+    assert match.status == Status.VOIDED
+    assert not Match.objects.filter(restarted_from=match).exists()

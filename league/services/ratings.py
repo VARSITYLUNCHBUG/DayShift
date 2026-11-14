@@ -216,17 +216,18 @@ def mvp_history(
 def _tell_staff_about_farming(match: Match, frozen: frozenset[int]) -> None:
     if not frozen:
         return
-    from league.services.common import add_effect
+    from league.models.alerts import AlertKind
+    from league.models.permissions import Area
+    from league.services import alerts
 
     names = dict(Player.objects.filter(pk__in=frozen).values_list("pk", "display_name"))
     for player_id in sorted(frozen):
-        add_effect(
+        alerts.raise_alert(
             match.community,
-            "ping_staff",
-            {
-                "text": f"froze {names.get(player_id, player_id)}'s award share: their MVP rate "
-                "is far above chance. Worth a look; it lifts by itself if the rate falls."
-            },
+            AlertKind.AWARD_FREEZE,
+            Area.RATINGS,
+            f"{names.get(player_id, player_id)}'s award share is frozen: their MVP rate is far "
+            "above chance. Worth a look; it lifts by itself if the rate falls.",
             match=match,
             dedupe_key=f"award_freeze:{match.season_id}:{player_id}",
         )

@@ -19,7 +19,7 @@ class Status:
     READY_CHECK = "ready_check"
     CAPTAIN_PHASE = "captain_phase"
     PLAYER_DRAFT = "player_draft"
-    SIDE_SELECT = "side_select"
+    COINFLIP = "coinflip"
     CHAMPION_DRAFT = "champion_draft"
     LOBBY_CODE = "lobby_code"
     IN_PROGRESS = "in_progress"
@@ -27,15 +27,19 @@ class Status:
     DISPUTED = "disputed"
     COMPLETED = "completed"
     VOIDED = "voided"
+    # Scrims only: claiming a side, waiting for Start Draft after the coinflip, and done at GLHF.
+    CAPTAIN_CLAIM = "captain_claim"
+    READY_TO_DRAFT = "ready_to_draft"
+    DRAFTED = "drafted"
 
 
-TERMINAL = frozenset({Status.COMPLETED, Status.VOIDED})
+TERMINAL = frozenset({Status.COMPLETED, Status.VOIDED, Status.DRAFTED})
 LIVE = frozenset(
     {
         Status.READY_CHECK,
         Status.CAPTAIN_PHASE,
         Status.PLAYER_DRAFT,
-        Status.SIDE_SELECT,
+        Status.COINFLIP,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,
@@ -43,12 +47,19 @@ LIVE = frozenset(
         Status.DISPUTED,
     }
 )
+# A scrim holds its channel while it's in one of these.
+SCRIM_LIVE = frozenset(
+    {Status.CAPTAIN_CLAIM, Status.COINFLIP, Status.READY_TO_DRAFT, Status.CHAMPION_DRAFT}
+)
+# Every status with a timer the poller runs, ranked or scrim.
+TIMED = LIVE | SCRIM_LIVE
+SIDE_LABELS = {"hk": "The Hidden King", "am": "The Archmother"}
 
 _TRANSITIONS: dict[str, frozenset[str]] = {
     Status.READY_CHECK: frozenset({Status.CAPTAIN_PHASE, Status.VOIDED}),
     Status.CAPTAIN_PHASE: frozenset({Status.PLAYER_DRAFT, Status.VOIDED}),
-    Status.PLAYER_DRAFT: frozenset({Status.SIDE_SELECT, Status.VOIDED}),
-    Status.SIDE_SELECT: frozenset({Status.CHAMPION_DRAFT, Status.VOIDED}),
+    Status.PLAYER_DRAFT: frozenset({Status.COINFLIP, Status.VOIDED}),
+    Status.COINFLIP: frozenset({Status.CHAMPION_DRAFT, Status.VOIDED}),
     Status.CHAMPION_DRAFT: frozenset({Status.LOBBY_CODE, Status.VOIDED}),
     Status.LOBBY_CODE: frozenset({Status.IN_PROGRESS, Status.VOIDED}),
     Status.IN_PROGRESS: frozenset({Status.AWAITING_CONFIRMATION, Status.DISPUTED, Status.VOIDED}),
@@ -60,8 +71,19 @@ _TRANSITIONS: dict[str, frozenset[str]] = {
 }
 
 
-def can_transition(current: str, target: str) -> bool:
-    return target in _TRANSITIONS.get(current, frozenset())
+_SCRIM_TRANSITIONS: dict[str, frozenset[str]] = {
+    # /startdraft: both captains claimed, straight into the draft.
+    Status.CAPTAIN_CLAIM: frozenset({Status.CHAMPION_DRAFT, Status.VOIDED}),
+    # /captains_coinflip: both chose, then a captain presses Start Draft.
+    Status.COINFLIP: frozenset({Status.READY_TO_DRAFT, Status.VOIDED}),
+    Status.READY_TO_DRAFT: frozenset({Status.CHAMPION_DRAFT, Status.VOIDED}),
+    Status.CHAMPION_DRAFT: frozenset({Status.DRAFTED, Status.VOIDED}),
+}
+
+
+def can_transition(current: str, target: str, kind: str = "ranked") -> bool:
+    table = _SCRIM_TRANSITIONS if kind == "scrim" else _TRANSITIONS
+    return target in table.get(current, frozenset())
 
 
 def seeded_rng(seed: int, purpose: str) -> random.Random:
@@ -139,6 +161,68 @@ def first_pick_team(rating_a: int, rating_b: int, seed: int) -> str:
 
 def coin_flip_team(seed: int, purpose: str) -> str:
     return seeded_rng(seed, purpose).choice(["A", "B"])
+
+
+# --- Captain coinflip -------------------------------------------------------------------------
+# Bebot's: the winner chooses First Pick, Last Pick or a side; the loser chooses from the other
+# kind. Between them, both the sides and who bans and picks first are settled.
+
+FIRST_PICK = "first_pick"
+LAST_PICK = "last_pick"
+HIDDEN_KING = "hidden_king"
+ARCHMOTHER = "archmother"
+ORDER_CHOICES = (FIRST_PICK, LAST_PICK)
+SIDE_CHOICES = (HIDDEN_KING, ARCHMOTHER)
+COINFLIP_LABELS = {
+    FIRST_PICK: "First Pick",
+    LAST_PICK: "Last Pick",
+    HIDDEN_KING: "Hidden King",
+    ARCHMOTHER: "Archmother",
+}
+_SIDE_OF = {HIDDEN_KING: "hk", ARCHMOTHER: "am"}
+
+
+def other_side(side: str) -> str:
+    return "am" if side == "hk" else "hk"
+
+
+def coinflip_options(winner_choice: str) -> tuple[str, ...]:
+    """What the chooser on turn can press: any of four for the winner, the other kind after."""
+    if not winner_choice:
+        return (FIRST_PICK, LAST_PICK, HIDDEN_KING, ARCHMOTHER)
+    return SIDE_CHOICES if winner_choice in ORDER_CHOICES else ORDER_CHOICES
+
+
+def settle_coinflip(winner_choice: str, loser_choice: str) -> tuple[str, str, str]:
+    """Turn the two choices into (winner's side, loser's side, side that goes first), with
+    sides as "hk" and "am". One captain chose an order and the other a side."""
+    winner_side = _SIDE_OF.get(winner_choice)
+    loser_side = _SIDE_OF.get(loser_choice)
+    if winner_side is None:
+        if loser_side is None:
+            raise ValueError("One of the two choices must be a side.")
+        winner_side = other_side(loser_side)
+    if loser_side is None:
+        loser_side = other_side(winner_side)
+    chose_order = winner_choice if winner_choice in ORDER_CHOICES else loser_choice
+    chooser_side = winner_side if winner_choice in ORDER_CHOICES else loser_side
+    first = chooser_side if chose_order == FIRST_PICK else other_side(chooser_side)
+    return winner_side, loser_side, first
+
+
+def auto_coinflip_choice(seed: int, winner_choice: str) -> str:
+    """A captain who runs out of time gets a random choice, seeded like every timeout."""
+    turn = "loser" if winner_choice else "winner"
+    return seeded_rng(seed, f"coinflip:{turn}").choice(coinflip_options(winner_choice))
+
+
+def apply_coinflip(winner_team: str, winner_choice: str, loser_choice: str) -> tuple[str, str]:
+    """(Hidden King team, team that bans and picks first), for teams "A" and "B"."""
+    loser_team = "B" if winner_team == "A" else "A"
+    winner_side, _loser_side, first_side = settle_coinflip(winner_choice, loser_choice)
+    hidden_king = winner_team if winner_side == "hk" else loser_team
+    first_pick = winner_team if winner_side == first_side else loser_team
+    return hidden_king, first_pick
 
 
 @dataclass(frozen=True, slots=True)

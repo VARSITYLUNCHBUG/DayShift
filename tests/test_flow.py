@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
-from django.core.management import call_command
-from django.core.management.base import CommandError
+import yaml
 from django.db import IntegrityError, transaction
 
+from bot.renderers.grid import hero_emoji as champion_emoji
+from league.domain import engine
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.models import (
@@ -23,20 +26,24 @@ from league.models import (
     QueueEntry,
     RatingEvent,
     ResultSubmission,
+    SubOffer,
 )
+from league.models.alerts import StaffAlert
 from league.models.outbox import EffectStatus
+from league.models.subs import OfferStatus
 from league.services import (
+    boards,
     champions,
     deadlines,
-    dev,
     draft,
     integrity,
     lobby,
     queue,
     ratings,
     results,
+    subs,
 )
-from league.services.common import captain_of
+from league.services.common import captain_of, mode_of
 from tests.conftest import PRESETS, Clock, activate, make_player
 from tests.helpers import (
     acting_captain,
@@ -84,7 +91,7 @@ def test_twelfth_player_pops_first_twelve_fifo(league: Community) -> None:
 
 def test_double_join_is_rejected(league: Community, players: list[Player]) -> None:
     queue.join(league.pk, players[0])
-    with pytest.raises(InvalidAction, match="already in the queue"):
+    with pytest.raises(InvalidAction, match="already in queue"):
         queue.join(league.pk, players[0])
 
 
@@ -151,7 +158,7 @@ def test_stranger_cannot_ready(popped: Match) -> None:
         lobby.mark_ready(popped.pk, make_player(99))
 
 
-def test_ready_timeout_backfills_next_in_queue(
+def test_a_missed_ready_check_offers_the_spots_and_keeps_the_lobby(
     popped: Match, league: Community, players: list[Player], clock: Clock
 ) -> None:
     waiting = [make_player(50), make_player(51)]
@@ -164,15 +171,18 @@ def test_ready_timeout_backfills_next_in_queue(
     deadlines.tick()
 
     match = fresh(popped)
-    assert match.status == Status.READY_CHECK
-    active = set(match.participants.filter(is_active=True).values_list("player_id", flat=True))
-    assert waiting[0].pk in active
-    assert waiting[1].pk in active
-    assert players[10].pk not in active
-    assert match.participants.filter(is_active=True, ready_at__isnull=False).count() == 10
+    assert match.status == Status.READY_CHECK and match.held_seconds is not None
+    assert not match.participants.filter(player__in=players[10:], is_active=True).exists()
     assert Penalty.objects.filter(player=players[10], kind="missed_ready").exists()
-    # A fresh timer for the replacements.
-    assert (match.deadline_at - clock.now()).total_seconds() > 170
+    # One spot each, offered down the queue: one person is asked for one spot at a time.
+    offers = SubOffer.objects.filter(request__match=match, status=OfferStatus.PENDING)
+    assert sorted(offer.player_id for offer in offers) == sorted(p.pk for p in waiting)
+    for offer in offers:
+        subs.answer_offer(offer.pk, offer.player, True)
+    match = fresh(match)
+    assert match.status == Status.CAPTAIN_PHASE  # Full and ready: on to the vote.
+    assert match.participants.filter(is_active=True, ready_at__isnull=False).count() == 12
+    assert not QueueEntry.objects.filter(player__in=waiting).exists()
 
 
 def test_ready_timeout_without_replacements_voids_and_requeues(
@@ -181,6 +191,9 @@ def test_ready_timeout_without_replacements_voids_and_requeues(
     for player in players[:11]:
         lobby.mark_ready(popped.pk, player)
     clock.advance(181)
+    deadlines.tick()
+    assert fresh(popped).status == Status.READY_CHECK  # The spot is offered for 2 minutes.
+    clock.advance(mode_of(popped).ready_check.refill_seconds + 1)
     deadlines.tick()
 
     match = fresh(popped)
@@ -322,7 +335,7 @@ def test_lower_rated_captain_gets_first_pick(popped: Match, players: list[Player
 
 def test_draft_produces_two_full_teams(popped: Match) -> None:
     match = run_player_draft(vote_captains(ready_all(popped)))
-    assert match.status == Status.SIDE_SELECT
+    assert match.status == Status.COINFLIP
     assert match.participants.filter(team="A").count() == 6
     assert match.participants.filter(team="B").count() == 6
     actions = list(DraftAction.objects.filter(match=match, action="player_pick"))
@@ -370,7 +383,7 @@ def test_cannot_pick_already_drafted_player(popped: Match) -> None:
     draft.pick_player(match.pk, captain, 0, target.player_id)
     match = fresh(match)
     second = "B" if match.player_first_pick == "A" else "A"
-    with pytest.raises(InvalidAction, match="already been drafted"):
+    with pytest.raises(InvalidAction, match="already been picked"):
         draft.pick_player(match.pk, captain_of(match, second).player, 1, target.player_id)
 
 
@@ -391,50 +404,66 @@ def test_player_pick_timeout_takes_highest_rated(
 # --- Side claim ----------------------------------------------------------------------------
 
 
-def at_side_select(voting: Match) -> Match:
+def at_coinflip(voting: Match) -> Match:
     return run_player_draft(vote_captains(voting))
 
 
-def test_player_draft_ends_at_the_side_claim(voting: Match) -> None:
-    match = at_side_select(voting)
-    assert match.status == Status.SIDE_SELECT
+def _coin_captains(match: Match) -> tuple[Player, Player]:
+    winner = match.coinflip_winner
+    return captain_of(match, winner).player, captain_of(match, "B" if winner == "A" else "A").player
+
+
+def test_player_draft_ends_at_the_captain_coinflip(voting: Match) -> None:
+    match = at_coinflip(voting)
+    assert match.status == Status.COINFLIP
+    assert match.coinflip_winner in {"A", "B"}
     assert match.hidden_king_team == ""
 
 
-def test_first_claim_decides_both_sides_and_hidden_king_goes_first(voting: Match) -> None:
-    match = at_side_select(voting)
-    draft.claim_side(match.pk, captain_of(match, "B").player, "hk")
+def test_the_winner_chooses_then_the_loser_from_the_other_kind(voting: Match) -> None:
+    match = at_coinflip(voting)
+    winner, loser = _coin_captains(match)
+    with pytest.raises(NotAllowed, match="coinflip winner"):
+        draft.choose_coinflip(match.pk, loser, engine.FIRST_PICK)
+    draft.choose_coinflip(match.pk, winner, engine.LAST_PICK)
+    with pytest.raises(NotAllowed, match="coinflip loser"):
+        draft.choose_coinflip(match.pk, winner, engine.HIDDEN_KING)
+    with pytest.raises(InvalidAction):
+        draft.choose_coinflip(match.pk, loser, engine.FIRST_PICK)  # Not the other kind.
+    draft.choose_coinflip(match.pk, loser, engine.ARCHMOTHER)
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
-    assert match.hidden_king_team == "B"
-    assert match.champion_first_pick == "B"
+    loser_team = "B" if match.coinflip_winner == "A" else "A"
+    # The loser took The Archmother, so the winner is Hidden King. The winner chose Last Pick,
+    # so the loser's team bans and picks first: Hidden King no longer means first.
+    assert match.hidden_king_team == match.coinflip_winner
+    assert match.champion_first_pick == loser_team
+    assert acting_captain(match) == loser
     with pytest.raises(StaleAction):
-        draft.claim_side(match.pk, captain_of(match, "A").player, "hk")
+        draft.choose_coinflip(match.pk, winner, engine.FIRST_PICK)
 
 
-def test_claiming_archmother_gives_the_other_team_hidden_king(voting: Match) -> None:
-    match = at_side_select(voting)
-    draft.claim_side(match.pk, captain_of(match, "B").player, "am")
-    match = fresh(match)
-    assert match.hidden_king_team == "A"
-    assert match.champion_first_pick == "A"
-
-
-def test_only_a_captain_can_claim_a_side(voting: Match) -> None:
-    match = at_side_select(voting)
+def test_only_a_captain_on_turn_can_choose(voting: Match) -> None:
+    match = at_coinflip(voting)
     player = match.participants.filter(is_captain=False).first().player
     with pytest.raises(NotAllowed):
-        draft.claim_side(match.pk, player, "hk")
+        draft.choose_coinflip(match.pk, player, engine.FIRST_PICK)
 
 
-def test_side_claim_timeout_flips_a_coin(voting: Match, clock: Clock) -> None:
-    match = at_side_select(voting)
+def test_a_coinflip_timeout_chooses_at_random_for_each_captain(voting: Match, clock: Clock) -> None:
+    match = at_coinflip(voting)
+    clock.advance(21)
+    deadlines.tick()
+    match = fresh(match)
+    assert match.status == Status.COINFLIP
+    assert match.coinflip_winner_choice in engine.coinflip_options("")
     clock.advance(21)
     deadlines.tick()
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
+    assert match.coinflip_loser_choice in engine.coinflip_options(match.coinflip_winner_choice)
     assert match.hidden_king_team in {"A", "B"}
-    assert match.champion_first_pick == match.hidden_king_team
+    assert match.champion_first_pick in {"A", "B"}
 
 
 # --- Champion draft ------------------------------------------------------------------------
@@ -442,7 +471,7 @@ def test_side_claim_timeout_flips_a_coin(voting: Match, clock: Clock) -> None:
 
 @pytest.mark.parametrize(
     ("slug", "steps", "bans", "seconds"),
-    [("bebot_2ban", 16, 4, 40), ("dcs_s3_2ban", 16, 4, 30), ("threeban_1win_2026", 18, 6, 30)],
+    [("bebot_2ban", 16, 4, 40), ("threeban_1win_2026", 18, 6, 30)],
 )
 def test_every_preset_runs_the_same_flow(
     league: Community, players: list[Player], slug: str, steps: int, bans: int, seconds: int
@@ -463,7 +492,7 @@ def test_every_preset_runs_the_same_flow(
     assert statuses[-5:] == [
         Status.CAPTAIN_PHASE,
         Status.PLAYER_DRAFT,
-        Status.SIDE_SELECT,
+        Status.COINFLIP,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
     ]
@@ -485,7 +514,7 @@ def test_banned_champion_cannot_be_picked(popped: Match) -> None:
     champion = draft.available_champions(match)[0]
     draft.choose_champion(match.pk, acting_captain(match), match.step_index, champion)
     match = fresh(match)
-    with pytest.raises(InvalidAction, match="isn't available"):
+    with pytest.raises(InvalidAction, match="already been picked or banned"):
         draft.choose_champion(match.pk, acting_captain(match), match.step_index, champion)
 
 
@@ -540,6 +569,50 @@ def test_bebot_emojis_load_onto_champions(league: Community) -> None:
     assert Champion.objects.get(name="Abrams").discord_emoji_id == 1302512783283191879
     again = champions.load_emojis(PRESETS / "champion_emojis.yaml")
     assert not again.updated
+
+
+def test_every_plain_hero_emoji_in_the_preset_is_valid() -> None:
+    """Discord refuses a bad button emoji for good, which would leave a board stuck."""
+    data = yaml.safe_load((PRESETS / "champion_emojis.yaml").read_text(encoding="utf-8"))
+    section = data["unicode"]
+    assert section
+    assert all(champions.is_unicode_emoji(str(emoji)) for emoji in section.values()), section
+    # A hero has either a custom emoji or a plain one, not both.
+    assert not set(section) & set(data["emojis"])
+
+
+@pytest.mark.parametrize("value", ["", "A", "abc", "<:c:123>", ":smile:", "🐐 ", "🐐" * 17])
+def test_plain_emoji_check_refuses_what_discord_would(value: str) -> None:
+    assert not champions.is_unicode_emoji(value)
+
+
+def test_plain_hero_emojis_fill_blanks_only(league: Community, tmp_path: Path) -> None:
+    # The fixture already loaded the preset, as `load_presets` does.
+    apollo = Champion.objects.get(name="Apollo")
+    assert apollo.unicode_emoji == "🗡️"
+    again = champions.load_unicode_emojis(PRESETS / "champion_emojis.yaml")
+    assert not again.updated and not again.unknown
+    # An admin's change survives the next start.
+    Champion.objects.filter(pk=apollo.pk).update(unicode_emoji="⚔️")
+    champions.load_unicode_emojis(PRESETS / "champion_emojis.yaml")
+    assert Champion.objects.get(pk=apollo.pk).unicode_emoji == "⚔️"
+    # A bad entry stops the load instead of reaching Discord.
+    bad = tmp_path / "emojis.yaml"
+    bad.write_text("unicode:\n  Billy: goat\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Billy"):
+        champions.load_unicode_emojis(bad)
+
+
+def test_a_hero_without_a_custom_emoji_shows_its_plain_one(popped: Match) -> None:
+    match = to_champion_draft(popped)
+    Champion.objects.filter(name="Billy").update(discord_emoji_id=None)
+    Champion.objects.filter(name="Abrams").update(discord_emoji_id=1302512783283191879)
+    by_name = {option.name: option for option in boards.board_state(match.pk).champions}
+    assert champion_emoji(by_name["Billy"].emoji_id, by_name["Billy"].unicode_emoji) is not None
+    assert str(champion_emoji(None, "🐐")) == "🐐"
+    custom = champion_emoji(by_name["Abrams"].emoji_id, by_name["Abrams"].unicode_emoji)
+    assert custom is not None and custom.id == 1302512783283191879
+    assert champion_emoji(None, "") is None
 
 
 # --- Lobby code ----------------------------------------------------------------------------
@@ -623,7 +696,7 @@ def test_conflicting_report_goes_to_dispute_unrated(popped: Match) -> None:
     match = fresh(match)
     assert match.status == Status.DISPUTED
     assert RatingEvent.objects.count() == 0
-    assert len(effects(match, "ping_staff")) == 1
+    assert StaffAlert.objects.filter(match=match, kind="dispute", status="open").count() == 1
 
 
 def test_second_matching_screenshot_is_kept(popped: Match) -> None:
@@ -764,31 +837,3 @@ def test_render_requests_coalesce(popped: Match) -> None:
         match=popped, kind="render_board", status=EffectStatus.PENDING
     )
     assert pending.count() == 1
-
-
-# --- Smoke test tool -------------------------------------------------------------------------
-
-
-def test_dev_autoplay_is_refused_outside_debug(league: Community, settings) -> None:
-    settings.DEBUG = False
-    settings.DEV_FAKE_PLAYERS = True
-    with pytest.raises(CommandError, match="DEBUG"):
-        call_command("dev_autoplay", pause=0, step=0)
-
-
-def test_dev_autoplay_plays_a_whole_match(league: Community, settings) -> None:
-    for player in dev.fake_players(12):
-        queue.join(league.pk, player)
-    first = Match.objects.get()
-    finish(to_in_progress(first))  # The tool reuses an archived screenshot from an earlier match.
-    settings.DEBUG = True
-    settings.DEV_FAKE_PLAYERS = True
-    call_command("dev_autoplay", pause=0, step=0, winner="B")
-    match = Match.objects.order_by("-id").first()
-    assert match.pk != first.pk
-    assert match.status == Status.COMPLETED
-    assert match.winner == "B"
-    assert CaptainVote.objects.filter(match=match).exists()
-    assert match.transitions.filter(to_status=Status.SIDE_SELECT).exists()
-    assert match.champion_first_pick == match.hidden_king_team
-    assert integrity.check_all() == []

@@ -16,17 +16,17 @@ from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, ru
 from hypothesis.strategies import integers, sampled_from
 
 from league.domain.draft_plan import build_plan, team_for_role
-from league.domain.engine import LIVE, Status
+from league.domain.engine import LIVE, Status, apply_coinflip
 from league.domain.errors import DomainError
 from league.models import DraftAction, Match, Player, QueueEntry
-from league.services import corrections, deadlines, draft, integrity, lobby, queue, results
+from league.services import corrections, deadlines, draft, integrity, lobby, queue, results, subs
 from league.services.common import captain_of, mode_of
 from tests.conftest import Clock, make_player
 from tests.helpers import (
-    claim_sides,
     image,
     run_champion_draft,
     run_player_draft,
+    settle_coinflip_for,
     vote_captains,
 )
 
@@ -79,9 +79,12 @@ class MatchMachine(RuleBasedStateMachine):
         chosen = [self.players[first].pk, self.players[second].pk]
         self._try(lobby.cast_captain_votes, self.match.pk, self.players[voter], chosen)
 
-    @rule(index=integers(0, 14), side=sampled_from(["hk", "am", "nope"]))
-    def claim_side(self, index: int, side: str) -> None:
-        self._try(draft.claim_side, self.match.pk, self.players[index], side)
+    @rule(
+        index=integers(0, 14),
+        choice=sampled_from(["first_pick", "last_pick", "hidden_king", "archmother"]),
+    )
+    def coin_choice(self, index: int, choice: str) -> None:
+        self._try(draft.choose_coinflip, self.match.pk, self.players[index], choice)
 
     def _acting(self, match: Match, status: str) -> Player | None:
         if match.status != status:
@@ -162,6 +165,14 @@ class MatchMachine(RuleBasedStateMachine):
         if match.status == Status.AWAITING_CONFIRMATION:
             self._try(results.dispute, match.pk, captain_of(match, team).player, "No")
 
+    @rule(accept=sampled_from([True, True, False]))
+    def answer_offers(self, accept: bool) -> None:
+        """Whoever was offered an open spot answers, as a waiting player would."""
+        from league.models import SubOffer
+
+        for offer in SubOffer.objects.filter(request__match=self.match, status="pending"):
+            self._try(subs.answer_offer, offer.pk, offer.player, accept)
+
     @rule(outcome=sampled_from(["A", "B", "void"]))
     def staff_resolves(self, outcome: str) -> None:
         self._try(results.resolve_dispute, self.match.pk, outcome, None, "Staff")
@@ -174,10 +185,10 @@ class MatchMachine(RuleBasedStateMachine):
         if match.status == Status.CAPTAIN_PHASE:
             self._try(vote_captains, match)
         elif match.status == Status.PLAYER_DRAFT:
-            # Straight on through the side claim. The claim_side rule covers it on its own.
-            self._try(lambda: claim_sides(run_player_draft(match), "hk" if agree else "am"))
-        elif match.status == Status.SIDE_SELECT:
-            self._try(claim_sides, match, "hk" if agree else "am")
+            # Straight on through the coinflip. The coin_choice rule covers it on its own.
+            self._try(lambda: settle_coinflip_for(run_player_draft(match), "A" if agree else "B"))
+        elif match.status == Status.COINFLIP:
+            self._try(settle_coinflip_for, match, "A" if agree else "B")
         elif match.status == Status.CHAMPION_DRAFT:
             self._try(run_champion_draft, match)
         elif match.status == Status.LOBBY_CODE:
@@ -226,13 +237,19 @@ class MatchMachine(RuleBasedStateMachine):
     @invariant()
     def draft_rows_match_step_index(self) -> None:
         match = self._fresh()
-        if match.status in {Status.PLAYER_DRAFT, Status.SIDE_SELECT, Status.CHAMPION_DRAFT}:
+        if match.status in {Status.PLAYER_DRAFT, Status.COINFLIP, Status.CHAMPION_DRAFT}:
             assert DraftAction.objects.filter(match=match).count() == match.step_index
 
     @invariant()
     def live_match_always_has_a_way_forward(self) -> None:
         match = self._fresh()
-        if match.status in LIVE:
+        if match.status not in LIVE:
+            return
+        if match.held_seconds is not None:  # On hold: an open spot's own deadline stands in.
+            assert match.sub_requests.filter(
+                status__in=("approval", "open"), deadline_at__isnull=False
+            ).exists(), f"{match.status} is on hold with nothing to end it"
+        else:
             assert match.deadline_at is not None, f"{match.status} has no deadline: it could hang"
 
     @invariant()
@@ -245,10 +262,15 @@ class MatchMachine(RuleBasedStateMachine):
                 assert match.participants.filter(is_captain=True, team=team).count() == 1
 
     @invariant()
-    def hidden_king_always_goes_first(self) -> None:
+    def sides_follow_the_coinflip(self) -> None:
+        """Once both captains have chosen, the sides and first pick are what they chose."""
         match = self._fresh()
-        if match.champion_first_pick:
-            assert match.champion_first_pick == match.hidden_king_team
+        if match.coinflip_loser_choice:
+            assert (match.hidden_king_team, match.champion_first_pick) == apply_coinflip(
+                match.coinflip_winner, match.coinflip_winner_choice, match.coinflip_loser_choice
+            )
+        elif match.champion_first_pick:
+            raise AssertionError("First pick was set without a finished coinflip.")
 
     @invariant()
     def teams_never_exceed_their_size(self) -> None:
@@ -286,6 +308,7 @@ def test_match_machine(league, clock: Clock) -> None:
             # Fixed by default, so a failure means something changed rather than bad luck. Set
             # EXPLORE=1 for a longer hunt through sequences this run hasn't tried.
             derandomize=not explore,
+            database=None,  # The same examples in every checkout, not ones saved locally.
             max_examples=150 if explore else 60,
             stateful_step_count=40,
             deadline=None,
@@ -296,7 +319,7 @@ def test_match_machine(league, clock: Clock) -> None:
     assert {
         Status.CAPTAIN_PHASE,
         Status.PLAYER_DRAFT,
-        Status.SIDE_SELECT,
+        Status.COINFLIP,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,

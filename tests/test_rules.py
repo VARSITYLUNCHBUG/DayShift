@@ -17,13 +17,13 @@ from league.models import (
     Community,
     EarlyLeave,
     Match,
-    OutboxEffect,
     Penalty,
     Player,
     QueueEntry,
     RatingEvent,
     Season,
 )
+from league.models.alerts import StaffAlert
 from league.models.matches import EarlyLeaveStatus
 from league.models.moderation import PenaltyKind
 from league.models.scoreboards import AwardSource
@@ -83,8 +83,8 @@ def test_an_mvp_every_game_freezes_the_award_share_live_and_on_replay(
     assert all(events[m.pk].award_adj for m in matches[:3])
     assert not any(events[m.pk].award_adj for m in matches[3:])
     assert integrity.check_season(farm_season) == []  # The replay agrees.
-    pings = OutboxEffect.objects.filter(kind="ping_staff", payload__text__icontains="froze")
-    assert pings.count() == 1
+    frozen_alerts = StaffAlert.objects.filter(kind="award_freeze", area="ratings")
+    assert frozen_alerts.count() == 1
     report = calibration.report(farm_season)
     assert report.farming and report.farming[0][0] == farmer.display_name
     assert report.frozen_matches == 2
@@ -145,9 +145,7 @@ def test_a_disagreed_early_leave_goes_to_staff(game_on: Match) -> None:
     early_leave.report(game_on.pk, captain_of(game_on, "A").player, _leaver(game_on).pk)
     early_leave.answer(game_on.pk, captain_of(game_on, "B").player, False)
     assert fresh(game_on).status == Status.IN_PROGRESS
-    assert OutboxEffect.objects.filter(
-        kind="ping_staff", payload__text__icontains="leave early"
-    ).exists()
+    assert StaffAlert.objects.filter(kind="early_leave", text__icontains="leave early").exists()
 
 
 def test_an_unanswered_early_leave_goes_to_staff(game_on: Match, clock: Clock) -> None:
@@ -201,7 +199,7 @@ def test_an_early_abandon_in_deadlock_api_flags_the_player(game_on: Match) -> No
     results.submit_report(game_on.pk, captain_of(game_on, hk).player, hk, image(1), 900000001)
     api_results.record_metadata(game_on.pk, 900000001, data)
     assert fresh(game_on).participants.get(player=hk_rows[0].player).left_early
-    assert OutboxEffect.objects.filter(kind="ping_staff", payload__text__icontains="2:20").exists()
+    assert StaffAlert.objects.filter(kind="api_abandon", text__icontains="2:20").exists()
 
 
 # --- The award check -------------------------------------------------------------------------

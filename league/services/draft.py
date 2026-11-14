@@ -7,19 +7,24 @@ import re
 
 from django.db import IntegrityError, transaction
 
+from league.domain import copy
 from league.domain.draft_plan import PlanStep, build_plan, player_draft_length, team_for_role
 from league.domain.engine import (
+    COINFLIP_LABELS,
     DraftablePlayer,
     Status,
+    apply_coinflip,
     auto_champion,
+    auto_coinflip_choice,
     auto_player_pick,
     coin_flip_team,
+    coinflip_options,
     seeded_rng,
 )
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import DraftMode
-from league.models import DraftAction, Match, Player
-from league.models.matches import Source
+from league.models import Champion, DraftAction, Match, Player
+from league.models.matches import MatchKind, Source
 from league.services.common import (
     active_participants,
     add_effect,
@@ -45,7 +50,7 @@ LOBBY_CODE_PATTERN = re.compile(r"^[A-Za-z0-9-]{3,32}$")
 def _current_step(match: Match, mode: DraftMode, step_index: int | None) -> PlanStep:
     plan = build_plan(mode)
     if step_index is not None and step_index != match.step_index:
-        raise StaleAction("Too late: that step has already been taken.")
+        raise StaleAction(copy.STEP_TAKEN)
     if match.step_index >= len(plan):
         raise StaleAction("The draft has finished.")
     return plan[match.step_index]
@@ -84,7 +89,7 @@ def _record(
                 created_at=now(),
             )
     except IntegrityError as exc:
-        raise StaleAction("Too late: that step has already been taken.") from exc
+        raise StaleAction(copy.STEP_TAKEN) from exc
 
 
 def _undrafted(match: Match) -> list[DraftablePlayer]:
@@ -98,15 +103,15 @@ def _undrafted(match: Match) -> list[DraftablePlayer]:
 def _assign_player(match: Match, step: PlanStep, team: str, player_id: int) -> None:
     participant = active_participants(match).filter(player_id=player_id, team="").first()
     if participant is None:
-        raise InvalidAction("That player has already been drafted.")
+        raise InvalidAction(copy.PLAYER_TAKEN)
     participant.team = team
     participant.draft_pick_number = step.index + 1
     participant.save(update_fields=["team", "draft_pick_number"])
 
 
-def _require_acting_captain(match: Match, team: str, player: Player) -> None:
+def _require_acting_captain(match: Match, step: PlanStep, team: str, player: Player) -> None:
     if captain_of(match, team).player_id != player.pk:
-        raise NotAllowed("It's not your turn.")
+        raise NotAllowed(copy.not_your_turn(step.action))
 
 
 # --- Player draft ----------------------------------------------------------------------------
@@ -127,7 +132,7 @@ def pick_player(
     mode = mode_of(match)
     step = _current_step(match, mode, step_index)
     team = _acting_team(match, step)
-    _require_acting_captain(match, team, captain)
+    _require_acting_captain(match, step, team, captain)
     _assign_player(match, step, team, target_player_id)
     _record(
         match,
@@ -144,7 +149,7 @@ def pick_player(
 def _advance_player_draft(match: Match, mode: DraftMode) -> None:
     match.step_index += 1
     if match.step_index >= player_draft_length(mode):
-        begin_side_select(match, mode)
+        begin_coinflip(match, mode)
         return
     remaining = _undrafted(match)
     if len(remaining) == 1:
@@ -182,61 +187,117 @@ def on_player_draft_timeout(match: Match) -> None:
 # --- Champion draft --------------------------------------------------------------------------
 
 
-SIDES = {"hk": "Hidden King", "am": "The Archmother"}
+# --- Captain coinflip ------------------------------------------------------------------------
 
 
-def begin_side_select(match: Match, mode: DraftMode) -> None:
-    """The player draft is over: make team voice channels and have the captains claim a side."""
+def begin_coinflip(match: Match, mode: DraftMode) -> None:
+    """The player draft is over: make team voice channels and flip a coin between the captains.
+    The winner chooses First Pick, Last Pick or a side; the loser chooses from the other kind."""
+    match.coinflip_winner = coin_flip_team(match.rng_seed, "coinflip")
+    match.coinflip_winner_choice = ""
+    match.coinflip_loser_choice = ""
     transition(
         match,
-        Status.SIDE_SELECT,
+        Status.COINFLIP,
         source=Source.SYSTEM,
-        deadline_at=seconds_from_now(mode.champion_draft.side_seconds),
+        deadline_at=seconds_from_now(mode.champion_draft.coinflip_seconds),
     )
-    save_transition(match, "step_index")
+    save_transition(
+        match, "step_index", "coinflip_winner", "coinflip_winner_choice", "coinflip_loser_choice"
+    )
     add_effect(
         match.community, "create_team_voice", match=match, dedupe_key=f"team_voice:{match.pk}"
     )
-    captain_ids = [captain_of(match, team).player.discord_user_id for team in ("A", "B")]
+    winner = captain_of(match, match.coinflip_winner).player
     add_effect(
         match.community,
         "ping",
         {
-            "user_ids": captain_ids,
-            "text": "teams are set. Claim a side: Hidden King bans and picks first.",
+            "user_ids": [winner.discord_user_id],
+            "text": "teams are set and you won the coinflip! Choose First Pick, Last Pick or a "
+            "side.",
         },
         match=match,
     )
     render_board(match)
 
 
+def coinflip_turn(match: Match) -> tuple[str, str]:
+    """(team choosing now, "winner" or "loser")."""
+    if not match.coinflip_winner_choice:
+        return match.coinflip_winner, "winner"
+    return ("B" if match.coinflip_winner == "A" else "A"), "loser"
+
+
 @transaction.atomic
-def claim_side(match_id: int, captain: Player, side: str) -> None:
-    """The first captain to claim a side decides both."""
+def choose_coinflip(match_id: int, captain: Player, choice: str) -> None:
     match = lock_match(match_id)
-    if match.status != Status.SIDE_SELECT:
-        raise StaleAction("Sides have already been chosen.")
+    if match.status != Status.COINFLIP:
+        raise StaleAction("The coinflip choices are already made.")
     require_not_on_hold(match)
-    if side not in SIDES:
-        raise InvalidAction("That isn't a side.")
-    participant = match.participants.filter(player=captain, is_active=True, is_captain=True).first()
-    if participant is None:
-        raise NotAllowed("Only a captain can claim a side.")
-    other = "B" if participant.team == "A" else "A"
-    match.hidden_king_team = participant.team if side == "hk" else other
-    begin_champion_draft(match, mode_of(match), source=Source.USER, actor=captain)
+    team, who = coinflip_turn(match)
+    if captain_of(match, team).player_id != captain.pk:
+        raise NotAllowed(copy.coinflip_only(who))
+    if choice not in coinflip_options(match.coinflip_winner_choice):
+        raise InvalidAction("That choice isn't available.")
+    _record_coinflip(match, choice, source=Source.USER, actor=captain)
 
 
-def on_side_timeout(match: Match) -> None:
-    match.hidden_king_team = coin_flip_team(match.rng_seed, "side")
-    begin_champion_draft(match, mode_of(match), source=Source.TIMEOUT)
+def on_coinflip_timeout(match: Match) -> None:
+    """Whoever's turn it is gets a random choice, as a timed-out ban or pick does."""
+    choice = auto_coinflip_choice(match.rng_seed, match.coinflip_winner_choice)
+    _record_coinflip(match, choice, source=Source.TIMEOUT, actor=None)
+
+
+def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | None) -> None:
+    mode = mode_of(match)
+    scrim = match.kind == MatchKind.SCRIM
+    if not match.coinflip_winner_choice:
+        match.coinflip_winner_choice = choice
+        if scrim:  # As in Bebot: no turn timer, only the scrim's idle one.
+            bump(match, "coinflip_winner_choice")
+            render_board(match)
+            return
+        match.deadline_at = seconds_from_now(mode.champion_draft.coinflip_seconds)
+        bump(match, "coinflip_winner_choice", "deadline_at")
+        loser = captain_of(match, coinflip_turn(match)[0]).player
+        add_effect(
+            match.community,
+            "ping",
+            {
+                "user_ids": [loser.discord_user_id],
+                "text": f"the coinflip winner chose {COINFLIP_LABELS[choice]}. Your turn to "
+                "choose.",
+            },
+            match=match,
+        )
+        render_board(match)
+        return
+    match.coinflip_loser_choice = choice
+    match.hidden_king_team, match.champion_first_pick = apply_coinflip(
+        match.coinflip_winner, match.coinflip_winner_choice, choice
+    )
+    if scrim:
+        # Bebot's "Ready to start the draft!": a captain presses Start Draft.
+        from league.services.scrims import IDLE_SECONDS
+
+        transition(
+            match,
+            Status.READY_TO_DRAFT,
+            source=source,
+            actor=actor,
+            deadline_at=seconds_from_now(IDLE_SECONDS),
+        )
+        save_transition(match, "champion_first_pick", "hidden_king_team", "coinflip_loser_choice")
+        render_board(match)
+        return
+    begin_champion_draft(match, mode, source=source, actor=actor)
 
 
 def begin_champion_draft(
     match: Match, mode: DraftMode, *, source: str, actor: Player | None = None
 ) -> None:
-    """Sides are set. The Hidden King team bans and picks first."""
-    match.champion_first_pick = match.hidden_king_team
+    """The coinflip has set the sides and which team bans and picks first."""
     step = build_plan(mode)[match.step_index]
     transition(
         match,
@@ -245,17 +306,20 @@ def begin_champion_draft(
         actor=actor,
         deadline_at=seconds_from_now(step.seconds),
     )
-    save_transition(match, "champion_first_pick", "hidden_king_team", "step_index")
-    hidden_king = captain_of(match, match.hidden_king_team).player
-    add_effect(
-        match.community,
-        "ping",
-        {
-            "user_ids": [hidden_king.discord_user_id],
-            "text": "you're Hidden King. You ban first. The champion draft is on.",
-        },
-        match=match,
+    save_transition(
+        match, "champion_first_pick", "hidden_king_team", "coinflip_loser_choice", "step_index"
     )
+    if match.kind == MatchKind.RANKED:  # A scrim's channel is public: no notices there.
+        first = captain_of(match, match.champion_first_pick).player
+        add_effect(
+            match.community,
+            "ping",
+            {
+                "user_ids": [first.discord_user_id],
+                "text": "you ban first. The champion draft is on.",
+            },
+            match=match,
+        )
     render_board(match)
 
 
@@ -287,9 +351,10 @@ def choose_champion(
     mode = mode_of(match)
     step = _current_step(match, mode, step_index)
     team = _acting_team(match, step)
-    _require_acting_captain(match, team, captain)
+    _require_acting_captain(match, step, team, captain)
     if champion_id not in available_champions(match):
-        raise InvalidAction("That champion isn't available.")
+        name = Champion.objects.filter(pk=champion_id).values_list("name", flat=True).first()
+        raise InvalidAction(copy.hero_taken(name) if name else "That hero isn't available.")
     _record(
         match,
         step,
@@ -317,7 +382,7 @@ def choose_random_champion(
     mode = mode_of(match)
     step = _current_step(match, mode, step_index)
     team = _acting_team(match, step)
-    _require_acting_captain(match, team, captain)
+    _require_acting_captain(match, step, team, captain)
     champion = auto_champion(available_champions(match), match.rng_seed, step.index)
     _record(
         match,
@@ -346,6 +411,11 @@ def _advance_champion_draft(match: Match, mode: DraftMode) -> None:
     plan = build_plan(mode)
     match.step_index += 1
     if match.step_index >= len(plan):
+        if match.kind == MatchKind.SCRIM:
+            from league.services.scrims import finish
+
+            finish(match)  # GLHF: a scrim ends at the draft.
+            return
         begin_lobby_code(match, mode)
         return
     match.deadline_at = seconds_from_now(plan[match.step_index].seconds)

@@ -22,7 +22,7 @@ class Gateway(Protocol):
         category_id: int | None,
         name: str,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
     ) -> int: ...
 
     async def create_voice_channel(
@@ -31,10 +31,16 @@ class Gateway(Protocol):
         category_id: int | None,
         name: str,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
     ) -> int: ...
 
     def voice_member_ids(self, guild_id: int, channel_id: int | None) -> set[int]: ...
+
+    def voice_members(self, guild_id: int, channel_id: int | None) -> dict[int, str] | None:
+        """Who is in this voice channel, bots left out: user ID to display name, blank where it
+        isn't cached. None if Discord hasn't sent the channel (the server is still loading,
+        say), which is different from an empty room."""
+        ...
 
     async def move_member(self, guild_id: int, user_id: int, channel_id: int) -> bool:
         """False if the member isn't in voice (Discord error 40032). Not a failure."""
@@ -52,7 +58,11 @@ class Gateway(Protocol):
         view: discord.ui.LayoutView,
         *,
         file: tuple[str, bytes] | None = None,
-    ) -> int: ...
+        ping_role_ids: Iterable[int] = (),
+        ping_user_ids: Iterable[int] = (),
+    ) -> int:
+        """Post a view. Its mentions never ping, except the roles and members named here."""
+        ...
 
     async def edit_view(self, channel_id: int, message_id: int, view: Any) -> None: ...
 
@@ -62,7 +72,7 @@ class Gateway(Protocol):
         text: str,
         *,
         user_ids: Iterable[int] = (),
-        role_id: int | None = None,
+        role_ids: Iterable[int] = (),
     ) -> int: ...
 
     async def latest_message_id(self, channel_id: int) -> int | None: ...
@@ -136,7 +146,7 @@ class DiscordGateway:
         self,
         guild: discord.Guild,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
         member_perms: discord.PermissionOverwrite,
         self_perms: discord.PermissionOverwrite,
     ) -> dict[Any, discord.PermissionOverwrite]:
@@ -144,8 +154,8 @@ class DiscordGateway:
             guild.default_role: HIDDEN,
             _member(self.client.user.id): self_perms,  # type: ignore[union-attr]
         }
-        if staff_role_id:
-            overwrites[discord.Object(id=staff_role_id, type=discord.Role)] = member_perms
+        for role_id in staff_role_ids:
+            overwrites[discord.Object(id=role_id, type=discord.Role)] = member_perms
         for user_id in member_ids:
             overwrites[_member(user_id)] = member_perms
         return overwrites
@@ -159,13 +169,13 @@ class DiscordGateway:
         category_id: int | None,
         name: str,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
     ) -> int:
         guild = self._guild(guild_id)
         channel = await guild.create_text_channel(
             name,
             category=self._category(guild, category_id),
-            overwrites=self._overwrites(guild, member_ids, staff_role_id, TEXT_MEMBER, SELF_TEXT),
+            overwrites=self._overwrites(guild, member_ids, staff_role_ids, TEXT_MEMBER, SELF_TEXT),
         )
         return channel.id
 
@@ -175,13 +185,15 @@ class DiscordGateway:
         category_id: int | None,
         name: str,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
     ) -> int:
         guild = self._guild(guild_id)
         channel = await guild.create_voice_channel(
             name,
             category=self._category(guild, category_id),
-            overwrites=self._overwrites(guild, member_ids, staff_role_id, VOICE_MEMBER, SELF_VOICE),
+            overwrites=self._overwrites(
+                guild, member_ids, staff_role_ids, VOICE_MEMBER, SELF_VOICE
+            ),
         )
         return channel.id
 
@@ -193,6 +205,21 @@ class DiscordGateway:
             return set()
         # A low-level mapping that works without the privileged Members intent.
         return set(channel.voice_states)
+
+    def voice_members(self, guild_id: int, channel_id: int | None) -> dict[int, str] | None:
+        guild = self.client.get_guild(guild_id)
+        if guild is None or guild.unavailable or channel_id is None:
+            return None
+        channel = guild.get_channel(channel_id)
+        if not isinstance(channel, discord.VoiceChannel | discord.StageChannel):
+            return None
+        found = {}
+        for user_id in channel.voice_states:
+            member = guild.get_member(user_id)
+            if member is not None and member.bot:
+                continue
+            found[user_id] = member.display_name if member is not None else ""
+        return found
 
     async def move_member(self, guild_id: int, user_id: int, channel_id: int) -> bool:
         try:
@@ -238,9 +265,18 @@ class DiscordGateway:
         view: discord.ui.LayoutView,
         *,
         file: tuple[str, bytes] | None = None,
+        ping_role_ids: Iterable[int] = (),
+        ping_user_ids: Iterable[int] = (),
     ) -> int:
         channel = await self._messageable(channel_id)
-        kwargs: dict[str, Any] = {"view": view, "allowed_mentions": discord.AllowedMentions.none()}
+        roles = [discord.Object(id=role_id) for role_id in ping_role_ids]
+        users = [discord.Object(id=user_id) for user_id in ping_user_ids]
+        allowed = (
+            discord.AllowedMentions(everyone=False, users=users or False, roles=roles or False)
+            if roles or users
+            else discord.AllowedMentions.none()
+        )
+        kwargs: dict[str, Any] = {"view": view, "allowed_mentions": allowed}
         if file is not None:
             kwargs["file"] = discord.File(io.BytesIO(file[1]), filename=file[0])
         try:
@@ -264,14 +300,14 @@ class DiscordGateway:
         text: str,
         *,
         user_ids: Iterable[int] = (),
-        role_id: int | None = None,
+        role_ids: Iterable[int] = (),
     ) -> int:
         channel = await self._messageable(channel_id)
-        ids = list(user_ids)
-        prefix = " ".join([*(f"<@{uid}>" for uid in ids), *([f"<@&{role_id}>"] if role_id else [])])
+        ids, roles = list(user_ids), list(role_ids)
+        prefix = " ".join([*(f"<@{uid}>" for uid in ids), *(f"<@&{rid}>" for rid in roles)])
         allowed = discord.AllowedMentions(
             users=[discord.Object(id=uid) for uid in ids],
-            roles=[discord.Object(id=role_id)] if role_id else False,
+            roles=[discord.Object(id=rid) for rid in roles] or False,
             everyone=False,
         )
         content = f"{prefix} {text}".strip()[:2000]

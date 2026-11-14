@@ -19,6 +19,18 @@ class SubStatus(models.TextChoices):
 UNRESOLVED = (SubStatus.AWAITING_APPROVAL, SubStatus.OPEN)
 
 
+class SubReason(models.TextChoices):
+    """Why the spot opened."""
+
+    SUB_OUT = "sub_out", "Sub out"
+    MISSED_READY = "missed_ready", "Missed the ready check"
+    RESTART = "restart", "Seat left empty by a restart"
+
+
+# Spots the bot opened itself: nobody names a sub, they're offered straight away.
+OPENED_BY_BOT = (SubReason.MISSED_READY, SubReason.RESTART)
+
+
 class SubRequest(models.Model):
     """A request to take one player out of a live match.
 
@@ -29,7 +41,11 @@ class SubRequest(models.Model):
 
     match = models.ForeignKey("league.Match", on_delete=models.PROTECT, related_name="sub_requests")
     leaving = models.ForeignKey("league.Player", on_delete=models.PROTECT, related_name="+")
-    requested_by = models.ForeignKey("league.Player", on_delete=models.PROTECT, related_name="+")
+    # Nobody, for a spot the bot opened itself (a missed ready check).
+    requested_by = models.ForeignKey(
+        "league.Player", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    reason = models.CharField(max_length=12, choices=SubReason.choices, default=SubReason.SUB_OUT)
     status = models.CharField(max_length=10, choices=SubStatus.choices)
     # Approval deadline while waiting on the other captain; the match-cancel deadline once open.
     deadline_at = models.DateTimeField()
@@ -70,6 +86,7 @@ class SubRequest(models.Model):
 
 class OfferSource(models.TextChoices):
     INVITE = "invite", "Invited by name"
+    PRIO = "prio", "Longest in the Waiting Room"
     QUEUE = "queue", "Next in the queue"
 
 
@@ -97,6 +114,9 @@ class SubOffer(models.Model):
     deadline_at = models.DateTimeField()
     created_at = models.DateTimeField()
     resolved_at = models.DateTimeField(null=True, blank=True)
+    # The mention posted in the priority list's (or queue's) channel, deleted when it closes.
+    notice_channel_id = models.BigIntegerField(null=True, blank=True)
+    notice_message_id = models.BigIntegerField(null=True, blank=True)
 
     class Meta:
         db_table = "sub_offers"
@@ -106,6 +126,12 @@ class SubOffer(models.Model):
                 fields=("request",),
                 condition=Q(status="pending"),
                 name="uniq_pending_offer_per_sub",
+            ),
+            # Several spots can be open at once; each person is asked for one at a time.
+            models.UniqueConstraint(
+                fields=("player",),
+                condition=Q(status="pending"),
+                name="uniq_pending_offer_per_player",
             ),
             # Nobody is asked twice for the same slot, so a decline sticks.
             models.UniqueConstraint(fields=("request", "player"), name="uniq_offer_per_player"),

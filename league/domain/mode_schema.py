@@ -26,7 +26,8 @@ class Provenance(_Strict):
 
 class ReadyCheck(_Strict):
     seconds: Seconds = 180
-    backfill: Literal["next_in_queue"] = "next_in_queue"
+    # Spots left by players who missed it are offered for this long, then the lobby is cancelled.
+    refill_seconds: Seconds = 120
 
 
 class Captains(_Strict):
@@ -55,10 +56,11 @@ class Step(_Strict):
 
 
 class ChampionDraft(_Strict):
-    """The captains claim a side, then the Hidden King team ("first") bans and picks first. A
-    timed-out ban or pick takes a random champion, and the acting captain can press Random."""
+    """After the player draft, Bebot's captain coinflip settles the sides and which team
+    ("first") bans and picks first. A timed-out ban or pick takes a random champion, and the
+    acting captain can press Random."""
 
-    side_seconds: Seconds = 20  # How long the captains have to claim a side. Then a coin flip.
+    coinflip_seconds: Seconds = 20  # Each captain's time to choose. Then a random choice.
     seconds: Seconds = 30
     excluded_champion_ids: tuple[int, ...] = ()
     steps: Annotated[tuple[Step, ...], Field(min_length=1)]
@@ -85,7 +87,7 @@ class Subs(_Strict):
     approve_seconds: Seconds = 60  # The other captain's window to agree to a captain's request.
     name_seconds: Seconds = 45  # How long whoever opened the slot has to name a sub.
     invite_seconds: Seconds = 60  # How long a named sub has to accept.
-    offer_seconds: Seconds = 30  # How long each queue player has to accept, in queue order.
+    offer_seconds: Seconds = 60  # How long each person offered a spot has to accept.
     max_wait_seconds: Seconds = 180  # Unfilled by then, the match is cancelled.
 
 

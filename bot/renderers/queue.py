@@ -5,10 +5,10 @@ from typing import Any
 from discord import ButtonStyle
 from discord.ui import ActionRow, Container, LayoutView, TextDisplay
 
+from bot.renderers import style
 from bot.routing import RouteButton
 from league.services.boards import QueueView
 
-ACCENT = 0x5865F2
 MAX_NAMES_SHOWN = 30
 
 
@@ -37,7 +37,7 @@ def render_queue(view_model: QueueView) -> LayoutView:
             f"-# {view_model.mode_name} · {live} match{'' if live == 1 else 'es'} in progress · "
             f"Wait in {room} and you're moved in automatically."
         ),
-        accent_colour=ACCENT,
+        accent_colour=style.QUEUE_COLOUR,
     )
     view = LayoutView(timeout=None)
     view.add_item(box)

@@ -12,7 +12,18 @@ from django.conf import settings
 from django.db import transaction
 from django.utils.text import slugify
 
+from league.domain.mode_schema import DraftMode
 from league.models import Champion
+
+
+def draft_pool(mode: DraftMode) -> list[int]:
+    """The champions a new draft in this mode can use: enabled and not excluded, by ID."""
+    excluded = set(mode.champion_draft.excluded_champion_ids)
+    return sorted(
+        pk
+        for pk in Champion.objects.filter(is_enabled=True).values_list("pk", flat=True)
+        if pk not in excluded
+    )
 
 
 def _slug(name: str, champion_id: int) -> str:
@@ -43,15 +54,61 @@ class EmojiLoad:
     unknown: list[str] = field(default_factory=list)
 
 
-@transaction.atomic
-def load_emojis(path: Path) -> EmojiLoad:
-    """Set champions' custom emojis from a `{name: emoji_id}` file, by name or alias."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+def _by_name() -> dict[str, Champion]:
     by_name: dict[str, Champion] = {}
     for champion in Champion.objects.all():
         by_name[champion.name.lower()] = champion
         for alias in champion.aliases:
             by_name.setdefault(alias.lower(), champion)
+    return by_name
+
+
+def is_unicode_emoji(value: str) -> bool:
+    """A plain emoji Discord will take on a button: not text, not a custom emoji.
+
+    Discord rejects a bad button emoji, and the worker treats that as permanent, so one bad entry
+    would leave a board stuck. This is a cheap check of the shape, not a full emoji database.
+    """
+    if not value or len(value) > 16 or value != value.strip():
+        return False
+    if any(char.isspace() or char in "<>:@#" for char in value):
+        return False
+    # Every emoji starts above the ASCII range; variation selectors and joiners follow it.
+    return ord(value[0]) > 0x2000 and not value[0].isalnum()
+
+
+@transaction.atomic
+def load_unicode_emojis(path: Path) -> EmojiLoad:
+    """Set the plain fallback emojis from the file's `unicode` section. Safe to run again.
+
+    Only champions with no fallback yet get one, so an admin's edit is kept, as `seed_from_file`
+    keeps theirs. An invalid entry is refused outright rather than loaded.
+    """
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    section = data.get("unicode") or {}
+    invalid = [str(name) for name, emoji in section.items() if not is_unicode_emoji(str(emoji))]
+    if invalid:
+        raise ValueError(f"Not a plain emoji for: {', '.join(sorted(invalid))}")
+    by_name = _by_name()
+    result = EmojiLoad()
+    for name, emoji in section.items():
+        match = by_name.get(str(name).lower())
+        if match is None:
+            result.unknown.append(str(name))
+        elif match.unicode_emoji:
+            result.unchanged.append(match.name)
+        else:
+            match.unicode_emoji = str(emoji)
+            match.save(update_fields=["unicode_emoji", "updated_at"])
+            result.updated.append(match.name)
+    return result
+
+
+@transaction.atomic
+def load_emojis(path: Path) -> EmojiLoad:
+    """Set champions' custom emojis from a `{name: emoji_id}` file, by name or alias."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    by_name = _by_name()
     result = EmojiLoad()
     for name, emoji_id in (data.get("emojis") or {}).items():
         match = by_name.get(str(name).lower())

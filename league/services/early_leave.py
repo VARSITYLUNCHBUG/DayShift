@@ -14,9 +14,11 @@ from django.db import transaction
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.models import EarlyLeave, Match, MatchParticipant, Player
+from league.models.alerts import AlertKind
 from league.models.matches import EarlyLeaveStatus, Source
 from league.models.moderation import PenaltyKind
-from league.services import penalties
+from league.models.permissions import Area
+from league.services import alerts, penalties
 from league.services.common import (
     add_effect,
     bump,
@@ -112,13 +114,12 @@ def answer(match_id: int, captain: Player, agree: bool) -> None:
         _void(match, claim, captain, Source.USER)
         return
     _close(claim, EarlyLeaveStatus.REJECTED, captain)
-    add_effect(
+    alerts.raise_alert(
         match.community,
-        "ping_staff",
-        {
-            "text": f"needs a decision: did {claim.leaver.display_name} leave early? The captains "
-            "disagree. `/match early_leave` voids it."
-        },
+        AlertKind.EARLY_LEAVE,
+        Area.DISPUTES,
+        f"Did {claim.leaver.display_name} leave early? The captains disagree. "
+        "`/match early_leave` voids the match.",
         match=match,
     )
     bump(match)
@@ -185,13 +186,12 @@ def tick(moment: datetime) -> int:
             if claim.status != EarlyLeaveStatus.PENDING:
                 continue
             _close(claim, EarlyLeaveStatus.EXPIRED, None)
-            add_effect(
+            alerts.raise_alert(
                 match.community,
-                "ping_staff",
-                {
-                    "text": f"needs a decision: {claim.leaver.display_name} may have left "
-                    "early and the other captain didn't answer. `/match early_leave` voids it."
-                },
+                AlertKind.EARLY_LEAVE,
+                Area.DISPUTES,
+                f"{claim.leaver.display_name} may have left early, and the other captain didn't "
+                "answer. `/match early_leave` voids the match.",
                 match=match,
             )
             bump(match)

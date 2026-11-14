@@ -9,31 +9,34 @@ import discord
 from discord import ButtonStyle, SelectOption
 from discord.ui import ActionRow, Container, LayoutView, MediaGallery, Separator, TextDisplay
 
+from bot.renderers import style
+from bot.renderers.grid import BUTTONS_PER_ROW, SELECT_LIMIT, hero_emoji
+from bot.renderers.grid import chunks as _chunks
+from bot.renderers.grid import fits as grid_fits
+from bot.renderers.grid import messages as grid_messages
 from bot.routing import RouteButton, RouteSelect
-from league.domain.engine import Status
+from league.domain.engine import (
+    ARCHMOTHER,
+    COINFLIP_LABELS,
+    FIRST_PICK,
+    HIDDEN_KING,
+    LAST_PICK,
+    Status,
+)
 from league.models.subs import SubStatus
-from league.services import dev
-from league.services.boards import BoardState, ChampionOption, PlayerLine, SubLine
+from league.services.boards import BoardState, ChampionOption, DraftLine, PlayerLine, SubLine
 from league.services.subs import OfferInfo
 
-# Discord caps a string select at 25 options, and an action row at 5 buttons.
-SELECT_LIMIT = 25
-BUTTONS_PER_ROW = 5
-# A message holds 40 components, counting each row and button, so a message of nothing but rows
-# holds 6 full rows. The champion grid gets up to two such messages of its own below the board; a
-# bigger roster falls back to selects.
-ROWS_PER_GRID_MESSAGE = 6
-GRID_MESSAGES = 2
-ACCENT_LIVE = 0x5865F2
-ACCENT_ATTENTION = 0xFEE75C
-ACCENT_DONE = 0x57F287
-ACCENT_VOID = 0x80848E
+ACCENT_LIVE = style.LOBBY_COLOUR
+ACCENT_ATTENTION = style.ATTENTION_COLOUR
+ACCENT_DONE = style.DONE_COLOUR
+ACCENT_VOID = style.VOID_COLOUR
 
 STATUS_TITLES = {
     Status.READY_CHECK: "Ready check",
     Status.CAPTAIN_PHASE: "Captain vote",
     Status.PLAYER_DRAFT: "Player draft",
-    Status.SIDE_SELECT: "Choose sides",
+    Status.COINFLIP: "Captain coinflip",
     Status.CHAMPION_DRAFT: "Champion draft",
     Status.LOBBY_CODE: "Lobby code",
     Status.IN_PROGRESS: "Game on",
@@ -41,14 +44,16 @@ STATUS_TITLES = {
     Status.DISPUTED: "Disputed: waiting for staff",
     Status.COMPLETED: "Finished",
     Status.VOIDED: "Cancelled",
+    Status.CAPTAIN_CLAIM: "Claim a side",
+    Status.READY_TO_DRAFT: "Ready to draft",
+    Status.DRAFTED: "Drafted",
 }
 
 CHECKLIST = "Lobby settings: Normal mode, bots off, cheats off, duplicate heroes off."
 
 
-def player_mention(discord_user_id: int, name: str) -> str:
-    """A real mention. Fake test players have no account, so they show their name."""
-    return f"@{name}" if dev.is_fake(discord_user_id) else f"<@{discord_user_id}>"
+def player_mention(discord_user_id: int) -> str:
+    return f"<@{discord_user_id}>"
 
 
 # What happens when each timer runs out. Each reads on from Discord's "in 18 seconds".
@@ -56,15 +61,15 @@ TIMER_LABELS = {
     Status.READY_CHECK: "Ready check closes",
     Status.CAPTAIN_PHASE: "Vote closes",
     Status.PLAYER_DRAFT: "Auto-pick",
-    Status.SIDE_SELECT: "Coin flip",
+    Status.COINFLIP: "Random choice",
     Status.CHAMPION_DRAFT: "Auto-pick",
     Status.LOBBY_CODE: "Code due",
     Status.AWAITING_CONFIRMATION: "Confirms automatically",
 }
 
 
-def _stamp(moment: datetime, style: str = "R") -> str:
-    return f"<t:{int(moment.timestamp())}:{style}>"
+def _stamp(moment: datetime, fmt: str = "R") -> str:
+    return f"<t:{int(moment.timestamp())}:{fmt}>"
 
 
 def countdown(state: BoardState) -> str:
@@ -119,24 +124,26 @@ def _team_line(state: BoardState, team: str) -> str:
     return f"{_team_heading(state, team, lines)}: {names}"
 
 
-def _picks(state: BoardState, action: str, team: str | None = None) -> str:
-    labels = [
-        ("⏱ " if line.auto else "🎲 " if line.random_choice else "") + line.label
-        for line in state.actions
-        if line.action == action and (team is None or line.team == team)
-    ]
-    return ", ".join(labels) if labels else "-"
+def _scrim_header(state: BoardState) -> str:
+    """Bebot's titles. The coinflip screens carry their own."""
+    if state.status == Status.CAPTAIN_CLAIM:
+        return f"## {style.draft_title(state.match_id)}"
+    if state.status in {Status.CHAMPION_DRAFT, Status.DRAFTED}:
+        return f"## {style.draft_title(state.match_id, state.draft_name)}"
+    return ""
 
 
 def _header(state: BoardState) -> str:
+    if state.is_scrim:
+        return _scrim_header(state)
+    if state.status == Status.CHAMPION_DRAFT:
+        # Bebot's title. The timer sits on the acting captain's line, unless a sub has paused it.
+        title = f"## {style.draft_title(state.match_id, state.draft_name)}"
+        return f"{title}\n{countdown(state)}" if state.on_hold else title
     title = STATUS_TITLES.get(state.status, state.status)
     timer = countdown(state)
     line = f"## Match #{state.match_id}: {title}"
     return f"{line}\n{timer}" if timer else line
-
-
-def _chunks(items: list[Any], size: int = SELECT_LIMIT) -> list[list[Any]]:
-    return [items[start : start + size] for start in range(0, len(items), size)]
 
 
 def _ready(state: BoardState, box: Container[Any]) -> None:
@@ -204,35 +211,51 @@ def _player_draft(state: BoardState, box: Container[Any]) -> None:
         box.add_item(ActionRow(*[_player_button(state, player) for player in chunk]))
 
 
-def _side_select(state: BoardState, box: Container[Any]) -> None:
-    box.add_item(TextDisplay(_team_block(state, "A") + "\n\n" + _team_block(state, "B")))
-    box.add_item(Separator())
-    box.add_item(
-        TextDisplay(
-            "Captains: claim a side. **Hidden King bans and picks first.** "
-            "The first claim decides both sides; if nobody claims, it's a coin flip."
+_COIN_STYLE = {
+    FIRST_PICK: ButtonStyle.primary,
+    LAST_PICK: ButtonStyle.primary,
+    HIDDEN_KING: ButtonStyle.danger,
+    ARCHMOTHER: ButtonStyle.primary,
+}
+_COIN_EMOJI = {HIDDEN_KING: style.HK_EMOJI, ARCHMOTHER: style.AM_EMOJI}
+
+
+def coin_buttons(action: str, target_id: int, options: tuple[str, ...]) -> ActionRow[Any]:
+    """Bebot's coinflip buttons: First Pick, Last Pick, Hidden King, Archmother."""
+    return ActionRow(
+        *(
+            RouteButton(
+                action,
+                target_id,
+                choice,
+                label=COINFLIP_LABELS[choice],
+                style=_COIN_STYLE[choice],
+                emoji=(
+                    discord.PartialEmoji(name=_COIN_EMOJI[choice])
+                    if choice in _COIN_EMOJI
+                    else None
+                ),
+            )
+            for choice in options
         )
     )
-    box.add_item(
-        ActionRow(
-            RouteButton(
-                "claim_side",
-                state.match_id,
-                "hk",
-                label="Become Hidden King captain",
-                style=ButtonStyle.danger,
-                emoji=discord.PartialEmoji(name="🔶"),
-            ),
-            RouteButton(
-                "claim_side",
-                state.match_id,
-                "am",
-                label="Become Archmother captain",
-                style=ButtonStyle.primary,
-                emoji=discord.PartialEmoji(name="🔷"),
-            ),
-        )
-    )
+
+
+def _coinflip(state: BoardState, box: Container[Any]) -> None:
+    winner = state.coinflip_winner
+    loser = "B" if winner == "A" else "A"
+    if not state.is_scrim:
+        box.add_item(TextDisplay(_team_block(state, "A") + "\n\n" + _team_block(state, "B")))
+        box.add_item(Separator())
+    who = state.captains.get(winner, "-") if state.is_scrim else state.team_name(winner)
+    lines = [f"### {style.COIN_EMOJI} Captain Coinflip", f"**{who}** wins the flip!"]
+    if not state.coinflip_winner_choice:
+        lines.append(f"{state.captains.get(winner, 'Their captain')}, choose your preference:")
+    else:
+        lines.append(f"Chose: {COINFLIP_LABELS[state.coinflip_winner_choice]}")
+        lines.append(f"{state.captains.get(loser, 'Their captain')}, choose your preference:")
+    box.add_item(TextDisplay("\n".join(lines)))
+    box.add_item(coin_buttons("coin_choice", state.match_id, state.coinflip_options))
 
 
 def _next_up(state: BoardState) -> str:
@@ -254,7 +277,7 @@ def _player_button(state: BoardState, player: PlayerLine) -> RouteButton:
 
 
 def _champion_emoji(champion: ChampionOption) -> discord.PartialEmoji | None:
-    return discord.PartialEmoji(name="c", id=champion.emoji_id) if champion.emoji_id else None
+    return hero_emoji(champion.emoji_id, champion.unicode_emoji)
 
 
 def _champion_button(state: BoardState, champion: ChampionOption) -> RouteButton:
@@ -301,20 +324,67 @@ def _champion_selects(state: BoardState) -> list[ActionRow[Any]]:
     ]
 
 
+def _hero_text(line: DraftLine) -> str:
+    """Bebot's hero line: plain emoji, name, and "(random choice)" or "(randomed)"."""
+    emoji = style.hero_emoji_text(line.emoji)
+    return style.hero_line(emoji, line.label, random_choice=line.random_choice, auto=line.auto)
+
+
+def _captain_line(state: BoardState, team: str) -> PlayerLine | None:
+    return next((p for p in state.players if p.is_captain and p.team == team), None)
+
+
+def _captains_block(state: BoardState, *, final: bool) -> list[str]:
+    rows = [f"{style.CAPTAIN_EMOJI} **Captains**"]
+    for team in state.side_order:
+        emoji = style.side_emoji(state.side_of(team))
+        captain = _captain_line(state, team)
+        name = captain.name if captain else "-"
+        if not final and team == state.acting_team and captain is not None:
+            # Bebot's "@Pike ban a hero!". Board mentions never ping, but they stand out.
+            timer = "" if state.on_hold else style.countdown(state.deadline_at)
+            mention = player_mention(captain.discord_user_id)
+            rows.append(f"{emoji} {mention} {state.step_action} a hero!{timer}")
+        else:
+            rows.append(f"{emoji} {name}")
+    return rows
+
+
+def draft_summary(state: BoardState, *, final: bool) -> str:
+    """Bebot's draft: captains, bans, then each side's heroes, one per line."""
+    bans = [_hero_text(line) for line in state.actions if line.action == "ban"]
+    parts = [*_captains_block(state, final=final), "", f"{style.BAN_EMOJI} **Bans**"]
+    parts.append(style.hero_list(bans))
+    for team in state.side_order:
+        side = state.side_of(team)
+        picks = [
+            _hero_text(line)
+            for line in state.actions
+            if line.action == "pick" and line.team == team
+        ]
+        parts += [
+            "",
+            f"{style.side_emoji(side)} **{style.side_name(side)}**: {state.team_name(team)}",
+        ]
+        parts.append(style.hero_list(picks))
+    return "\n".join(parts)
+
+
 def _champion_draft(state: BoardState, box: Container[Any]) -> None:
-    box.add_item(TextDisplay(_team_line(state, "A") + "\n" + _team_line(state, "B")))
-    box.add_item(Separator())
-    box.add_item(
-        TextDisplay(
-            f"**Bans:** {_picks(state, 'ban')}\n"
-            f"**{state.team_name('A')} picks:** {_picks(state, 'pick', 'A')}\n"
-            f"**{state.team_name('B')} picks:** {_picks(state, 'pick', 'B')}"
-        )
+    box.add_item(TextDisplay(draft_summary(state, final=False)))
+    box.add_item(TextDisplay(style.timeline_block(state.champion_steps, state.champion_step)))
+    if state.is_scrim:
+        return  # Bebot's board alone: a scrim has no ratings to show.
+    # Our extras: each team's rating, and where the draft is up to.
+    ratings = "\n".join(
+        f"-# {_team_heading(state, team, _team(state, team))}"
+        for team in state.side_order
+        if _team(state, team)
     )
-    verb, noun = ("banning", "ban") if state.step_action == "ban" else ("picking", "pick")
-    progress = f": {noun} {state.turn_position} of {state.turn_total}" if state.turn_total else ""
+    noun = "Ban" if state.step_action == "ban" else "Pick"
+    progress = f"{noun} {state.turn_position} of {state.turn_total}." if state.turn_total else ""
     box.add_item(
-        TextDisplay(f"**{state.acting_captain_name}** is {verb}{progress}.{_next_up(state)}")
+        TextDisplay(f"{progress}{_next_up(state)}".strip() + (f"\n{ratings}" if ratings else ""))
     )
 
 
@@ -338,32 +408,20 @@ def render_pickers(state: BoardState) -> list[LayoutView]:
     if state.status != Status.CHAMPION_DRAFT or state.on_hold:
         return []
     rows = [*_champion_rows(state, state.champions), ActionRow(_random_button(state))]
-    if len(rows) > ROWS_PER_GRID_MESSAGE * GRID_MESSAGES:
+    if not grid_fits(rows):
         rows = [*_champion_selects(state), ActionRow(_random_button(state))]
-    messages = -(-len(rows) // ROWS_PER_GRID_MESSAGE)
-    per_message = -(-len(rows) // messages)  # Balanced, so neither half looks like an afterthought.
-    views = []
-    for start in range(0, len(rows), per_message):
-        view = LayoutView(timeout=None)
-        for row in rows[start : start + per_message]:
-            view.add_item(row)
-        views.append(view)
-    return views
+    return grid_messages(rows)
 
 
 def _final_draft_summary(state: BoardState) -> str:
-    return (
-        _team_block(state, "A")
-        + f"\nChampions: {_picks(state, 'pick', 'A')}\n\n"
-        + _team_block(state, "B")
-        + f"\nChampions: {_picks(state, 'pick', 'B')}\n\n"
-        + f"**Bans:** {_picks(state, 'ban')}"
-    )
+    """Bebot's finished draft, then who's on each team for the lobby."""
+    teams = "\n".join(_team_line(state, team) for team in state.side_order)
+    return f"{draft_summary(state, final=True)}\n\n{teams}"
 
 
 def _lobby_code(state: BoardState, box: Container[Any]) -> None:
     # The draft ends with a name, the summary, a GIF and GLHF.
-    box.add_item(TextDisplay(f"### 🏆 Draft: {state.draft_name} 🏆"))
+    box.add_item(TextDisplay(f"### {style.draft_title(state.match_id, state.draft_name)}"))
     box.add_item(TextDisplay(_final_draft_summary(state)))
     if state.gif_url:
         box.add_item(MediaGallery(discord.MediaGalleryItem(state.gif_url)))
@@ -490,24 +548,7 @@ def _disputed(state: BoardState, box: Container[Any]) -> None:
         else "No result was reported.\n"
     )
     box.add_item(
-        TextDisplay(reported + "Staff: choose the result. Ratings are unchanged until then.")
-    )
-    box.add_item(
-        ActionRow(
-            RouteButton(
-                "resolve_a",
-                state.match_id,
-                label=f"{state.team_name('A')} won"[:80],
-                style=ButtonStyle.primary,
-            ),
-            RouteButton(
-                "resolve_b",
-                state.match_id,
-                label=f"{state.team_name('B')} won"[:80],
-                style=ButtonStyle.primary,
-            ),
-            RouteButton("resolve_void", state.match_id, label="Void", style=ButtonStyle.danger),
-        )
+        TextDisplay(reported + "Sent to staff, who will decide. Ratings are unchanged until then.")
     )
 
 
@@ -537,11 +578,82 @@ def _finished(state: BoardState, box: Container[Any]) -> None:
         box.add_item(TextDisplay(f"No rating changes.{_closing(state)}"))
 
 
+def _captain_claim(state: BoardState, box: Container[Any]) -> None:
+    """Bebot's /startdraft: two Become Captain buttons. The Hidden King bans and picks first."""
+    lines = ["Captains: claim a side."]
+    for side, team in (("hk", "A"), ("am", "B")):
+        captain = _captain_line(state, team)
+        lines.append(
+            f"{style.side_emoji(side)} {style.side_name(side)}: {captain.name if captain else '-'}"
+        )
+    box.add_item(TextDisplay("\n".join(lines)))
+    box.add_item(
+        ActionRow(
+            *(
+                RouteButton(
+                    "claim_captain",
+                    state.match_id,
+                    side,
+                    label=f"Become {style.side_name(side)} Captain",
+                    style=button_style,
+                    disabled=_captain_line(state, team) is not None,
+                    emoji=discord.PartialEmoji(name=style.side_emoji(side)),
+                )
+                for side, team, button_style in (
+                    ("hk", "A", ButtonStyle.danger),
+                    ("am", "B", ButtonStyle.primary),
+                )
+            )
+        )
+    )
+
+
+def _ready_to_draft(state: BoardState, box: Container[Any]) -> None:
+    """Bebot's "Captain Coinflip - Complete", with the Start Draft button."""
+    winner = state.coinflip_winner
+    loser = "B" if winner == "A" else "A"
+    first_side = state.side_of(state.champion_first_pick)
+    lines = [
+        f"### {style.COIN_EMOJI} Captain Coinflip - Complete",
+        f"**{state.captains.get(winner, '-')}** chose: "
+        f"{COINFLIP_LABELS[state.coinflip_winner_choice]}",
+        f"**{state.captains.get(loser, '-')}** chose: "
+        f"{COINFLIP_LABELS[state.coinflip_loser_choice]}",
+        "",
+        *(
+            f"{style.side_emoji(state.side_of(team))} {style.side_name(state.side_of(team))}: "
+            f"{state.captains.get(team, '-')}"
+            for team in state.side_order
+        ),
+        f"{style.side_name(first_side)} bans and picks first. Ready to start the draft!",
+    ]
+    box.add_item(TextDisplay("\n".join(lines)))
+    box.add_item(
+        ActionRow(
+            RouteButton(
+                "start_draft", state.match_id, label="Start Draft", style=ButtonStyle.success
+            )
+        )
+    )
+
+
+def _drafted(state: BoardState, box: Container[Any]) -> None:
+    """A scrim's end: Bebot's finished draft, a GIF and GLHF."""
+    box.add_item(TextDisplay(draft_summary(state, final=True)))
+    if state.gif_url:
+        box.add_item(MediaGallery(discord.MediaGalleryItem(state.gif_url)))
+    box.add_item(TextDisplay("# GLHF"))
+
+
+def _stopped(state: BoardState, box: Container[Any]) -> None:
+    box.add_item(TextDisplay("Draft stopped."))
+
+
 _SECTIONS = {
     Status.READY_CHECK: _ready,
     Status.CAPTAIN_PHASE: _captain_vote,
     Status.PLAYER_DRAFT: _player_draft,
-    Status.SIDE_SELECT: _side_select,
+    Status.COINFLIP: _coinflip,
     Status.CHAMPION_DRAFT: _champion_draft,
     Status.LOBBY_CODE: _lobby_code,
     Status.IN_PROGRESS: _in_progress,
@@ -549,12 +661,23 @@ _SECTIONS = {
     Status.DISPUTED: _disputed,
     Status.COMPLETED: _finished,
     Status.VOIDED: _finished,
+    Status.CAPTAIN_CLAIM: _captain_claim,
+    Status.READY_TO_DRAFT: _ready_to_draft,
+    Status.DRAFTED: _drafted,
 }
 
 
 def _accent(state: BoardState) -> int:
     if state.on_hold:
         return ACCENT_ATTENTION
+    if state.status in {Status.COINFLIP, Status.READY_TO_DRAFT}:
+        return style.COINFLIP_COLOUR
+    if state.status == Status.CAPTAIN_CLAIM:
+        return style.HK_COLOUR
+    if state.status == Status.CHAMPION_DRAFT and state.acting_team:
+        return style.side_colour(state.side_of(state.acting_team))
+    if state.status == Status.DRAFTED and state.champion_steps:
+        return style.side_colour(state.champion_steps[-1][1])  # Bebot: the last side's colour.
     if state.status == Status.COMPLETED:
         return ACCENT_DONE
     if state.status == Status.VOIDED:
@@ -594,7 +717,13 @@ def _sub_text(state: BoardState, line: SubLine) -> str:
             f"The other captain can approve or refuse {_stamp(line.deadline_at)}."
         )
     if line.offer_name:
-        source = "next in the queue" if line.offer_from_queue else "invited"
+        source = (
+            "next in the queue"
+            if line.offer_from_queue
+            else "longest in the Waiting Room"
+            if line.offer_from_prio
+            else "invited"
+        )
         answer = f" {_stamp(line.offer_deadline_at)}" if line.offer_deadline_at else ""
         return f"🔁 {who} is subbing out. Waiting for **{line.offer_name}** ({source}){answer}."
     if line.name_until is not None:
@@ -604,8 +733,31 @@ def _sub_text(state: BoardState, line: SubLine) -> str:
     return f"🔁 {who} needs a sub. Nobody in the queue can take it yet, so name someone."
 
 
+# Spots the bot opened itself, offered for players to accept: nobody names a sub for these.
+OPENED_BY_BOT = ("missed_ready", "restart")
+
+
+def _open_spots_text(lines: list[SubLine]) -> str:
+    """Every spot the bot opened (a missed ready check, or a restart), on one line: they're
+    offered for players to accept, so there's nothing to click here, and it keeps the board
+    under Discord's limit."""
+    waiting = [f"**{line.offer_name}**" for line in lines if line.offer_name]
+    spots = f"{len(lines)} spot{'' if len(lines) == 1 else 's'}"
+    source = "from the ready check" if lines[0].reason == "missed_ready" else "after the restart"
+    asked = f" Waiting for {', '.join(waiting)}." if waiting else " Nobody can take them yet."
+    return (
+        f"🔁 {spots} open {source}, offered to the priority list, then the queue."
+        f"{asked} Cancelled {_stamp(lines[0].deadline_at)} if not filled."
+    )
+
+
 def _subs(state: BoardState, box: Container[Any]) -> None:
+    opened = [line for line in state.subs if line.reason in OPENED_BY_BOT]
+    if opened:
+        box.add_item(TextDisplay(_open_spots_text(opened)))
     for line in state.subs:
+        if line.reason in OPENED_BY_BOT:
+            continue
         box.add_item(TextDisplay(_sub_text(state, line)))
         box.add_item(ActionRow(*_sub_buttons(state, line)))
 
@@ -619,9 +771,14 @@ def _strip_buttons(box: Container[Any], start: int) -> None:
 
 def render_board(state: BoardState) -> LayoutView:
     box: Container[Any] = Container(accent_colour=_accent(state))
-    box.add_item(TextDisplay(_header(state)))
+    header = _header(state)
+    if header:
+        box.add_item(TextDisplay(header))
     start = len(box.children)
-    _SECTIONS[state.status](state, box)
+    if state.is_scrim and state.status == Status.VOIDED:
+        _stopped(state, box)
+    else:
+        _SECTIONS[state.status](state, box)
     # A result can still come in while a sub is on the way: the game may have ended anyway.
     if state.on_hold and state.status != Status.IN_PROGRESS:
         _strip_buttons(box, start)
@@ -631,7 +788,8 @@ def render_board(state: BoardState) -> LayoutView:
     if state.can_request_sub:
         box.add_item(ActionRow(RouteButton("sub_open", state.match_id, label="Request a sub")))
     if state.status == Status.READY_CHECK:  # Once is enough: it doesn't change during a match.
-        box.add_item(TextDisplay(f"-# Format: {state.mode_name}"))
+        restart = f" · Restarted from match #{state.restarted_from}" if state.restarted_from else ""
+        box.add_item(TextDisplay(f"-# Format: {state.mode_name}{restart}"))
     view = LayoutView(timeout=None)
     view.add_item(box)
     return view
@@ -681,37 +839,53 @@ def render_voice_dm(
     return view
 
 
-def render_sub_offer_dm(info: OfferInfo, team_name: str) -> LayoutView:
-    """Asks someone outside the match to take an open spot."""
+def _offer_intro(info: OfferInfo, team_name: str) -> str:
     team = f" on **{team_name}**" if team_name else ""
     if info.invited_by:
-        intro = f"**{info.invited_by}** asked you to take **{info.leaving_name}**'s spot{team}."
-    else:
-        intro = f"A spot opened{team}, and you're next in the queue."
+        return f"**{info.invited_by}** asked you to take **{info.leaving_name}**'s spot{team}."
+    spot = "A spot opened in the ready check" if info.missed_ready else f"A spot opened{team}"
+    if info.source == "prio":
+        return f"{spot}, and you've waited longest in the Waiting Room."
+    return f"{spot}, and you're next in the queue."
+
+
+def _offer_buttons(info: OfferInfo) -> ActionRow[Any]:
+    return ActionRow(
+        RouteButton(
+            "sub_accept",
+            info.match_id,
+            info.offer_id,
+            label="I'll sub in",
+            style=ButtonStyle.success,
+        ),
+        RouteButton("sub_decline", info.match_id, info.offer_id, label="Can't right now"),
+    )
+
+
+def render_sub_offer_dm(info: OfferInfo, team_name: str) -> LayoutView:
+    """Asks someone outside the match to take an open spot."""
     phase = STATUS_TITLES.get(info.status, info.status)
     lines = [
-        f"## Can you sub in?\nMatch #{info.match_id} ({phase}). {intro}",
+        f"## Can you sub in?\nMatch #{info.match_id} ({phase}). {_offer_intro(info, team_name)}",
         f"Answer {_stamp(info.deadline_at)}.",
     ]
     if info.status == Status.IN_PROGRESS:
         lines.append("-# The game is already running. You take this team's result.")
     view = LayoutView(timeout=None)
     view.add_item(
-        Container(
-            TextDisplay("\n".join(lines)),
-            ActionRow(
-                RouteButton(
-                    "sub_accept",
-                    info.match_id,
-                    info.offer_id,
-                    label="I'll sub in",
-                    style=ButtonStyle.success,
-                ),
-                RouteButton("sub_decline", info.match_id, info.offer_id, label="Can't right now"),
-            ),
-            accent_colour=ACCENT_LIVE,
-        )
+        Container(TextDisplay("\n".join(lines)), _offer_buttons(info), accent_colour=ACCENT_LIVE)
     )
+    return view
+
+
+def render_sub_offer_notice(info: OfferInfo, team_name: str) -> LayoutView:
+    """The same offer as a mention in the priority list's channel, for anyone who misses DMs."""
+    text = (
+        f"{player_mention(info.discord_user_id)} {_offer_intro(info, team_name)} "
+        f"Match #{info.match_id}: answer {_stamp(info.deadline_at)}."
+    )
+    view = LayoutView(timeout=None)
+    view.add_item(Container(TextDisplay(text), _offer_buttons(info), accent_colour=ACCENT_LIVE))
     return view
 
 

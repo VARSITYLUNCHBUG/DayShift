@@ -21,6 +21,7 @@ def publish_presets(*, captain_rule: bool = False) -> None:
     the presets as shipped.
     """
     champions.seed_from_file(PRESETS / "champions.yaml")
+    champions.load_unicode_emojis(PRESETS / "champion_emojis.yaml")
     for path in sorted(PRESETS.glob("*.yaml")):
         if path.name not in NOT_MODES:
             body = modes.load_yaml(path)
@@ -59,6 +60,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     monkeypatch.setattr(common, "now", instance.now)
     # Services import `now` by name, so each one needs patching too.
     from league.services import (
+        alerts,
         api_results,
         awards,
         corrections,
@@ -69,7 +71,10 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
         lobby,
         ocr,
         penalties,
+        pings,
+        prio,
         results,
+        scrims,
         standing,
         steam,
         subs,
@@ -78,6 +83,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     from league.services import ratings as ratings_service
 
     for module in (
+        alerts,
         api_results,
         awards,
         corrections,
@@ -88,9 +94,12 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
         lobby,
         ocr,
         penalties,
+        pings,
+        prio,
         queue_service,
         ratings_service,
         results,
+        scrims,
         standing,
         steam,
         subs,
@@ -106,7 +115,7 @@ def league(db: None) -> Community:
 
 
 def make_player(number: int) -> Player:
-    # Well above the fake-player range, like a real Discord ID.
+    # A large number, like a real Discord ID.
     return common.get_or_create_player(10_000_000 + number, f"P{number}")
 
 

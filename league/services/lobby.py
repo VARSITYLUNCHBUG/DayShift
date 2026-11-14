@@ -9,6 +9,7 @@ from collections.abc import Collection, Sequence
 from django.db import transaction
 from django.db.models import Max, Q
 
+from league.domain import copy
 from league.domain.engine import (
     LIVE,
     TERMINAL,
@@ -21,18 +22,21 @@ from league.domain.errors import InvalidAction, StaleAction
 from league.domain.mode_schema import parse_mode
 from league.models import (
     CaptainVote,
-    Champion,
     Community,
     Match,
     MatchParticipant,
+    MatchResource,
     MatchResult,
     MatchTransition,
     Player,
     QueueEntry,
 )
-from league.models.matches import RemovedReason, Source
+from league.models.alerts import AlertKind
+from league.models.matches import RemovedReason, ResourceKind, Source
 from league.models.moderation import PenaltyKind
-from league.services import penalties, standing
+from league.models.permissions import Area
+from league.models.subs import SubReason
+from league.services import alerts, champions, penalties, prio, standing
 from league.services.common import (
     active_participants,
     add_effect,
@@ -65,12 +69,7 @@ TEXT_CHANNEL_GRACE_MINUTES = 15
 def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match | None:
     """Turn the front of the queue into a lobby. Caller holds the community lock."""
     mode = parse_mode(community.active_mode.body)
-    excluded = set(mode.champion_draft.excluded_champion_ids)
-    pool = sorted(
-        pk
-        for pk in Champion.objects.filter(is_enabled=True).values_list("pk", flat=True)
-        if pk not in excluded
-    )
+    pool = champions.draft_pool(mode)
     if len(pool) < mode.champions_consumed_max:
         logger.error(
             "Queue full but champion pool too small",
@@ -97,6 +96,7 @@ def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match |
         for entry in entries
     )
     QueueEntry.objects.filter(pk__in=[entry.pk for entry in entries]).delete()
+    _matched(community, [entry.player for entry in entries])
 
     add_effect(community, "create_lobby", match=match, dedupe_key=f"create_lobby:{match.pk}")
     for entry in entries:
@@ -104,6 +104,16 @@ def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match |
     render_queue(community)
     logger.info("Lobby created", extra={"match": match.pk})
     return match
+
+
+def _matched(community: Community, players: Sequence[Player]) -> None:
+    """They're in a match now: off the voice priority list. Every way into a match calls this."""
+    prio.drop_players(community.pk, [player.discord_user_id for player in players])
+
+
+def _unmatched(community: Community) -> None:
+    """Someone left a live match before it ended. Every early way out calls this."""
+    prio.recheck(community)
 
 
 def _gather(match: Match, player: Player, *, sub: bool = False) -> None:
@@ -128,7 +138,7 @@ def mark_ready(match_id: int, player: Player) -> None:
     require_not_on_hold(match)
     participant = require_participant(match, player)
     if participant.ready_at is not None:
-        raise InvalidAction("You're already marked as ready.")
+        raise InvalidAction(copy.ALREADY_READY)
     participant.ready_at = now()
     participant.save(update_fields=["ready_at"])
     bump(match)
@@ -139,7 +149,10 @@ def mark_ready(match_id: int, player: Player) -> None:
 
 
 def on_ready_timeout(match: Match) -> None:
-    """Replace everyone who missed it from the queue, or cancel if the queue can't cover them."""
+    """Take out everyone who missed it, and offer their spots: the priority list first, then the
+    queue. The lobby waits for them; unfilled after `refill_seconds`, it's cancelled."""
+    from league.services import subs
+
     community = lock_community(match.community_id)
     mode = mode_of(match)
     missed = list(active_participants(match).filter(ready_at__isnull=True))
@@ -148,9 +161,6 @@ def on_ready_timeout(match: Match) -> None:
         return
 
     moment = now()
-    replacements = list(
-        QueueEntry.objects.filter(community=community).select_related("player")[: len(missed)]
-    )
     for participant in missed:
         participant.is_active = False
         participant.removed_reason = RemovedReason.MISSED_READY
@@ -164,10 +174,6 @@ def on_ready_timeout(match: Match) -> None:
             reason=f"Missed the ready check for match #{match.pk}",
         )
 
-    if len(replacements) < len(missed):
-        void_live(match, source=Source.TIMEOUT, reason="Not enough players ready", requeue=True)
-        return
-
     for participant in missed:
         add_effect(
             community,
@@ -175,22 +181,26 @@ def on_ready_timeout(match: Match) -> None:
             {"discord_user_id": participant.player.discord_user_id},
             match=match,
         )
-    for entry in replacements:
-        MatchParticipant.objects.create(
-            match=match, player=entry.player, queue_joined_at=entry.joined_at
-        )
-        add_effect(
-            community,
-            "grant_access",
-            {"discord_user_id": entry.player.discord_user_id},
-            match=match,
-        )
-        _gather(match, entry.player)
-    QueueEntry.objects.filter(pk__in=[entry.pk for entry in replacements]).delete()
+    _unmatched(community)
+    subs.open_openings(match, mode, [participant.player for participant in missed])
+    render_queue(community)
 
-    match.deadline_at = seconds_from_now(mode.ready_check.seconds)
-    bump(match, "deadline_at")
-    render_board(match)
+
+def add_player(match: Match, player: Player) -> None:
+    """Someone accepted an open spot in the ready check: they're in, and ready. The caller holds
+    the match lock and has checked they're free."""
+    community = lock_community(match.community_id)
+    entry = QueueEntry.objects.filter(community=community, player=player).first()
+    MatchParticipant.objects.create(
+        match=match,
+        player=player,
+        queue_joined_at=entry.joined_at if entry else now(),
+        ready_at=now(),  # Accepting means they're here.
+    )
+    QueueEntry.objects.filter(community=community, player=player).delete()
+    add_effect(community, "grant_access", {"discord_user_id": player.discord_user_id}, match=match)
+    _gather(match, player)
+    _matched(community, [player])
     render_queue(community)
 
 
@@ -382,10 +392,12 @@ def void_live(
     actor: Player | None = None,
     requeue: bool = False,
     skip_requeue: Collection[int] = (),
+    cleanup: bool = True,
 ) -> None:
     """End a live match with no rating change. Caller holds the match lock.
 
     `skip_requeue` holds player IDs that must not go back in line, such as someone subbing out.
+    `cleanup` False leaves its channels alone, for a restart that takes them over.
     """
     community = lock_community(match.community_id)
     moment = now()
@@ -410,14 +422,76 @@ def void_live(
                     defaults={"joined_at": participant.queue_joined_at},
                 )
     match.participants.filter(is_active=True).update(is_active=False)
+    alerts.settle_for_match(
+        match, (AlertKind.DISPUTE, AlertKind.EARLY_LEAVE), actor, f"Voided: {reason}"
+    )
     transition(match, Status.VOIDED, source=source, actor=actor)
     match.ended_at = moment
     save_transition(match, "ended_at")
     add_effect(community, "ping_lobby", {"text": f"Match cancelled: {reason}"}, match=match)
-    schedule_cleanup(match)
+    if cleanup:
+        schedule_cleanup(match)
     render_board(match)
     render_queue(community)
     logger.info("Match voided", extra={"match": match.pk, "reason": reason})
+
+
+# A restart's successor takes these over; the old match's team voices go back to the lobby.
+HANDED_OVER = (
+    ResourceKind.TEXT,
+    ResourceKind.LOBBY_VOICE,
+    ResourceKind.BOARD_MESSAGE,
+    ResourceKind.PICKER_MESSAGE,
+    ResourceKind.PICKER_MESSAGE_2,
+    ResourceKind.NOTICE,  # So the successor's first status change clears them.
+)
+
+
+def restart(match: Match, *, leaving: Collection[int]) -> Match:
+    """Captains were set, then someone left and nobody took their seat before the game. Keep the
+    lobby together: a successor match takes over the channels and everyone who stayed, offers the
+    empty seats, and runs a fresh captain vote once they're filled. The old match is voided; its
+    draft history is append-only and stays exactly as it was. Caller holds the match lock."""
+    from league.services import subs
+
+    community = lock_community(match.community_id)
+    mode = mode_of(match)
+    stayed = [p for p in active_participants(match) if p.player_id not in leaving]
+    gone = list(Player.objects.filter(pk__in=list(leaving)))
+    names = ", ".join(player.display_name for player in gone)
+    void_live(
+        match,
+        source=Source.TIMEOUT,
+        reason=f"Restarting: {names} left before the game",
+        cleanup=False,
+    )
+    successor = Match.objects.create(
+        community=community,
+        season=match.season,
+        mode_version=match.mode_version,
+        status=Status.READY_CHECK,
+        rng_seed=secrets.randbits(62),
+        champion_pool=champions.draft_pool(mode),
+        restarted_from=match,
+        created_at=now(),
+    )
+    # The same transaction, so nothing queued for the old match can lose track of a channel.
+    MatchResource.objects.filter(match=match, kind__in=HANDED_OVER, deleted_at__isnull=True).update(
+        match=successor
+    )
+    moment = now()
+    for participant in stayed:
+        MatchParticipant.objects.create(
+            match=successor,
+            player=participant.player,
+            queue_joined_at=participant.queue_joined_at,
+            ready_at=moment,  # They're here: they stayed.
+        )
+    add_effect(community, "restart_voice", {"old_id": match.pk}, match=successor)
+    subs.open_openings(successor, mode, gone, reason=SubReason.RESTART)
+    _matched(community, [participant.player for participant in stayed])
+    logger.info("Match restarted", extra={"match": match.pk, "successor": successor.pk})
+    return successor
 
 
 def schedule_cleanup(match: Match) -> None:
@@ -481,6 +555,8 @@ def swap_player(match: Match, leaving: MatchParticipant, in_player: Player, *, r
     moment = now()
     community = lock_community(match.community_id)
     QueueEntry.objects.filter(community=community, player=in_player).delete()
+    _matched(community, [in_player])
+    _unmatched(community)  # The player subbed out.
     heir = _captaincy_heir(match, leaving, in_player) if leaving.is_captain else None
     MatchParticipant.objects.create(
         match=match,
@@ -555,3 +631,12 @@ def fail_lobby_setup(match_id: int, reason: str) -> None:
         if match.status in LIVE:
             match.participants.filter(is_active=True, ready_at__isnull=True).update(ready_at=now())
             void_live(match, source=Source.SYSTEM, reason=reason, requeue=True)
+            alerts.raise_alert(
+                match.community,
+                AlertKind.LOBBY_FAILED,
+                Area.SETUP,
+                f"{reason}, so it was cancelled and its players went back in the queue. Check "
+                "the bot can Manage Channels and Manage Roles in the match category.",
+                match=match,
+                dedupe_key=f"lobby_failed:{match.pk}",
+            )
