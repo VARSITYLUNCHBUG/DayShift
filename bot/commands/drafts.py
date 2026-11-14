@@ -142,10 +142,7 @@ async def randomdraft_command(interaction: Interaction[Any]) -> None:
         community = await community_of(interaction)  # Before answering: refusals stay private.
         await interaction.response.defer(thinking=True)
         draft = await db(quick_drafts.random_draft, community)
-        custom_emojis = interaction.app_permissions.use_external_emojis
-        await interaction.followup.send(
-            view=render_random_draft(draft, custom_emojis=custom_emojis)
-        )
+        await interaction.followup.send(view=render_random_draft(draft))
 
     await guarded(interaction, run)
 

@@ -52,11 +52,13 @@ def countdown(deadline_at: datetime | None) -> str:
     return f" ⌛ <t:{int(deadline_at.timestamp())}:R>"
 
 
-def hero_emoji_text(name: str, emoji_id: int | None, unicode_emoji: str) -> str:
-    """The emoji to show before a hero's name in text, or empty if it has none."""
-    if emoji_id:
-        alias = "".join(ch if ch.isalnum() else "_" for ch in name.lower()).strip("_") or "hero"
-        return f"<:{alias[:32]}:{emoji_id}>"
+def hero_emoji_text(unicode_emoji: str) -> str:
+    """The emoji to show before a hero's name in text: its plain emoji, or nothing.
+
+    Never a custom emoji: in message text Discord only draws one if the bot is in the server that
+    owns it, and the hero emojis belong to Bebot's server, so others see a bare ":mina:". Buttons
+    are different: they reference the emoji by ID and draw it anywhere.
+    """
     return unicode_emoji
 
 

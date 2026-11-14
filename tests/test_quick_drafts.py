@@ -300,7 +300,7 @@ def test_random_draft_fills_every_slot_once(league: Community) -> None:
     chosen = [hero.id for side in result.bans.values() for hero in side]
     chosen += [hero.id for side in result.picks.values() for hero in side]
     assert len(chosen) == len(plan) == len(set(chosen))
-    assert_within_limits(render_random_draft(result, custom_emojis=True))
+    assert_within_limits(render_random_draft(result))
 
 
 # --- Rendering --------------------------------------------------------------------------------
@@ -555,3 +555,19 @@ def test_fake_test_players_show_by_name(league: Community) -> None:
     quick_drafts.claim_captain(draft.pk, "am", HK, "Hidden", allow_both=False)
     text = str(render_draft(quick_drafts.state(draft.pk)).to_components())
     assert "@Fake 1" in text and "<@1>" not in text
+
+
+@pytest.mark.django_db
+def test_draft_text_never_uses_custom_emojis(league: Community) -> None:
+    """Discord only draws a custom emoji in text for a bot in the server that owns it; found in a
+    live run, where Bebot's hero emojis showed as bare ":mina:". Buttons keep them."""
+    from league.models import Champion
+
+    Champion.objects.update(discord_emoji_id=123456789012345678)
+    draft = _captained(league)
+    quick_drafts.choose_hero(draft.pk, _on_turn(draft), 0, quick_drafts.available(draft)[0])
+    state = quick_drafts.state(draft.pk)
+    assert "<:" not in str(render_draft(state).to_components())
+    assert "<:" not in str(render_random_draft(quick_drafts.random_draft(league)).to_components())
+    buttons = [b for view in render_grid(state) for b in _buttons(view)]
+    assert any((b.get("emoji") or {}).get("id") for b in buttons)

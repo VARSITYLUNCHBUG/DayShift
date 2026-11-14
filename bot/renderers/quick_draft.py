@@ -149,9 +149,8 @@ def _coinflip_done(state: QuickDraftState) -> LayoutView:
 # --- Hero draft -----------------------------------------------------------------------------
 
 
-def _hero_text(state: QuickDraftState, choice: HeroChoice) -> str:
-    emoji_id = _emoji_id(state.custom_emojis, choice.emoji_id)
-    emoji = bebot.hero_emoji_text(choice.name, emoji_id, choice.unicode_emoji)
+def _hero_text(choice: HeroChoice) -> str:
+    emoji = bebot.hero_emoji_text(choice.unicode_emoji)
     return bebot.hero_line(emoji, choice.name, random_choice=choice.random_choice, auto=choice.auto)
 
 
@@ -170,7 +169,7 @@ def _captains(state: QuickDraftState, final: bool) -> str:
 
 def summary_text(state: QuickDraftState, *, final: bool) -> str:
     """Bebot's draft summary: captains, bans, then each side's heroes."""
-    bans = [_hero_text(state, c) for c in state.actions if c.action == "ban"]
+    bans = [_hero_text(c) for c in state.actions if c.action == "ban"]
     parts = [
         _captains(state, final),
         "",
@@ -178,9 +177,7 @@ def summary_text(state: QuickDraftState, *, final: bool) -> str:
         bebot.hero_list(bans),
     ]
     for side in bebot.SIDES:
-        picks = [
-            _hero_text(state, c) for c in state.actions if c.action == "pick" and c.side == side
-        ]
+        picks = [_hero_text(c) for c in state.actions if c.action == "pick" and c.side == side]
         parts += ["", f"{bebot.side_emoji(side)} **{bebot.side_name(side)}**"]
         parts.append(bebot.hero_list(picks))
     if final:
@@ -304,21 +301,13 @@ def render_coinflip(winner: tuple[int, str], loser: tuple[int, str]) -> LayoutVi
     return _view(box)
 
 
-def _option_list(heroes: list[HeroOption], *, custom_emojis: bool) -> str:
+def _option_list(heroes: list[HeroOption]) -> str:
     return bebot.hero_list(
-        [
-            bebot.hero_line(
-                bebot.hero_emoji_text(
-                    hero.name, _emoji_id(custom_emojis, hero.emoji_id), hero.unicode_emoji
-                ),
-                hero.name,
-            )
-            for hero in heroes
-        ]
+        [bebot.hero_line(bebot.hero_emoji_text(hero.unicode_emoji), hero.name) for hero in heroes]
     )
 
 
-def render_random_draft(draft: RandomDraft, *, custom_emojis: bool) -> LayoutView:
+def render_random_draft(draft: RandomDraft) -> LayoutView:
     parts = [f"## {bebot.DRAFT_TITLE} (Random)"]
     for index, side in enumerate(bebot.SIDES):
         if index:
@@ -326,9 +315,9 @@ def render_random_draft(draft: RandomDraft, *, custom_emojis: bool) -> LayoutVie
         parts += [
             f"{bebot.side_emoji(side)} **{bebot.side_name(side)}**",
             "**Bans:**",
-            _option_list(draft.bans[side], custom_emojis=custom_emojis),
+            _option_list(draft.bans[side]),
             "**Picks:**",
-            _option_list(draft.picks[side], custom_emojis=custom_emojis),
+            _option_list(draft.picks[side]),
         ]
     box: Container[Any] = Container(TextDisplay("\n".join(parts)), accent_colour=bebot.HK_COLOUR)
     return _view(box)
