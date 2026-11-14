@@ -19,6 +19,7 @@ from bot.effects.worker import EffectWorker
 from bot.error_log import ErrorSink, discord_error_handler
 
 # Importing the handlers registers them with the router.
+from bot.handlers import alerts as _alerts  # noqa: F401
 from bot.handlers import draft as _draft  # noqa: F401
 from bot.handlers import lobby as _lobby  # noqa: F401
 from bot.handlers import queue as _queue  # noqa: F401

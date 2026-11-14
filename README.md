@@ -39,7 +39,7 @@ match flow, draft modes, subs, ratings, commands, architecture, operations and d
    docker compose up -d --build
    ```
 5. In Discord, run `/setup` as the server owner or an Administrator. It creates the queue,
-   Waiting Room, results and archive channels, and it is safe to run again. Then give your staff
+   Waiting Room, results, archive and staff-alerts channels, and it is safe to run again. Then give your staff
    roles their areas with `/permissions grant` (see [Permissions](#permissions)).
 6. Create an admin login for `http://127.0.0.1:8000/admin/`:
    ```bash
@@ -431,6 +431,25 @@ every area without a grant, so a new server is never locked out.
 Discord can't hide commands by these grants, so staff commands are visible to everyone and
 refused when they run without the area. `/permissions` alone is hidden from non-Administrators.
 
+### Staff channel
+
+Everything staff should look at arrives as a card in `#staff-alerts`, which only staff roles can
+see. Each card is tagged with an area and pings the roles holding it:
+
+| Card | Area | Closed by |
+|---|---|---|
+| A disputed result, or no result reported | Disputes | Its buttons: either team won, or Void. Any Disputes holder can rule |
+| A possible early leave the captains disagree on or didn't answer | Disputes | Dismiss, or the match being voided |
+| deadlock-api disagrees with the result, or shows an abandon | Disputes | Dismiss |
+| The scoreboard shows the other team won | Disputes | Dismiss |
+| A player's award share is frozen | Ratings | Dismiss |
+| Discord refused to create a lobby | Setup | Dismiss |
+
+A dispute still open after its re-ping time is posted again at the bottom, pinging again, and the
+old card is removed. A closed card stays, edited to say who closed it and how. The match channel
+gets a short note for disputes and early leaves, without pinging anyone. On a server whose staff
+channel isn't set up yet, cards go to the match channel instead.
+
 ## Commands
 
 **Everyone:** `/leaderboard`, `/stats`, `/queue status`, `/link`, `/unlink`, `/submit` (fallback
@@ -461,7 +480,7 @@ Anything that rewrites past ratings shows a preview and needs Confirm.
 | Queue | `queue_entries` |
 | Matches | `matches`, `match_participants`, `match_resources`, `match_transitions`, `draft_actions`, `captain_votes`, `sub_requests`, `sub_offers`, `early_leaves` |
 | Results | `result_submissions`, `match_results`, `match_awards`, `scoreboard_reads`, `player_match_stats`, `player_aliases`, `api_match_checks` |
-| Operations | `penalties`, `strike_adjustments`, `captain_overrides`, `outbox_effects` |
+| Operations | `penalties`, `strike_adjustments`, `captain_overrides`, `staff_alerts`, `outbox_effects` |
 | Bebot's tools | `quick_drafts`, `quick_draft_actions`, `prio_entries`, `channel_pings` |
 
 For analytics, start at `result_submissions`. Screenshots are in the archive channel: use

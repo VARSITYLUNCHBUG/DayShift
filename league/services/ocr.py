@@ -41,7 +41,10 @@ from league.models import (
     ResultSubmission,
     ScoreboardRead,
 )
+from league.models.alerts import AlertKind
+from league.models.permissions import Area
 from league.models.scoreboards import AwardSource, MapSource, ReadStatus
+from league.services import alerts
 from league.services.common import add_effect, lock_match, now, roster
 
 logger = logging.getLogger(__name__)
@@ -395,10 +398,11 @@ def act_on(read: ScoreboardRead) -> None:
         if match.status == Status.AWAITING_CONFIRMATION:
             results._dispute(match, None, "The scoreboard shows the other team won.")
         elif match.status == Status.COMPLETED:
-            add_effect(
+            alerts.raise_alert(
                 match.community,
-                "ping_staff",
-                {"text": "is recorded the other way from what its scoreboard shows."},
+                AlertKind.OCR_MISMATCH,
+                Area.DISPUTES,
+                "The result is recorded the other way from what the scoreboard shows.",
                 match=match,
                 dedupe_key=f"ocr_winner_mismatch:{match.pk}",
             )

@@ -42,6 +42,7 @@ from league.models import (
     ResultSubmission,
     ScoreboardRead,
     Season,
+    StaffAlert,
     StrikeAdjustment,
 )
 from league.services import modes
@@ -184,6 +185,13 @@ class PlayerAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
+
+
+@admin.register(StaffAlert)
+class StaffAlertAdmin(ReadOnlyAdmin):
+    list_display = ("created_at", "community", "match", "kind", "area", "status", "closed_by")
+    list_filter = ("status", "kind", "area")
+    search_fields = ("text", "outcome")
 
 
 @admin.register(Penalty)

@@ -1,3 +1,4 @@
+from league.models.alerts import StaffAlert
 from league.models.api import ApiMatchCheck
 from league.models.champions import Champion
 from league.models.community import Community
@@ -57,6 +58,7 @@ __all__ = [
     "ResultSubmission",
     "ScoreboardRead",
     "Season",
+    "StaffAlert",
     "StrikeAdjustment",
     "SubOffer",
     "SubRequest",

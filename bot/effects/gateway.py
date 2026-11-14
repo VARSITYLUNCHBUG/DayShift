@@ -58,7 +58,10 @@ class Gateway(Protocol):
         view: discord.ui.LayoutView,
         *,
         file: tuple[str, bytes] | None = None,
-    ) -> int: ...
+        ping_role_ids: Iterable[int] = (),
+    ) -> int:
+        """Post a view. Its mentions never ping, except the roles in `ping_role_ids`."""
+        ...
 
     async def edit_view(self, channel_id: int, message_id: int, view: Any) -> None: ...
 
@@ -261,9 +264,16 @@ class DiscordGateway:
         view: discord.ui.LayoutView,
         *,
         file: tuple[str, bytes] | None = None,
+        ping_role_ids: Iterable[int] = (),
     ) -> int:
         channel = await self._messageable(channel_id)
-        kwargs: dict[str, Any] = {"view": view, "allowed_mentions": discord.AllowedMentions.none()}
+        roles = [discord.Object(id=role_id) for role_id in ping_role_ids]
+        allowed = (
+            discord.AllowedMentions(everyone=False, users=False, roles=roles)
+            if roles
+            else discord.AllowedMentions.none()
+        )
+        kwargs: dict[str, Any] = {"view": view, "allowed_mentions": allowed}
         if file is not None:
             kwargs["file"] = discord.File(io.BytesIO(file[1]), filename=file[0])
         try:

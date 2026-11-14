@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from bot.db import db
 from bot.effects import flow
 from bot.effects.gateway import ChannelGone, Gateway
+from bot.renderers.alerts import match_notice, render_alert
 from bot.renderers.board import (
     render_board,
     render_pickers,
@@ -29,10 +31,11 @@ from bot.renderers.results import (
 from league.domain.engine import Status
 from league.integrations import deadlock_api
 from league.models import Community, Match, OutboxEffect, QuickDraft
+from league.models.alerts import AlertStatus
 from league.models.matches import ResourceKind
-from league.models.permissions import Area
 from league.models.quick_drafts import QuickDraftStatus
 from league.services import (
+    alerts,
     api_results,
     boards,
     draft,
@@ -443,13 +446,48 @@ async def ping_lobby(env: Env) -> None:
     await _notice(env, str(env.effect.payload["text"]))
 
 
-@effect("ping_staff")
-async def ping_staff(env: Env) -> None:
-    await _notice(
-        env,
-        f"Match #{env.match_id} {env.effect.payload['text']}",
-        role_ids=await db(permissions.role_ids_with, env.community.pk, [Area.DISPUTES]),
-    )
+# --- Staff alerts --------------------------------------------------------------------------
+
+
+@effect(alerts.POST_KIND)
+async def post_staff_alert(env: Env) -> None:
+    """Post the card, pinging the roles that hold its area. A re-ping posts it again at the
+    bottom and only then deletes the old one, so the card is never missing."""
+    alert_id = int(env.effect.payload["alert_id"])
+    reping = bool(env.effect.payload.get("reping"))
+    card = await db(alerts.card, alert_id)
+    if card.status != AlertStatus.OPEN:
+        raise Skip("Alert already closed.")
+    target, old_channel, old_message = await db(alerts.where_to_post, alert_id)
+    if target is None:
+        raise Skip("No staff channel and no match channel to post the alert in.")
+    if reping or old_message is None:
+        message_id = await env.gateway.send_view(
+            target, render_alert(card), ping_role_ids=card.ping_role_ids
+        )
+        await db(alerts.record_card, alert_id, target, message_id)
+        if old_channel is not None and old_message is not None:
+            with contextlib.suppress(ChannelGone):
+                await env.gateway.delete_message(old_channel, old_message)
+    if not reping and card.kind in alerts.MATCH_NOTICE_KINDS and env.match is not None:
+        staff_channel = env.community.staff_channel_id
+        if staff_channel is not None and staff_channel == target:
+            with contextlib.suppress(Skip):
+                await _notice(env, match_notice(card))
+
+
+@effect(alerts.REFRESH_KIND)
+async def refresh_staff_alert(env: Env) -> None:
+    alert_id = int(env.effect.payload["alert_id"])
+    _target, channel_id, message_id = await db(alerts.where_to_post, alert_id)
+    if channel_id is None or message_id is None:
+        raise Skip("The card was never posted.")
+    try:
+        await env.gateway.edit_view(
+            channel_id, message_id, render_alert(await db(alerts.card, alert_id))
+        )
+    except ChannelGone as exc:
+        raise Skip("The card is gone.") from exc
 
 
 @effect("announce_lobby_code")

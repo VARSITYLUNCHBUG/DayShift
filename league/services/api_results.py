@@ -24,9 +24,11 @@ from django.db import transaction
 
 from league.domain.engine import Status
 from league.models import ApiMatchCheck, Match, MatchParticipant, Player
+from league.models.alerts import AlertKind
 from league.models.api import CheckStatus
+from league.models.permissions import Area
 from league.models.scoreboards import AwardSource
-from league.services import steam
+from league.services import alerts, steam
 from league.services.common import add_effect, lock_match, now, roster
 
 logger = logging.getLogger(__name__)
@@ -200,7 +202,7 @@ def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any])
             )
         return check
 
-    text = f"doesn't match deadlock-api ({deadlock_match_id}): {'; '.join(problems)}."
+    text = f"The result doesn't match deadlock-api ({deadlock_match_id}): {'; '.join(problems)}."
     if (
         api_winner
         and claimed
@@ -211,10 +213,11 @@ def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any])
             match, None, f"deadlock-api shows the other team won ({deadlock_match_id})."
         )
     else:
-        add_effect(
+        alerts.raise_alert(
             match.community,
-            "ping_staff",
-            {"text": text},
+            AlertKind.API_MISMATCH,
+            Area.DISPUTES,
+            text,
             match=match,
             dedupe_key=f"api_mismatch:{match.pk}:{deadlock_match_id}",
         )
@@ -236,13 +239,13 @@ def _note_abandons(
         MatchParticipant.objects.filter(pk=row.pk).update(left_early=True)
         if abandoned <= window and match.status in CHECKABLE:
             minutes, seconds = divmod(abandoned, 60)
-            add_effect(
+            alerts.raise_alert(
                 match.community,
-                "ping_staff",
-                {
-                    "text": f"has {row.player.display_name} abandoning at {minutes}:{seconds:02d}, "
-                    "per deadlock-api. If that's an early leave, `/match early_leave` voids it."
-                },
+                AlertKind.API_ABANDON,
+                Area.DISPUTES,
+                f"deadlock-api shows {row.player.display_name} abandoning at "
+                f"{minutes}:{seconds:02d}. If that's an early leave, `/match early_leave` "
+                "voids it.",
                 match=match,
                 dedupe_key=f"api_abandon:{match.pk}:{row.player_id}",
             )

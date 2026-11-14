@@ -29,9 +29,11 @@ from league.models import (
     Player,
     QueueEntry,
 )
+from league.models.alerts import AlertKind
 from league.models.matches import RemovedReason, Source
 from league.models.moderation import PenaltyKind
-from league.services import champions, penalties, prio, standing
+from league.models.permissions import Area
+from league.services import alerts, champions, penalties, prio, standing
 from league.services.common import (
     active_participants,
     add_effect,
@@ -418,6 +420,9 @@ def void_live(
                     defaults={"joined_at": participant.queue_joined_at},
                 )
     match.participants.filter(is_active=True).update(is_active=False)
+    alerts.settle_for_match(
+        match, (AlertKind.DISPUTE, AlertKind.EARLY_LEAVE), actor, f"Voided: {reason}"
+    )
     transition(match, Status.VOIDED, source=source, actor=actor)
     match.ended_at = moment
     save_transition(match, "ended_at")
@@ -565,3 +570,12 @@ def fail_lobby_setup(match_id: int, reason: str) -> None:
         if match.status in LIVE:
             match.participants.filter(is_active=True, ready_at__isnull=True).update(ready_at=now())
             void_live(match, source=Source.SYSTEM, reason=reason, requeue=True)
+            alerts.raise_alert(
+                match.community,
+                AlertKind.LOBBY_FAILED,
+                Area.SETUP,
+                f"{reason}, so it was cancelled and its players went back in the queue. Check "
+                "the bot can Manage Channels and Manage Roles in the match category.",
+                match=match,
+                dedupe_key=f"lobby_failed:{match.pk}",
+            )

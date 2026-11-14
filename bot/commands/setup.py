@@ -1,7 +1,8 @@
 """/setup creates the permanent channels. Running it again only fills in whatever is missing.
 
 The first run needs the server owner or an Administrator; after that, the Setup area. Staff
-access to the bot's own staff channels follows the grants made with /permissions.
+access to the bot's own staff channels follows the grants made with /permissions: every staff
+role sees #staff-alerts, and match staff see the scoreboard archive.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 ARCHIVE_STAFF = discord.PermissionOverwrite(
     view_channel=True, read_message_history=True, send_messages=False
 )
+ALERTS_STAFF = discord.PermissionOverwrite(view_channel=True, read_message_history=True)
 
 
 def _is_live(guild: discord.Guild, channel_id: int | None) -> bool:
@@ -74,6 +76,12 @@ async def ensure_channels(interaction: Interaction[Any], row: Community) -> None
             "scoreboard-archive", category=category, overwrites={everyone: hidden, me: SELF_TEXT}
         )
         wiring["archive_channel_id"] = channel.id
+    if not _is_live(guild, row.staff_channel_id):
+        hidden = discord.PermissionOverwrite(view_channel=False)
+        channel = await guild.create_text_channel(
+            "staff-alerts", category=category, overwrites={everyone: hidden, me: SELF_TEXT}
+        )
+        wiring["staff_channel_id"] = channel.id
 
     if wiring:
         await db(community_service.save_wiring, row.pk, **wiring)
@@ -105,8 +113,10 @@ async def sync_staff_access(guild: discord.Guild, community_id: int) -> None:
     logged and the grants still stand."""
     row = await db(Community.objects.get, pk=community_id)
     match_staff = await db(permissions.role_ids_with, community_id, permissions.MATCH_STAFF_AREAS)
+    all_staff = await db(permissions.role_ids_with, community_id, permissions.ALL_AREAS)
     try:
         await _sync_roles(guild, row.archive_channel_id, match_staff, ARCHIVE_STAFF)
+        await _sync_roles(guild, row.staff_channel_id, all_staff, ALERTS_STAFF)
     except discord.HTTPException:
         logger.warning("Couldn't update staff channel access", exc_info=True)
 
@@ -134,7 +144,8 @@ async def setup_command(interaction: Interaction[Any]) -> None:
         await db(_refresh_queue, row.pk)
         await reply(
             interaction,
-            "Setup done. The queue is live. Give staff roles their areas with /permissions grant.",
+            "Setup done. The queue is live, and staff alerts go to #staff-alerts. Give staff "
+            "roles their areas with /permissions grant.",
         )
 
     await guarded(interaction, run)

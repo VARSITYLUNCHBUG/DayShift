@@ -26,6 +26,7 @@ from league.models import (
     RatingEvent,
     ResultSubmission,
 )
+from league.models.alerts import StaffAlert
 from league.models.outbox import EffectStatus
 from league.services import (
     boards,
@@ -669,7 +670,7 @@ def test_conflicting_report_goes_to_dispute_unrated(popped: Match) -> None:
     match = fresh(match)
     assert match.status == Status.DISPUTED
     assert RatingEvent.objects.count() == 0
-    assert len(effects(match, "ping_staff")) == 1
+    assert StaffAlert.objects.filter(match=match, kind="dispute", status="open").count() == 1
 
 
 def test_second_matching_screenshot_is_kept(popped: Match) -> None:

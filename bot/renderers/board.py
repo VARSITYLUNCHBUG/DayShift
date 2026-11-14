@@ -472,24 +472,7 @@ def _disputed(state: BoardState, box: Container[Any]) -> None:
         else "No result was reported.\n"
     )
     box.add_item(
-        TextDisplay(reported + "Staff: choose the result. Ratings are unchanged until then.")
-    )
-    box.add_item(
-        ActionRow(
-            RouteButton(
-                "resolve_a",
-                state.match_id,
-                label=f"{state.team_name('A')} won"[:80],
-                style=ButtonStyle.primary,
-            ),
-            RouteButton(
-                "resolve_b",
-                state.match_id,
-                label=f"{state.team_name('B')} won"[:80],
-                style=ButtonStyle.primary,
-            ),
-            RouteButton("resolve_void", state.match_id, label="Void", style=ButtonStyle.danger),
-        )
+        TextDisplay(reported + "Sent to staff, who will decide. Ratings are unchanged until then.")
     )
 
 

@@ -42,7 +42,6 @@ from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
 from league.services import boards, common, community, effects, integrity, lobby, queue
 from league.services import draft as draft_service
-from league.services import results as results_service
 from league.services.boards import ResultRow
 from league.services.common import add_effect, captain_of, get_or_create_player, mode_of
 from league.services.common import render_queue as request_queue
@@ -615,6 +614,7 @@ class FakeGateway:
     members_seen: dict[int, list[int]] = field(default_factory=dict)
     staff_seen: dict[int, list[int]] = field(default_factory=dict)  # Staff roles per channel.
     role_pings: list[list[int]] = field(default_factory=list)
+    view_pings: dict[int, list[int]] = field(default_factory=dict)  # Roles a view pinged.
     closed_dms: set[int] = field(default_factory=set)
     next_id: int = 500_000
     fail_next: dict[str, Exception] = field(default_factory=dict)
@@ -677,13 +677,14 @@ class FakeGateway:
         self.dms.append((user_id, view))
         return True
 
-    async def send_view(self, channel_id, view, *, file=None) -> int:
+    async def send_view(self, channel_id, view, *, file=None, ping_role_ids=()) -> int:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
         self._maybe_fail("send_view")
         message_id = self._id()
         self.views[message_id] = view
         self.posted_files.append((channel_id, file))
+        self.view_pings[message_id] = list(ping_role_ids)
         self.messages.setdefault(channel_id, []).append(message_id)
         return message_id
 
@@ -1480,20 +1481,6 @@ def test_a_new_lobby_host_replaces_the_first_hosts_prompt(wired: Community) -> N
 
 
 @pytest.mark.django_db(transaction=True)
-def test_repeat_staff_requests_replace_each_other(wired: Community) -> None:
-    gateway = FakeGateway()
-    match = to_in_progress(popped_match(wired, gateway))
-    results_service.on_in_progress_timeout(fresh(match))
-    drain(gateway)
-    assert "needs a decision" in live_notice_texts(gateway, match)[0]
-    results_service.on_disputed_timeout(fresh(match))
-    drain(gateway)
-    notices = live_notice_texts(gateway, match)
-    assert len(notices) == 1
-    assert "still needs a decision" in notices[0]
-
-
-@pytest.mark.django_db(transaction=True)
 def test_a_failed_board_move_does_not_ping_twice(wired: Community) -> None:
     gateway = FakeGateway()
     match = ready_all(popped_match(wired, gateway))
@@ -1681,23 +1668,6 @@ def test_match_channels_let_in_the_roles_that_look_after_matches(wired: Communit
     match = Match.objects.get()
     assert gateway.staff_seen[resource(match, ResourceKind.TEXT)] == [71, 72]
     assert gateway.staff_seen[resource(match, ResourceKind.LOBBY_VOICE)] == [71, 72]
-
-
-def test_staff_pings_go_to_the_disputes_roles(wired: Community) -> None:
-    from league.models import Area
-    from league.services import permissions
-    from league.services.common import add_effect
-
-    permissions.grant(wired.pk, 81, [Area.DISPUTES], granted_by=None)
-    permissions.grant(wired.pk, 82, [Area.MATCH_CONTROL], granted_by=None)
-    gateway = FakeGateway()
-    for n in range(1, 13):
-        queue.join(wired.pk, make_player(n))
-    drain(gateway)
-    match = Match.objects.get()
-    add_effect(wired, "ping_staff", {"text": "needs a decision"}, match=match)
-    drain(gateway)
-    assert gateway.role_pings[-1] == [81]
 
 
 def test_a_queued_player_offered_a_sub_spot_can_take_it(wired: Community) -> None:

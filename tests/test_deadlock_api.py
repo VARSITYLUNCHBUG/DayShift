@@ -18,7 +18,7 @@ from league.domain import steam as steam_ids
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.integrations import deadlock_api
-from league.models import ApiMatchCheck, Community, Match, OutboxEffect, Player
+from league.models import ApiMatchCheck, Community, Match, OutboxEffect, Player, StaffAlert
 from league.models.api import CheckStatus
 from league.services import api_results, draft, integrity, queue, ratings, results, steam
 from league.services.common import captain_of
@@ -217,9 +217,7 @@ def test_a_linked_player_on_the_wrong_team_goes_to_staff(live: Match) -> None:
     check = api_results.record_metadata(live.pk, DEADLOCK_ID, metadata())
     assert check.status == CheckStatus.MISMATCH
     assert set(check.wrong_team) == {a.pk, b.pk}
-    assert OutboxEffect.objects.filter(
-        kind="ping_staff", payload__text__icontains="other team"
-    ).exists()
+    assert StaffAlert.objects.filter(kind="api_mismatch", text__icontains="other team").exists()
     assert fresh(live).status == Status.AWAITING_CONFIRMATION
 
 
