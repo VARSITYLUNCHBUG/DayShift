@@ -13,6 +13,7 @@ from discord import ButtonStyle, SelectOption
 from discord.ui import ActionRow, Container, LayoutView, MediaGallery, TextDisplay
 
 from bot.renderers import bebot, grid
+from bot.renderers.board import player_mention
 from bot.routing import RouteButton, RouteSelect
 from league.models.quick_drafts import QuickDraftStatus
 from league.services.quick_drafts import (
@@ -26,6 +27,11 @@ from league.services.quick_drafts import (
     QuickDraftState,
     RandomDraft,
 )
+
+
+def _mention(user_id: int | None, name: str) -> str:
+    """A real mention, or the name of a fake test player, as the match board shows them."""
+    return player_mention(user_id, name) if user_id is not None else name
 
 
 def _view(*items: discord.ui.Item[Any]) -> LayoutView:
@@ -92,13 +98,15 @@ def _coinflip(state: QuickDraftState) -> LayoutView:
     if not state.winner_choice:
         body = (
             f"**{state.coinflip_winner_name}** wins the flip!\n\n"
-            f"<@{state.coinflip_winner_id}>, choose your preference:"
+            f"{_mention(state.coinflip_winner_id, state.coinflip_winner_name)}, "
+            "choose your preference:"
         )
     else:
         chose = CHOICE_LABELS[state.winner_choice]
         body = (
             f"**{state.coinflip_winner_name}** chose: {chose}\n\n"
-            f"<@{state.coinflip_loser_id}>, choose your preference:"
+            f"{_mention(state.coinflip_loser_id, state.coinflip_loser_name)}, "
+            "choose your preference:"
         )
     buttons = [
         RouteButton(
@@ -154,7 +162,7 @@ def _captains(state: QuickDraftState, final: bool) -> str:
         emoji = bebot.side_emoji(side)
         if not final and side == state.acting_side:
             timer = bebot.countdown(state.deadline_at)
-            rows.append(f"{emoji} <@{user_id}> {state.step_action} a hero!{timer}")
+            rows.append(f"{emoji} {_mention(user_id, name)} {state.step_action} a hero!{timer}")
         else:
             rows.append(f"{emoji} {name}")
     return "\n".join(rows)
@@ -288,8 +296,8 @@ def render_coinflip(winner: tuple[int, str], loser: tuple[int, str]) -> LayoutVi
         TextDisplay(
             f"### {bebot.COIN_EMOJI} Captain Coinflip\n"
             f"**{winner[1]}** wins the flip!\n\n"
-            f"<@{winner[0]}> should select {bebot.HIDDEN_KING} (first pick)\n"
-            f"<@{loser[0]}> should select {bebot.ARCHMOTHER}"
+            f"{_mention(*winner)} should select {bebot.HIDDEN_KING} (first pick)\n"
+            f"{_mention(*loser)} should select {bebot.ARCHMOTHER}"
         ),
         accent_colour=bebot.COINFLIP_COLOUR,
     )
