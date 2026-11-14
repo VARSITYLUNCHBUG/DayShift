@@ -782,7 +782,8 @@ def render_board(state: BoardState) -> LayoutView:
     if state.can_request_sub:
         box.add_item(ActionRow(RouteButton("sub_open", state.match_id, label="Request a sub")))
     if state.status == Status.READY_CHECK:  # Once is enough: it doesn't change during a match.
-        box.add_item(TextDisplay(f"-# Format: {state.mode_name}"))
+        restart = f" · Restarted from match #{state.restarted_from}" if state.restarted_from else ""
+        box.add_item(TextDisplay(f"-# Format: {state.mode_name}{restart}"))
     view = LayoutView(timeout=None)
     view.add_item(box)
     return view

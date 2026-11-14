@@ -45,7 +45,7 @@ from league.services import draft as draft_service
 from league.services.boards import ResultRow
 from league.services.common import add_effect, captain_of, get_or_create_player, mode_of
 from league.services.common import render_queue as request_queue
-from tests.conftest import make_player, publish_presets
+from tests.conftest import Clock, make_player, publish_presets
 from tests.helpers import (
     acting_captain,
     finish,
@@ -1728,6 +1728,33 @@ def test_an_offer_is_a_dm_and_a_mention_that_goes_once_answered(wired: Community
     subs.answer_offer(offer.pk, spare, True)
     drain(gateway)
     assert offer.notice_message_id not in gateway.messages[QUEUE_CHANNEL]
+
+
+def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_lobby(
+    wired: Community, clock: Clock
+) -> None:
+    from league.services import deadlines, subs
+
+    gateway = FakeGateway()
+    match = to_champion_draft(popped_match(wired, gateway))
+    drain(gateway)
+    text = resource(match, ResourceKind.TEXT)
+    team_voice = resource(match, ResourceKind.TEAM_A_VOICE)
+    sitting = captain_of(match, "A").player.discord_user_id
+    gateway.voice[team_voice] = {sitting}
+    leaving = match.participants.filter(is_active=True, is_captain=False).first().player
+    subs.request_sub_out(match.pk, leaving, leaving.pk)
+    drain(gateway)
+    clock.advance(mode_of(match).subs.max_wait_seconds + 1)
+    deadlines.tick()
+    drain(gateway)
+    successor = Match.objects.get(restarted_from=match)
+    assert resource(successor, ResourceKind.TEXT) == text and text not in gateway.deleted
+    lobby_voice = resource(successor, ResourceKind.LOBBY_VOICE)  # Its own: teams had formed.
+    assert team_voice in gateway.deleted
+    assert sitting in gateway.voice[lobby_voice]
+    board = gateway.views[resource(successor, ResourceKind.BOARD_MESSAGE)]
+    assert f"Restarted from match #{match.pk}" in str(board.to_components())
 
 
 def test_a_queued_player_offered_a_sub_spot_can_take_it(wired: Community) -> None:

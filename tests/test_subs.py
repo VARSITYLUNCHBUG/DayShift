@@ -575,3 +575,68 @@ def test_a_ready_check_spot_is_never_penalised_twice(
     deadlines.tick()
     assert fresh(popped).status == Status.VOIDED
     assert Penalty.objects.filter(player=players[11]).count() == 1  # For missing it, only.
+
+
+# --- A restart, when nobody takes the seat before the game ---------------------------------------
+
+
+def _expire_sub_out(match: Match, leaving: Player, clock: Clock) -> Match:
+    self_sub(match, leaving)
+    clock.advance(mode_of(match).subs.max_wait_seconds + 1)
+    deadlines.tick()
+    return fresh(match)
+
+
+def test_an_unfilled_sub_out_in_the_draft_restarts_the_lobby(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    match = in_draft(popped)
+    first = captain_of(match, match.player_first_pick).player
+    target = match.participants.filter(is_active=True, team="").order_by("id").first()
+    draft.pick_player(match.pk, first, match.step_index, target.player_id)
+    picks_before = list(match.draft_actions.values_list("pk", "target_player_id"))
+    leaving = non_captain(match)
+    old = _expire_sub_out(fresh(match), leaving, clock)
+
+    assert old.status == Status.VOIDED
+    # The draft history is append-only: the old match keeps it exactly as it was.
+    assert list(old.draft_actions.values_list("pk", "target_player_id")) == picks_before
+    successor = Match.objects.get(restarted_from=old)
+    assert successor.status == Status.READY_CHECK and successor.held_seconds is not None
+    stayed = successor.participants.filter(is_active=True)
+    assert stayed.count() == 11 and not stayed.filter(player=leaving).exists()
+    assert not stayed.filter(ready_at__isnull=True).exists()
+    assert not stayed.filter(is_captain=True).exists()  # A fresh captain vote, once full.
+    assert Penalty.objects.filter(player=leaving, kind=PenaltyKind.DODGE).exists()
+    assert not QueueEntry.objects.filter(player__in=[p.player for p in stayed]).exists()
+
+    spare = queue_up(league, range(90, 91))[0]
+    deadlines.tick()  # The empty seat is offered to whoever turns up.
+    offer = SubOffer.objects.get(request__match=successor, status=OfferStatus.PENDING)
+    assert offer.player == spare
+    subs.answer_offer(offer.pk, spare, True)
+    successor = fresh(successor)
+    assert successor.status == Status.CAPTAIN_PHASE
+    assert successor.participants.filter(is_active=True).count() == 12
+
+
+def test_a_restart_nobody_fills_is_cancelled_and_requeued(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    match = in_draft(popped)
+    leaving = non_captain(match)
+    old = _expire_sub_out(match, leaving, clock)
+    successor = Match.objects.get(restarted_from=old)
+    clock.advance(mode_of(successor).ready_check.refill_seconds + 1)
+    deadlines.tick()
+    assert fresh(successor).status == Status.VOIDED
+    assert QueueEntry.objects.count() == 11 and not QueueEntry.objects.filter(player=leaving)
+
+
+def test_a_sub_out_before_captains_are_set_still_cancels(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    leaving = players[3]
+    match = _expire_sub_out(popped, leaving, clock)  # Still in the ready check.
+    assert match.status == Status.VOIDED
+    assert not Match.objects.filter(restarted_from=match).exists()

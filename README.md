@@ -99,7 +99,7 @@ While any request is pending, the timer is parked and the board hides the phase'
 the result buttons once the game is on). The sub takes the leaving player's team, captaincy,
 lobby-host role and result. The timer resumes where it stopped, with at least 15 s. Nobody in
 3 minutes means the match is cancelled with no rating change, and everyone except the leaving
-player goes back into the queue. Subbing yourself out after the ready check is a dodge, and once the
+player goes back into the queue (or, once captains are set and before the game, a restart). Subbing yourself out after the ready check is a dodge, and once the
 game is on it's a leaver; cancelling the request costs nothing. See Captains and dodge strikes. At most 4 requests can be pending at once. All of these timers
 live in the draft mode's `subs` section.
 
@@ -116,6 +116,13 @@ A missed ready check keeps the lobby: the players who missed it are taken out (w
 missed-ready cooldown), their spots are offered for 2 minutes (`ready_check.refill_seconds`), and
 once they're filled the captain vote starts. If they aren't, the lobby is cancelled and everyone
 still in it goes back to the front of the queue.
+
+A sub out nobody fills after captains are set, but before the game starts, restarts the lobby
+rather than cancelling it. The match is voided (its draft history is kept exactly as it was) and
+a successor match takes over its channels and everyone who stayed. The empty seats are offered
+the same way, and once they're filled a fresh captain vote starts. Unfilled, it's cancelled as
+above. Before captains are set, an unfilled sub out still cancels; once the game is on, the
+early-leave rules apply.
 
 ## The match channel
 

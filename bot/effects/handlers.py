@@ -789,6 +789,34 @@ async def post_correction(env: Env) -> None:
 # --- Cleanup ---------------------------------------------------------------------------------
 
 
+@effect("restart_voice")
+async def restart_voice(env: Env) -> None:
+    """A restart: teams are gone, so everyone goes back to a lobby voice and the old match's team
+    channels are deleted. Runs in the successor's lane, before anyone new is gathered. Once teams
+    had formed the old lobby voice was gone, so the successor gets one of its own."""
+    old_id = int(env.effect.payload["old_id"])
+    lobby_voice = await db(effects.resource_id, env.match_id, ResourceKind.LOBBY_VOICE)
+    if lobby_voice is None:
+        community = env.community
+        lobby_voice = await env.gateway.create_voice_channel(
+            env.guild_id,
+            community.match_category_id,
+            f"Match {env.match_id} Lobby",
+            await db(_active_user_ids, env.required_match),
+            await db(_match_staff_roles, community.pk),
+        )
+        await db(effects.record_resource, env.match_id, ResourceKind.LOBBY_VOICE, lobby_voice)
+    resources = await db(effects.resources, old_id)
+    for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
+        channel_id = resources.get(kind)
+        if channel_id is None:
+            continue
+        for user_id in env.gateway.voice_member_ids(env.guild_id, channel_id):
+            await env.gateway.move_member(env.guild_id, user_id, lobby_voice)
+        await env.gateway.delete_channel(channel_id)
+        await db(effects.mark_resource_deleted, old_id, kind)
+
+
 @effect("cleanup_voice")
 async def cleanup_voice(env: Env) -> None:
     resources = await db(effects.resources, env.match_id)

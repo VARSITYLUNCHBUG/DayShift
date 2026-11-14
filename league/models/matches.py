@@ -58,6 +58,10 @@ class Match(models.Model):
     started_by = models.ForeignKey(
         "league.Player", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # A restart: the match this one took over from, keeping its channels and players.
+    restarted_from = models.OneToOneField(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="restarted_as"
+    )
     version = models.PositiveIntegerField(default=0)
     step_index = models.PositiveSmallIntegerField(default=0)
     deadline_at = models.DateTimeField(null=True, blank=True)

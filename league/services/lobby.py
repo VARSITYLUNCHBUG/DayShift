@@ -25,15 +25,17 @@ from league.models import (
     Community,
     Match,
     MatchParticipant,
+    MatchResource,
     MatchResult,
     MatchTransition,
     Player,
     QueueEntry,
 )
 from league.models.alerts import AlertKind
-from league.models.matches import RemovedReason, Source
+from league.models.matches import RemovedReason, ResourceKind, Source
 from league.models.moderation import PenaltyKind
 from league.models.permissions import Area
+from league.models.subs import SubReason
 from league.services import alerts, champions, penalties, prio, standing
 from league.services.common import (
     active_participants,
@@ -180,7 +182,7 @@ def on_ready_timeout(match: Match) -> None:
             match=match,
         )
     _unmatched(community)
-    subs.open_missed_ready(match, mode, [participant.player for participant in missed])
+    subs.open_openings(match, mode, [participant.player for participant in missed])
     render_queue(community)
 
 
@@ -390,10 +392,12 @@ def void_live(
     actor: Player | None = None,
     requeue: bool = False,
     skip_requeue: Collection[int] = (),
+    cleanup: bool = True,
 ) -> None:
     """End a live match with no rating change. Caller holds the match lock.
 
     `skip_requeue` holds player IDs that must not go back in line, such as someone subbing out.
+    `cleanup` False leaves its channels alone, for a restart that takes them over.
     """
     community = lock_community(match.community_id)
     moment = now()
@@ -425,10 +429,69 @@ def void_live(
     match.ended_at = moment
     save_transition(match, "ended_at")
     add_effect(community, "ping_lobby", {"text": f"Match cancelled: {reason}"}, match=match)
-    schedule_cleanup(match)
+    if cleanup:
+        schedule_cleanup(match)
     render_board(match)
     render_queue(community)
     logger.info("Match voided", extra={"match": match.pk, "reason": reason})
+
+
+# A restart's successor takes these over; the old match's team voices go back to the lobby.
+HANDED_OVER = (
+    ResourceKind.TEXT,
+    ResourceKind.LOBBY_VOICE,
+    ResourceKind.BOARD_MESSAGE,
+    ResourceKind.PICKER_MESSAGE,
+    ResourceKind.PICKER_MESSAGE_2,
+    ResourceKind.NOTICE,  # So the successor's first status change clears them.
+)
+
+
+def restart(match: Match, *, leaving: Collection[int]) -> Match:
+    """Captains were set, then someone left and nobody took their seat before the game. Keep the
+    lobby together: a successor match takes over the channels and everyone who stayed, offers the
+    empty seats, and runs a fresh captain vote once they're filled. The old match is voided; its
+    draft history is append-only and stays exactly as it was. Caller holds the match lock."""
+    from league.services import subs
+
+    community = lock_community(match.community_id)
+    mode = mode_of(match)
+    stayed = [p for p in active_participants(match) if p.player_id not in leaving]
+    gone = list(Player.objects.filter(pk__in=list(leaving)))
+    names = ", ".join(player.display_name for player in gone)
+    void_live(
+        match,
+        source=Source.TIMEOUT,
+        reason=f"Restarting: {names} left before the game",
+        cleanup=False,
+    )
+    successor = Match.objects.create(
+        community=community,
+        season=match.season,
+        mode_version=match.mode_version,
+        status=Status.READY_CHECK,
+        rng_seed=secrets.randbits(62),
+        champion_pool=champions.draft_pool(mode),
+        restarted_from=match,
+        created_at=now(),
+    )
+    # The same transaction, so nothing queued for the old match can lose track of a channel.
+    MatchResource.objects.filter(match=match, kind__in=HANDED_OVER, deleted_at__isnull=True).update(
+        match=successor
+    )
+    moment = now()
+    for participant in stayed:
+        MatchParticipant.objects.create(
+            match=successor,
+            player=participant.player,
+            queue_joined_at=participant.queue_joined_at,
+            ready_at=moment,  # They're here: they stayed.
+        )
+    add_effect(community, "restart_voice", {"old_id": match.pk}, match=successor)
+    subs.open_openings(successor, mode, gone, reason=SubReason.RESTART)
+    _matched(community, [participant.player for participant in stayed])
+    logger.info("Match restarted", extra={"match": match.pk, "successor": successor.pk})
+    return successor
 
 
 def schedule_cleanup(match: Match) -> None:

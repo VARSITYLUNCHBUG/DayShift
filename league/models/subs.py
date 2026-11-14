@@ -24,6 +24,11 @@ class SubReason(models.TextChoices):
 
     SUB_OUT = "sub_out", "Sub out"
     MISSED_READY = "missed_ready", "Missed the ready check"
+    RESTART = "restart", "Seat left empty by a restart"
+
+
+# Spots the bot opened itself: nobody names a sub, they're offered straight away.
+OPENED_BY_BOT = (SubReason.MISSED_READY, SubReason.RESTART)
 
 
 class SubRequest(models.Model):

@@ -170,6 +170,8 @@ class BoardState:
     champion_step: int | None = None
     # "ranked" or "scrim". A scrim shows Bebot's screens only, in a public channel.
     kind: str = "ranked"
+    # The match this one restarted, keeping its lobby.
+    restarted_from: int | None = None
 
     @property
     def is_scrim(self) -> bool:
@@ -252,6 +254,7 @@ def board_state(match_id: int) -> BoardState:
         hidden_king_team=match.hidden_king_team,
         champion_first_pick=match.champion_first_pick,
         kind=match.kind,
+        restarted_from=match.restarted_from_id,
         coinflip_winner=match.coinflip_winner,
         coinflip_winner_choice=match.coinflip_winner_choice,
         coinflip_loser_choice=match.coinflip_loser_choice,

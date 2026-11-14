@@ -37,7 +37,14 @@ from league.models import (
 )
 from league.models.matches import Source
 from league.models.moderation import PenaltyKind
-from league.models.subs import UNRESOLVED, OfferSource, OfferStatus, SubReason, SubStatus
+from league.models.subs import (
+    OPENED_BY_BOT,
+    UNRESOLVED,
+    OfferSource,
+    OfferStatus,
+    SubReason,
+    SubStatus,
+)
 from league.services import lobby, penalties
 from league.services.common import (
     active_participants,
@@ -65,6 +72,10 @@ SUBBABLE = frozenset(
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,
     }
+)
+# A sub-out nobody fills in these restarts the lobby: captains are set, the game isn't on.
+RESTARTABLE = frozenset(
+    {Status.PLAYER_DRAFT, Status.COINFLIP, Status.CHAMPION_DRAFT, Status.LOBBY_CODE}
 )
 # Once the sub is in, the paused timer resumes with at least this long left, so nobody is
 # auto-picked the moment the match starts moving again.
@@ -392,17 +403,20 @@ def _offer_next(match: Match, request: SubRequest) -> bool:
     return False
 
 
-def open_missed_ready(match: Match, mode: DraftMode, missed: list[Player]) -> None:
-    """The ready check closed short. Each missing spot is offered straight away; the lobby waits
-    for them, and is cancelled if they aren't all filled in time. Called under the match lock."""
+def open_openings(
+    match: Match, mode: DraftMode, missing: list[Player], reason: str = SubReason.MISSED_READY
+) -> None:
+    """Seats the bot opened itself: a ready check that closed short, or a restart. Each is
+    offered straight away; the lobby waits for them, and is cancelled if they aren't all filled
+    in time. Called under the match lock."""
     moment = now()
     deadline = moment + timedelta(seconds=mode.ready_check.refill_seconds)
-    for player in missed:
+    for player in missing:
         request = SubRequest.objects.create(
             match=match,
             leaving=player,
             requested_by=None,
-            reason=SubReason.MISSED_READY,
+            reason=reason,
             status=SubStatus.OPEN,
             deadline_at=deadline,
             created_at=moment,
@@ -410,12 +424,13 @@ def open_missed_ready(match: Match, mode: DraftMode, missed: list[Player]) -> No
         )
         _offer_next(match, request)
     _hold(match)
-    names = ", ".join(f"**{player.display_name}**" for player in missed)
+    names = ", ".join(f"**{player.display_name}**" for player in missing)
+    why = "missed the ready check" if reason == SubReason.MISSED_READY else "left before the game"
     _ping(
         match,
         [],
-        f"{names} missed the ready check. Their spots are offered to the priority list, then the "
-        f"queue. The lobby is cancelled <t:{int(deadline.timestamp())}:R> if they aren't filled.",
+        f"{names} {why}. Their spots are offered to the priority list, then the queue. The "
+        f"lobby is cancelled <t:{int(deadline.timestamp())}:R> if they aren't filled.",
     )
     render_board(match)
 
@@ -443,7 +458,7 @@ def answer_offer(offer_id: int, player: Player, accept: bool) -> None:
 
 
 def _fill(match: Match, request: SubRequest, in_player: Player) -> None:
-    if request.reason == SubReason.MISSED_READY:
+    if request.reason in OPENED_BY_BOT:
         request.filled_by = in_player
         _resolve(request, SubStatus.FILLED)
         _withdraw_offers(request)
@@ -478,8 +493,8 @@ def _offence(match: Match, request: SubRequest) -> str:
     """What leaving costs. Once the game is on it's leaving a game. Taking yourself out after the
     ready check but before the game is a dodge. During the ready check, or when a captain asked
     for it, nothing."""
-    if request.reason == SubReason.MISSED_READY:
-        return ""  # Already penalised for missing it.
+    if request.reason in OPENED_BY_BOT:
+        return ""  # Nobody chose to leave this seat: any penalty was given when it opened.
     if _game_on(match):
         return PenaltyKind.LEAVER
     if request.is_self and match.status != Status.READY_CHECK:
@@ -625,10 +640,15 @@ def _expire_request(request_id: int, moment: datetime) -> bool:
             match.sub_requests.filter(status__in=UNRESOLVED).values_list("leaving_id", flat=True)
         )
         leaving.add(request.leaving_id)
+        if request.reason == SubReason.SUB_OUT and match.status in RESTARTABLE:
+            # Captains were set but the game hadn't started: keep the lobby together and go
+            # again, rather than send everyone back to the queue.
+            lobby.restart(match, leaving=leaving)
+            return True
         reason = (
-            "Not enough players for the ready check"
-            if request.reason == SubReason.MISSED_READY
-            else f"No sub was found for {request.leaving.display_name}"
+            f"No sub was found for {request.leaving.display_name}"
+            if request.reason == SubReason.SUB_OUT
+            else "Not enough players to fill the lobby"
         )
         # Everyone still in goes back to the queue at their original place: the front.
         lobby.void_live(
@@ -752,7 +772,7 @@ def offer_info(offer_id: int) -> OfferInfo:
         source=offer.source,
         invited_by=offer.invited_by.display_name if offer.invited_by else "",
         deadline_at=offer.deadline_at,
-        missed_ready=request.reason == SubReason.MISSED_READY,
+        missed_ready=request.reason in OPENED_BY_BOT,
         notice_channel_id=offer.notice_channel_id,
         notice_message_id=offer.notice_message_id,
     )
