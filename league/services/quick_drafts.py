@@ -18,7 +18,15 @@ from django.db import IntegrityError, transaction
 from league import log_context
 from league.domain import copy
 from league.domain.draft_plan import PlanStep, champion_plan
-from league.domain.engine import auto_champion, draft_name, pick_gif, seeded_rng
+from league.domain.engine import (  # The coinflip rules are the ranked flow's.
+    auto_champion,
+    coinflip_options,
+    draft_name,
+    other_side,
+    pick_gif,
+    seeded_rng,
+    settle_coinflip,
+)
 from league.domain.errors import DomainError, InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import DraftMode, parse_mode
 from league.models import Champion, Community, OutboxEffect, QuickDraft, QuickDraftAction
@@ -41,24 +49,6 @@ UNPOSTED_SECONDS = 5 * 60
 RENDER_KIND = "render_quick_draft"
 MOVE_KIND = "move_quick_draft"
 DELETE_KIND = "delete_quick_draft"
-
-# The coinflip choices. The winner picks any; the loser picks from the other kind.
-FIRST_PICK = "first_pick"
-LAST_PICK = "last_pick"
-HIDDEN_KING = "hidden_king"
-ARCHMOTHER = "archmother"
-PICK_CHOICES = (FIRST_PICK, LAST_PICK)
-SIDE_CHOICES = (HIDDEN_KING, ARCHMOTHER)
-CHOICE_LABELS = {
-    FIRST_PICK: "First Pick",
-    LAST_PICK: "Last Pick",
-    HIDDEN_KING: "Hidden King",
-    ARCHMOTHER: "Archmother",
-}
-
-
-def other_side(side: str) -> str:
-    return Side.ARCHMOTHER if side == Side.HIDDEN_KING else Side.HIDDEN_KING
 
 
 def side_for_role(role: str, first_side: str) -> str:
@@ -214,33 +204,6 @@ def claim_captain(draft_id: int, side: str, user_id: int, name: str, *, allow_bo
 
 
 # --- Coinflip -------------------------------------------------------------------------------
-
-
-def coinflip_options(winner_choice: str) -> tuple[str, ...]:
-    """What the chooser on turn can press: any of four for the winner, the other kind after."""
-    if not winner_choice:
-        return (FIRST_PICK, LAST_PICK, HIDDEN_KING, ARCHMOTHER)
-    return SIDE_CHOICES if winner_choice in PICK_CHOICES else PICK_CHOICES
-
-
-def settle_coinflip(winner_choice: str, loser_choice: str) -> tuple[str, str, str]:
-    """Turn the two choices into (winner's side, loser's side, side that goes first).
-
-    One captain chose an order and the other a side, so between them both are fixed.
-    """
-    side_of: dict[str, str] = {HIDDEN_KING: Side.HIDDEN_KING, ARCHMOTHER: Side.ARCHMOTHER}
-    winner_side = side_of.get(winner_choice)
-    loser_side = side_of.get(loser_choice)
-    if winner_side is None:
-        if loser_side is None:
-            raise ValueError("One of the two choices must be a side.")
-        winner_side = other_side(loser_side)
-    if loser_side is None:
-        loser_side = other_side(winner_side)
-    chose_order = winner_choice if winner_choice in PICK_CHOICES else loser_choice
-    chooser_side = winner_side if winner_choice in PICK_CHOICES else loser_side
-    first = chooser_side if chose_order == FIRST_PICK else other_side(chooser_side)
-    return winner_side, loser_side, first
 
 
 @transaction.atomic

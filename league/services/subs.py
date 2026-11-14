@@ -54,7 +54,7 @@ SUBBABLE = frozenset(
         Status.READY_CHECK,
         Status.CAPTAIN_PHASE,
         Status.PLAYER_DRAFT,
-        Status.SIDE_SELECT,
+        Status.COINFLIP,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,

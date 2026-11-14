@@ -30,6 +30,7 @@ from tests.helpers import (
     image,
     ready_all,
     run_player_draft,
+    settle_coinflip_for,
     to_champion_draft,
     to_in_progress,
     vote_captains,
@@ -401,7 +402,7 @@ def test_captain_subbing_out_hands_the_role_to_the_sub(popped: Match) -> None:
     assert captain_of(match, "A").player == sub
     assert match.participants.get(player=sub, is_active=True).is_captain
     run_player_draft(match)
-    assert fresh(match).status == Status.SIDE_SELECT
+    assert fresh(match).status == Status.COINFLIP
 
 
 def test_a_sub_during_the_vote_drops_the_leavers_votes(
@@ -419,17 +420,16 @@ def test_a_sub_during_the_vote_drops_the_leavers_votes(
     lobby.cast_captain_votes(match.pk, sub, [sub.pk])
 
 
-def test_a_sub_during_the_side_claim_resumes_it(voting: Match) -> None:
+def test_a_sub_during_the_coinflip_resumes_it(voting: Match) -> None:
     match = run_player_draft(vote_captains(voting))
     leaving = non_captain(match)
     request = self_sub(match, leaving)
     sub = make_player(61)
     subs.answer_offer(invite(request, leaving, sub).pk, sub, True)
     match = fresh(match)
-    assert match.status == Status.SIDE_SELECT
+    assert match.status == Status.COINFLIP
     assert match.deadline_at is not None
-    draft.claim_side(match.pk, captain_of(match, "A").player, "hk")
-    assert fresh(match).status == Status.CHAMPION_DRAFT
+    assert settle_coinflip_for(match).status == Status.CHAMPION_DRAFT
 
 
 def test_lobby_host_subbing_out_makes_the_sub_host(popped: Match) -> None:

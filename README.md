@@ -60,8 +60,8 @@ The admin binds to localhost. Put a TLS reverse proxy in front of it before expo
 | Captain vote | Everyone votes for up to two captains, themselves included, from players with 5 completed matches. Most votes wins; rating breaks ties and fills any gap. Two or fewer eligible: no vote | 45 s, or closes early once everyone has voted |
 | Player draft | `FSSFFSSFFS`, lower-rated captain first. Last player is assigned | 45 s, then highest rated |
 | Team voice | Creates team channels and moves anyone in the lobby voice. Everyone else gets a DM invite | Never blocks the draft |
-| Sides | A captain presses Become Hidden King captain or Become Archmother captain. The first press decides both sides | 20 s, then a coin flip |
-| Champion draft | The mode's ban and pick order. Hidden King bans and picks first. 🎲 Random takes a champion on purpose | 40 s a turn. A timeout takes a random champion, for bans too |
+| Captain coinflip | Bebot's: the winner chooses First Pick, Last Pick, 🔶 Hidden King or 🔷 Archmother, and the loser chooses from the other kind. Between them the sides and who bans and picks first are set | 20 s each, then a random choice |
+| Champion draft | The mode's ban and pick order, from the team the coinflip put first. 🎲 Random takes a champion on purpose | 40 s a turn. A timeout takes a random champion, for bans too |
 | Draft summary | Named like "Crimson Wolf", with a GIF from `presets/draft_gifs.json` and GLHF, above the lobby code prompt | |
 | Lobby code | A random captain enters it; it's posted with the settings checklist. With automatic lobbies, deadlock-api's bot creates it and a captain presses Start match | 3 min, then the other captain, then cancel |
 | Report | Press the team that won, then add the screenshot, and optionally the Deadlock match ID, MVP and key players. With score OCR on, the screenshot is read | 3 h without a report goes to staff |

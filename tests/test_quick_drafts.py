@@ -11,6 +11,7 @@ import pytest
 from django.db import IntegrityError, transaction
 
 from bot.renderers.quick_draft import render_draft, render_grid, render_random_draft
+from league.domain import engine
 from league.domain.draft_plan import champion_plan
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import parse_mode
@@ -240,37 +241,17 @@ def test_captain_claims(league: Community) -> None:
         quick_drafts.claim_captain(draft.pk, Side.ARCHMOTHER, AM, "Mother", allow_both=False)
 
 
-@pytest.mark.parametrize(
-    ("winner_choice", "loser_choice", "expected"),
-    [
-        (quick_drafts.FIRST_PICK, quick_drafts.HIDDEN_KING, ("am", "hk", "am")),
-        (quick_drafts.FIRST_PICK, quick_drafts.ARCHMOTHER, ("hk", "am", "hk")),
-        (quick_drafts.LAST_PICK, quick_drafts.HIDDEN_KING, ("am", "hk", "hk")),
-        (quick_drafts.LAST_PICK, quick_drafts.ARCHMOTHER, ("hk", "am", "am")),
-        (quick_drafts.HIDDEN_KING, quick_drafts.FIRST_PICK, ("hk", "am", "am")),
-        (quick_drafts.HIDDEN_KING, quick_drafts.LAST_PICK, ("hk", "am", "hk")),
-        (quick_drafts.ARCHMOTHER, quick_drafts.FIRST_PICK, ("am", "hk", "hk")),
-        (quick_drafts.ARCHMOTHER, quick_drafts.LAST_PICK, ("am", "hk", "am")),
-    ],
-)
-def test_every_coinflip_pair(
-    winner_choice: str, loser_choice: str, expected: tuple[str, str, str]
-) -> None:
-    """(winner's side, loser's side, side that goes first)."""
-    assert quick_drafts.settle_coinflip(winner_choice, loser_choice) == expected
-
-
 @pytest.mark.django_db
 def test_a_captains_coinflip_runs_to_a_draft(league: Community) -> None:
     draft = quick_drafts.start_coinflip(league.pk, CHANNEL, STARTER, (HK, "One"), (AM, "Two"))
     winner, loser = draft.coinflip_winner_id, draft.coinflip_loser_id
     assert {winner, loser} == {HK, AM}
     with pytest.raises(NotAllowed):
-        quick_drafts.coinflip_choose(draft.pk, loser, quick_drafts.FIRST_PICK)
-    quick_drafts.coinflip_choose(draft.pk, winner, quick_drafts.LAST_PICK)
+        quick_drafts.coinflip_choose(draft.pk, loser, engine.FIRST_PICK)
+    quick_drafts.coinflip_choose(draft.pk, winner, engine.LAST_PICK)
     with pytest.raises(InvalidAction):  # The loser chooses from the other kind.
-        quick_drafts.coinflip_choose(draft.pk, loser, quick_drafts.FIRST_PICK)
-    quick_drafts.coinflip_choose(draft.pk, loser, quick_drafts.ARCHMOTHER)
+        quick_drafts.coinflip_choose(draft.pk, loser, engine.FIRST_PICK)
+    quick_drafts.coinflip_choose(draft.pk, loser, engine.ARCHMOTHER)
     draft = _fresh(draft)
     assert draft.status == QuickDraftStatus.READY
     assert draft.am_captain_id == loser and draft.hk_captain_id == winner
@@ -455,7 +436,7 @@ def test_a_stuck_draft_does_not_hold_up_the_next(wired: Community) -> None:  # n
 
 
 def test_settle_needs_a_side() -> None:
-    for first, second in itertools.product(quick_drafts.PICK_CHOICES, repeat=2):
+    for first, second in itertools.product(engine.ORDER_CHOICES, repeat=2):
         with pytest.raises(ValueError):
             quick_drafts.settle_coinflip(first, second)
 

@@ -65,10 +65,10 @@ async def random_champion(ctx: Context) -> None:
     )
 
 
-@handles("claim_side")
-async def claim_side(ctx: Context) -> None:
+@handles("coin_choice")
+async def coin_choice(ctx: Context) -> None:
     await ctx.interaction.response.defer()
-    await db(draft.claim_side, ctx.match_id, await actor(ctx.interaction), ctx.arg)
+    await db(draft.choose_coinflip, ctx.match_id, await actor(ctx.interaction), ctx.arg)
 
 
 class LobbyCodeModal(discord.ui.Modal, title="Enter the lobby code"):

@@ -242,19 +242,24 @@ def test_captain_vote_select(wired: Community) -> None:
     assert "not in this match" in replies(outsider)[0]
 
 
-def test_side_claim_buttons(wired: Community) -> None:
+def test_coinflip_buttons(wired: Community) -> None:
     match, _players = lobby_of_twelve(wired)
     match = run_player_draft(vote_captains(ready_all(match)))
-    assert match.status == Status.SIDE_SELECT
-    other = match.participants.filter(is_captain=False).first().player
-    refused = fake_interaction(other)
-    click(refused, "claim_side", match.pk, "hk")
-    assert "Only a captain" in replies(refused)[0]
+    assert match.status == Status.COINFLIP
+    winner = match.coinflip_winner
+    loser = "B" if winner == "A" else "A"
+    refused = fake_interaction(captain_of(match, loser).player)
+    click(refused, "coin_choice", match.pk, "first_pick")
+    assert replies(refused)[0] == "Only the coinflip winner can make this choice!"
 
-    click(fake_interaction(captain_of(match, "B").player), "claim_side", match.pk, "am")
+    click(
+        fake_interaction(captain_of(match, winner).player), "coin_choice", match.pk, "hidden_king"
+    )
+    click(fake_interaction(captain_of(match, loser).player), "coin_choice", match.pk, "first_pick")
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
-    assert match.hidden_king_team == "A"
+    assert match.hidden_king_team == winner
+    assert match.champion_first_pick == loser
 
 
 def test_random_champion_button(wired: Community) -> None:

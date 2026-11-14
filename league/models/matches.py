@@ -16,7 +16,7 @@ class MatchStatus(models.TextChoices):
     READY_CHECK = S.READY_CHECK, "Ready check"
     CAPTAIN_PHASE = S.CAPTAIN_PHASE, "Captain vote"
     PLAYER_DRAFT = S.PLAYER_DRAFT, "Player draft"
-    SIDE_SELECT = S.SIDE_SELECT, "Choosing sides"
+    COINFLIP = S.COINFLIP, "Captain coinflip"
     CHAMPION_DRAFT = S.CHAMPION_DRAFT, "Champion draft"
     LOBBY_CODE = S.LOBBY_CODE, "Lobby code"
     IN_PROGRESS = S.IN_PROGRESS, "In progress"
@@ -48,6 +48,10 @@ class Match(models.Model):
     player_first_pick = models.CharField(max_length=1, choices=Team.choices, blank=True)
     champion_first_pick = models.CharField(max_length=1, choices=Team.choices, blank=True)
     hidden_king_team = models.CharField(max_length=1, choices=Team.choices, blank=True)
+    # The captain coinflip after the player draft: its winner's team, then each captain's choice.
+    coinflip_winner = models.CharField(max_length=1, choices=Team.choices, blank=True)
+    coinflip_winner_choice = models.CharField(max_length=12, blank=True)
+    coinflip_loser_choice = models.CharField(max_length=12, blank=True)
     lobby_code = models.CharField(max_length=32, blank=True)
     lobby_code_host = models.ForeignKey(
         "league.Player", null=True, blank=True, on_delete=models.PROTECT, related_name="+"

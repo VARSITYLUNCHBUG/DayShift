@@ -48,12 +48,12 @@ from league.services.common import render_queue as request_queue
 from tests.conftest import make_player, publish_presets
 from tests.helpers import (
     acting_captain,
-    claim_sides,
     finish,
     fresh,
     ready_all,
     run_champion_draft,
     run_player_draft,
+    settle_coinflip_for,
     to_champion_draft,
     to_in_progress,
     vote_captains,
@@ -124,7 +124,7 @@ def test_button_and_select_ids_match_their_templates() -> None:
     import re
 
     assert re.fullmatch(BUTTON_TEMPLATE, button_id("ready", 42))
-    assert re.fullmatch(BUTTON_TEMPLATE, button_id("claim_side", 42, "hk"))
+    assert re.fullmatch(BUTTON_TEMPLATE, button_id("coin_choice", 42, "first_pick"))
     assert re.fullmatch(SELECT_TEMPLATE, select_id("pick_champion", 42, "12.1"))
     assert not re.fullmatch(BUTTON_TEMPLATE, select_id("pick_champion", 42, "12.1"))
     assert BUTTON_TEMPLATE != SELECT_TEMPLATE
@@ -144,7 +144,7 @@ def test_every_rendered_action_has_a_handler(league: Community, players: list[Pl
     states.append(boards.board_state(match.pk))
     match = run_player_draft(vote_captains(match))
     states.append(boards.board_state(match.pk))
-    match = claim_sides(match)
+    match = settle_coinflip_for(match)
     states.append(boards.board_state(match.pk))
     actions = registered_actions()
     for state in states:
@@ -182,7 +182,7 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
     check(match)
     match = run_player_draft(match)
     check(match)
-    match = claim_sides(match)
+    match = settle_coinflip_for(match)
     check(match)
     match = run_champion_draft(match)
     check(match)
@@ -203,7 +203,7 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
         Status.READY_CHECK,
         Status.CAPTAIN_PHASE,
         Status.PLAYER_DRAFT,
-        Status.SIDE_SELECT,
+        Status.COINFLIP,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,
@@ -402,7 +402,7 @@ def test_game_on_board_reports_with_a_button_per_team() -> None:
         (Status.READY_CHECK, "", "Ready check closes"),
         (Status.PLAYER_DRAFT, "player_pick", "Auto-pick"),
         (Status.CAPTAIN_PHASE, "", "Vote closes"),
-        (Status.SIDE_SELECT, "", "Coin flip"),
+        (Status.COINFLIP, "", "Random choice"),
         (Status.CHAMPION_DRAFT, "ban", "Auto-pick"),
         (Status.CHAMPION_DRAFT, "pick", "Auto-pick"),
         (Status.AWAITING_CONFIRMATION, "", "Confirms automatically"),
@@ -1232,15 +1232,13 @@ def test_board_stays_last_and_only_current_pings_survive_a_whole_match(wired: Co
     drain(gateway)
     assert_board_last(gateway, match)
     assert live_notice_texts(gateway, match) == [
-        "teams are set. Claim a side: Hidden King bans and picks first."
+        "teams are set and you won the coinflip! Choose First Pick, Last Pick or a side."
     ]
 
-    match = claim_sides(match)
+    match = settle_coinflip_for(match)
     drain(gateway)
     assert_board_last(gateway, match)
-    assert live_notice_texts(gateway, match) == [
-        "you're Hidden King. You ban first. The champion draft is on."
-    ]
+    assert live_notice_texts(gateway, match) == ["you ban first. The champion draft is on."]
 
     match = to_in_progress(match)
     drain(gateway)
@@ -1746,11 +1744,21 @@ def test_vote_board_has_a_two_choice_select(voting: Match, players: list[Player]
 
 
 @pytest.mark.django_db
-def test_side_board_has_both_claim_buttons(voting: Match) -> None:
+def test_coinflip_board_offers_the_winner_all_four_then_the_loser_two(voting: Match) -> None:
     match = run_player_draft(vote_captains(voting))
-    labels = [button.get("label") for button in all_buttons(_check(match))]
-    assert "Become Hidden King captain" in labels
-    assert "Become Archmother captain" in labels
+    text = str(_check(match))
+    assert "Captain Coinflip" in text and "wins the flip!" in text
+
+    def coin_labels(match: Match) -> list[str]:
+        buttons = all_buttons(_check(match))
+        return [b["label"] for b in buttons if ":coin_choice:" in b.get("custom_id", "")]
+
+    assert coin_labels(match) == ["First Pick", "Last Pick", "Hidden King", "Archmother"]
+    draft_service.choose_coinflip(
+        match.pk, captain_of(match, match.coinflip_winner).player, "first_pick"
+    )
+    assert coin_labels(fresh(match)) == ["Hidden King", "Archmother"]
+    assert "Chose: First Pick" in str(_check(fresh(match)))
 
 
 @pytest.mark.django_db

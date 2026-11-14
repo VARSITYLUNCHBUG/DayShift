@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from league.domain.draft_plan import build_plan, team_for_role
-from league.domain.engine import Status
+from league.domain.engine import ARCHMOTHER, FIRST_PICK, HIDDEN_KING, LAST_PICK, Status
 from league.models import Community, Match, Player
 from league.services import draft, lobby, queue, results
 from league.services.common import captain_of, mode_of
@@ -47,11 +47,17 @@ def vote_captains(match: Match) -> Match:
     return fresh(match)
 
 
-def claim_sides(match: Match, side: str = "hk") -> Match:
-    """Team A's captain claims a side, once the player draft is over."""
+def settle_coinflip_for(match: Match, hk_team: str = "A") -> Match:
+    """Play the captain coinflip so `hk_team` is The Hidden King and bans and picks first."""
     match = fresh(match)
-    if match.status == Status.SIDE_SELECT:
-        draft.claim_side(match.pk, captain_of(match, "A").player, side)
+    if match.status != Status.COINFLIP:
+        return match
+    winner = match.coinflip_winner
+    loser = "B" if winner == "A" else "A"
+    side = HIDDEN_KING if winner == hk_team else ARCHMOTHER
+    draft.choose_coinflip(match.pk, captain_of(match, winner).player, side)
+    order = FIRST_PICK if loser == hk_team else LAST_PICK
+    draft.choose_coinflip(match.pk, captain_of(match, loser).player, order)
     return fresh(match)
 
 
@@ -77,11 +83,11 @@ def acting_captain(match: Match) -> Player:
 
 def to_champion_draft(match: Match) -> Match:
     """From the ready check to the first champion draft step."""
-    return claim_sides(run_player_draft(vote_captains(ready_all(match))))
+    return settle_coinflip_for(run_player_draft(vote_captains(ready_all(match))))
 
 
 def run_champion_draft(match: Match) -> Match:
-    match = claim_sides(match)
+    match = settle_coinflip_for(match)
     while match.status == Status.CHAMPION_DRAFT:
         step = build_plan(mode_of(match))[match.step_index]
         team = team_for_role(step.role, match.champion_first_pick)

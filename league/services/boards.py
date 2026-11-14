@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from django.db.models import Max
 
 from league.domain.draft_plan import PlanStep, build_plan, team_for_role
-from league.domain.engine import TERMINAL, Status, draft_name, pick_gif
+from league.domain.engine import TERMINAL, Status, coinflip_options, draft_name, pick_gif
 from league.domain.mode_schema import parse_mode
 from league.models import (
     Champion,
@@ -121,6 +121,11 @@ class BoardState:
     turn_total: int = 0
     champions: list[ChampionOption] = field(default_factory=list)
     hidden_king_team: str = ""
+    # The captain coinflip: the winner's team, each captain's choice, and the buttons on turn.
+    coinflip_winner: str = ""
+    coinflip_winner_choice: str = ""
+    coinflip_loser_choice: str = ""
+    coinflip_options: tuple[str, ...] = ()
     host_name: str = ""
     lobby_code: str = ""
     winner: str = ""
@@ -222,6 +227,14 @@ def board_state(match_id: int) -> BoardState:
         step_index=match.step_index,
         players=players,
         hidden_king_team=match.hidden_king_team,
+        coinflip_winner=match.coinflip_winner,
+        coinflip_winner_choice=match.coinflip_winner_choice,
+        coinflip_loser_choice=match.coinflip_loser_choice,
+        coinflip_options=(
+            coinflip_options(match.coinflip_winner_choice)
+            if match.status == Status.COINFLIP
+            else ()
+        ),
         lobby_code=match.lobby_code,
         winner=match.winner,
         is_terminal=match.status in TERMINAL,

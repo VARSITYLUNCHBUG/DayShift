@@ -9,6 +9,7 @@ import yaml
 from django.db import IntegrityError, transaction
 
 from bot.renderers.grid import hero_emoji as champion_emoji
+from league.domain import engine
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.models import (
@@ -325,7 +326,7 @@ def test_lower_rated_captain_gets_first_pick(popped: Match, players: list[Player
 
 def test_draft_produces_two_full_teams(popped: Match) -> None:
     match = run_player_draft(vote_captains(ready_all(popped)))
-    assert match.status == Status.SIDE_SELECT
+    assert match.status == Status.COINFLIP
     assert match.participants.filter(team="A").count() == 6
     assert match.participants.filter(team="B").count() == 6
     actions = list(DraftAction.objects.filter(match=match, action="player_pick"))
@@ -394,50 +395,66 @@ def test_player_pick_timeout_takes_highest_rated(
 # --- Side claim ----------------------------------------------------------------------------
 
 
-def at_side_select(voting: Match) -> Match:
+def at_coinflip(voting: Match) -> Match:
     return run_player_draft(vote_captains(voting))
 
 
-def test_player_draft_ends_at_the_side_claim(voting: Match) -> None:
-    match = at_side_select(voting)
-    assert match.status == Status.SIDE_SELECT
+def _coin_captains(match: Match) -> tuple[Player, Player]:
+    winner = match.coinflip_winner
+    return captain_of(match, winner).player, captain_of(match, "B" if winner == "A" else "A").player
+
+
+def test_player_draft_ends_at_the_captain_coinflip(voting: Match) -> None:
+    match = at_coinflip(voting)
+    assert match.status == Status.COINFLIP
+    assert match.coinflip_winner in {"A", "B"}
     assert match.hidden_king_team == ""
 
 
-def test_first_claim_decides_both_sides_and_hidden_king_goes_first(voting: Match) -> None:
-    match = at_side_select(voting)
-    draft.claim_side(match.pk, captain_of(match, "B").player, "hk")
+def test_the_winner_chooses_then_the_loser_from_the_other_kind(voting: Match) -> None:
+    match = at_coinflip(voting)
+    winner, loser = _coin_captains(match)
+    with pytest.raises(NotAllowed, match="coinflip winner"):
+        draft.choose_coinflip(match.pk, loser, engine.FIRST_PICK)
+    draft.choose_coinflip(match.pk, winner, engine.LAST_PICK)
+    with pytest.raises(NotAllowed, match="coinflip loser"):
+        draft.choose_coinflip(match.pk, winner, engine.HIDDEN_KING)
+    with pytest.raises(InvalidAction):
+        draft.choose_coinflip(match.pk, loser, engine.FIRST_PICK)  # Not the other kind.
+    draft.choose_coinflip(match.pk, loser, engine.ARCHMOTHER)
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
-    assert match.hidden_king_team == "B"
-    assert match.champion_first_pick == "B"
+    loser_team = "B" if match.coinflip_winner == "A" else "A"
+    # The loser took The Archmother, so the winner is Hidden King. The winner chose Last Pick,
+    # so the loser's team bans and picks first: Hidden King no longer means first.
+    assert match.hidden_king_team == match.coinflip_winner
+    assert match.champion_first_pick == loser_team
+    assert acting_captain(match) == loser
     with pytest.raises(StaleAction):
-        draft.claim_side(match.pk, captain_of(match, "A").player, "hk")
+        draft.choose_coinflip(match.pk, winner, engine.FIRST_PICK)
 
 
-def test_claiming_archmother_gives_the_other_team_hidden_king(voting: Match) -> None:
-    match = at_side_select(voting)
-    draft.claim_side(match.pk, captain_of(match, "B").player, "am")
-    match = fresh(match)
-    assert match.hidden_king_team == "A"
-    assert match.champion_first_pick == "A"
-
-
-def test_only_a_captain_can_claim_a_side(voting: Match) -> None:
-    match = at_side_select(voting)
+def test_only_a_captain_on_turn_can_choose(voting: Match) -> None:
+    match = at_coinflip(voting)
     player = match.participants.filter(is_captain=False).first().player
     with pytest.raises(NotAllowed):
-        draft.claim_side(match.pk, player, "hk")
+        draft.choose_coinflip(match.pk, player, engine.FIRST_PICK)
 
 
-def test_side_claim_timeout_flips_a_coin(voting: Match, clock: Clock) -> None:
-    match = at_side_select(voting)
+def test_a_coinflip_timeout_chooses_at_random_for_each_captain(voting: Match, clock: Clock) -> None:
+    match = at_coinflip(voting)
+    clock.advance(21)
+    deadlines.tick()
+    match = fresh(match)
+    assert match.status == Status.COINFLIP
+    assert match.coinflip_winner_choice in engine.coinflip_options("")
     clock.advance(21)
     deadlines.tick()
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
+    assert match.coinflip_loser_choice in engine.coinflip_options(match.coinflip_winner_choice)
     assert match.hidden_king_team in {"A", "B"}
-    assert match.champion_first_pick == match.hidden_king_team
+    assert match.champion_first_pick in {"A", "B"}
 
 
 # --- Champion draft ------------------------------------------------------------------------
@@ -466,7 +483,7 @@ def test_every_preset_runs_the_same_flow(
     assert statuses[-5:] == [
         Status.CAPTAIN_PHASE,
         Status.PLAYER_DRAFT,
-        Status.SIDE_SELECT,
+        Status.COINFLIP,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
     ]

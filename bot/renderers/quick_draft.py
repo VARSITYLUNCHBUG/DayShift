@@ -15,13 +15,9 @@ from discord.ui import ActionRow, Container, LayoutView, MediaGallery, TextDispl
 from bot.renderers import grid, style
 from bot.renderers.board import player_mention
 from bot.routing import RouteButton, RouteSelect
+from league.domain.engine import ARCHMOTHER, COINFLIP_LABELS, FIRST_PICK, HIDDEN_KING, LAST_PICK
 from league.models.quick_drafts import QuickDraftStatus
 from league.services.quick_drafts import (
-    ARCHMOTHER,
-    CHOICE_LABELS,
-    FIRST_PICK,
-    HIDDEN_KING,
-    LAST_PICK,
     HeroChoice,
     HeroOption,
     QuickDraftState,
@@ -101,7 +97,7 @@ def _coinflip(state: QuickDraftState) -> LayoutView:
             "choose your preference:"
         )
     else:
-        chose = CHOICE_LABELS[state.winner_choice]
+        chose = COINFLIP_LABELS[state.winner_choice]
         body = (
             f"**{state.coinflip_winner_name}** chose: {chose}\n\n"
             f"{_mention(state.coinflip_loser_id, state.coinflip_loser_name)}, "
@@ -112,7 +108,7 @@ def _coinflip(state: QuickDraftState) -> LayoutView:
             "qd_coin",
             state.id,
             choice,
-            label=CHOICE_LABELS[choice],
+            label=COINFLIP_LABELS[choice],
             style=_CHOICE_STYLE[choice],
             emoji=(
                 discord.PartialEmoji(name=_CHOICE_EMOJI[choice])
@@ -133,8 +129,8 @@ def _coinflip_done(state: QuickDraftState) -> LayoutView:
     box: Container[Any] = Container(
         TextDisplay(
             f"### {style.COIN_EMOJI} Captain Coinflip - Complete\n"
-            f"**{state.coinflip_winner_name}** chose: {CHOICE_LABELS[state.winner_choice]}\n"
-            f"**{state.coinflip_loser_name}** chose: {CHOICE_LABELS[state.loser_choice]}\n\n"
+            f"**{state.coinflip_winner_name}** chose: {COINFLIP_LABELS[state.winner_choice]}\n"
+            f"**{state.coinflip_loser_name}** chose: {COINFLIP_LABELS[state.loser_choice]}\n\n"
             f"{style.HK_EMOJI} {style.HIDDEN_KING}: {state.hk_captain_name}\n"
             f"{style.AM_EMOJI} {style.ARCHMOTHER}: {state.am_captain_name}\n"
             f"{first} bans and picks first. Ready to start the draft!"

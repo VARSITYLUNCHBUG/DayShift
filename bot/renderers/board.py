@@ -15,7 +15,14 @@ from bot.renderers.grid import chunks as _chunks
 from bot.renderers.grid import fits as grid_fits
 from bot.renderers.grid import messages as grid_messages
 from bot.routing import RouteButton, RouteSelect
-from league.domain.engine import Status
+from league.domain.engine import (
+    ARCHMOTHER,
+    COINFLIP_LABELS,
+    FIRST_PICK,
+    HIDDEN_KING,
+    LAST_PICK,
+    Status,
+)
 from league.models.subs import SubStatus
 from league.services.boards import BoardState, ChampionOption, PlayerLine, SubLine
 from league.services.subs import OfferInfo
@@ -29,7 +36,7 @@ STATUS_TITLES = {
     Status.READY_CHECK: "Ready check",
     Status.CAPTAIN_PHASE: "Captain vote",
     Status.PLAYER_DRAFT: "Player draft",
-    Status.SIDE_SELECT: "Choose sides",
+    Status.COINFLIP: "Captain coinflip",
     Status.CHAMPION_DRAFT: "Champion draft",
     Status.LOBBY_CODE: "Lobby code",
     Status.IN_PROGRESS: "Game on",
@@ -51,7 +58,7 @@ TIMER_LABELS = {
     Status.READY_CHECK: "Ready check closes",
     Status.CAPTAIN_PHASE: "Vote closes",
     Status.PLAYER_DRAFT: "Auto-pick",
-    Status.SIDE_SELECT: "Coin flip",
+    Status.COINFLIP: "Random choice",
     Status.CHAMPION_DRAFT: "Auto-pick",
     Status.LOBBY_CODE: "Code due",
     Status.AWAITING_CONFIRMATION: "Confirms automatically",
@@ -195,35 +202,52 @@ def _player_draft(state: BoardState, box: Container[Any]) -> None:
         box.add_item(ActionRow(*[_player_button(state, player) for player in chunk]))
 
 
-def _side_select(state: BoardState, box: Container[Any]) -> None:
+_COIN_STYLE = {
+    FIRST_PICK: ButtonStyle.primary,
+    LAST_PICK: ButtonStyle.primary,
+    HIDDEN_KING: ButtonStyle.danger,
+    ARCHMOTHER: ButtonStyle.primary,
+}
+_COIN_EMOJI = {HIDDEN_KING: style.HK_EMOJI, ARCHMOTHER: style.AM_EMOJI}
+
+
+def coin_buttons(action: str, target_id: int, options: tuple[str, ...]) -> ActionRow[Any]:
+    """Bebot's coinflip buttons: First Pick, Last Pick, Hidden King, Archmother."""
+    return ActionRow(
+        *(
+            RouteButton(
+                action,
+                target_id,
+                choice,
+                label=COINFLIP_LABELS[choice],
+                style=_COIN_STYLE[choice],
+                emoji=(
+                    discord.PartialEmoji(name=_COIN_EMOJI[choice])
+                    if choice in _COIN_EMOJI
+                    else None
+                ),
+            )
+            for choice in options
+        )
+    )
+
+
+def _coinflip(state: BoardState, box: Container[Any]) -> None:
     box.add_item(TextDisplay(_team_block(state, "A") + "\n\n" + _team_block(state, "B")))
     box.add_item(Separator())
-    box.add_item(
-        TextDisplay(
-            "Captains: claim a side. **Hidden King bans and picks first.** "
-            "The first claim decides both sides; if nobody claims, it's a coin flip."
-        )
-    )
-    box.add_item(
-        ActionRow(
-            RouteButton(
-                "claim_side",
-                state.match_id,
-                "hk",
-                label="Become Hidden King captain",
-                style=ButtonStyle.danger,
-                emoji=discord.PartialEmoji(name="🔶"),
-            ),
-            RouteButton(
-                "claim_side",
-                state.match_id,
-                "am",
-                label="Become Archmother captain",
-                style=ButtonStyle.primary,
-                emoji=discord.PartialEmoji(name="🔷"),
-            ),
-        )
-    )
+    winner = state.coinflip_winner
+    loser = "B" if winner == "A" else "A"
+    lines = [
+        f"### {style.COIN_EMOJI} Captain Coinflip",
+        f"**{state.team_name(winner)}** wins the flip!",
+    ]
+    if not state.coinflip_winner_choice:
+        lines.append(f"{state.captains.get(winner, 'Their captain')}, choose your preference:")
+    else:
+        lines.append(f"Chose: {COINFLIP_LABELS[state.coinflip_winner_choice]}")
+        lines.append(f"{state.captains.get(loser, 'Their captain')}, choose your preference:")
+    box.add_item(TextDisplay("\n".join(lines)))
+    box.add_item(coin_buttons("coin_choice", state.match_id, state.coinflip_options))
 
 
 def _next_up(state: BoardState) -> str:
@@ -507,7 +531,7 @@ _SECTIONS = {
     Status.READY_CHECK: _ready,
     Status.CAPTAIN_PHASE: _captain_vote,
     Status.PLAYER_DRAFT: _player_draft,
-    Status.SIDE_SELECT: _side_select,
+    Status.COINFLIP: _coinflip,
     Status.CHAMPION_DRAFT: _champion_draft,
     Status.LOBBY_CODE: _lobby_code,
     Status.IN_PROGRESS: _in_progress,

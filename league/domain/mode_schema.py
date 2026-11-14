@@ -55,10 +55,11 @@ class Step(_Strict):
 
 
 class ChampionDraft(_Strict):
-    """The captains claim a side, then the Hidden King team ("first") bans and picks first. A
-    timed-out ban or pick takes a random champion, and the acting captain can press Random."""
+    """After the player draft, Bebot's captain coinflip settles the sides and which team
+    ("first") bans and picks first. A timed-out ban or pick takes a random champion, and the
+    acting captain can press Random."""
 
-    side_seconds: Seconds = 20  # How long the captains have to claim a side. Then a coin flip.
+    coinflip_seconds: Seconds = 20  # Each captain's time to choose. Then a random choice.
     seconds: Seconds = 30
     excluded_champion_ids: tuple[int, ...] = ()
     steps: Annotated[tuple[Step, ...], Field(min_length=1)]
