@@ -39,8 +39,8 @@ match flow, draft modes, subs, ratings, commands, architecture, operations and d
    docker compose up -d --build
    ```
 5. In Discord, run `/setup` as the server owner or an Administrator. It creates the queue,
-   Waiting Room, results, archive and staff-alerts channels, and it is safe to run again. Then give your staff
-   roles their areas with `/permissions grant` (see [Permissions](#permissions)).
+   Waiting Room, results, archive and staff-alerts channels, and it is safe to run again. Then
+   give your staff roles their areas with `/permissions grant` (see [Permissions](#permissions)).
 6. Create an admin login for `http://127.0.0.1:8000/admin/`:
    ```bash
    docker compose exec web python manage.py createsuperuser
@@ -48,6 +48,10 @@ match flow, draft modes, subs, ratings, commands, architecture, operations and d
 
 The admin binds to localhost. Put a TLS reverse proxy in front of it before exposing it, and set
 `BEHIND_TLS_PROXY=true`, `SECURE_COOKIES=true` and `CSRF_TRUSTED_ORIGINS`.
+
+**Upgrading an older install.** The migrations were squashed into one `0001_initial` when scrims,
+staff areas and the staff channel came in. A database created before that can't be migrated
+forward: back it up, start a fresh one, and run `/setup` and `/permissions grant` again.
 
 ## How a match runs
 
@@ -524,16 +528,19 @@ works with `GET https://api.deadlock-api.com/v1/matches/{id}/metadata`.
 ```
 league/domain/    Pure rules, no Django or Discord: ratings (openskill_v1), strikes and
                   captain eligibility (standing), Steam IDs, mode schema, draft plan, engine
+                  (statuses, transitions per kind, the captain coinflip), copy (what players read)
 league/models/    The tables
 league/services/  Transactions: queue, lobby, draft, results, ratings, corrections, awards,
                   standing, penalties, ocr, steam, api_results, calibration, deadlines,
-                  and Bebot's tools: scrims, prio, pings
+                  permissions, alerts (the staff channel), and Bebot's tools: scrims, prio, pings
 league/integrations/  The deadlock-api client. Network only, no database
 league/web/       The staff calibration dashboard
 league/admin/     Django admin
-bot/handlers/     Clicks and modals: validate, call a service, acknowledge
+bot/handlers/     Clicks and modals: validate, call a service, acknowledge. permissions.py holds
+                  the staff area checks every command and button uses
 bot/commands/     Slash commands
-bot/renderers/    State to Discord components, with no I/O
+bot/renderers/    State to Discord components, with no I/O. style.py is the one look (Bebot's
+                  colours, titles and turn strip); board.py renders ranked matches and scrims
 bot/effects/      Runs Discord side effects from the outbox, with retries
 bot/error_log.py  Posts ERROR logs to each server's /seterrorchannel channel
 scoreocr/         Scoreboard screenshot reader, used through league/services/ocr.py when installed
