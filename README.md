@@ -115,8 +115,14 @@ Players can chat freely, and the board stays at the bottom:
   20 s after the third message if chat doesn't stop. A board that moves mid-click could cost a
   captain a wrong ban, so it doesn't move on every message. Change this with the `BOARD_MOVE_*`
   values in `league/services/effects.py`.
-- **Choices are buttons**, so everything is visible at once. Drafted players and taken champions
-  stay in place, greyed out, so nothing shifts under a click. The champion grid has messages of
+- **The champion draft is Bebot's board**: 🏆 Draft #N with its name, 👑 Captains with the
+  timer on the captain whose turn it is, 🚫 Bans, each side's heroes one per line ("(random
+  choice)" for 🎲, "(randomed)" for a timeout), and the bracketed turn strip, in the acting
+  side's colour. Under it, each team's rating and chance to win, and "Ban 3 of 4. Next: Pike
+  picks." The finished draft ends in `# GLHF` with a GIF.
+- **Choices are buttons**, so everything is visible at once. Champions are red to ban and green
+  to pick. Drafted players and taken champions stay in place, greyed out, so nothing shifts under
+  a click. The champion grid has messages of
   its own directly below the board, split evenly over two because Discord allows 40 components per
   message, with Random at the end. They are posted afresh each turn rather than edited, so no
   "(edited)" tag splits the grid. A roster above 55 falls back to dropdowns.

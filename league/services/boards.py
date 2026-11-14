@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from django.db.models import Max
 
-from league.domain.draft_plan import PlanStep, build_plan, team_for_role
+from league.domain.draft_plan import PlanStep, build_plan, player_draft_length, team_for_role
 from league.domain.engine import TERMINAL, Status, coinflip_options, draft_name, pick_gif
 from league.domain.mode_schema import parse_mode
 from league.models import (
@@ -75,6 +75,7 @@ class DraftLine:
     label: str
     auto: bool
     random_choice: bool = False
+    emoji: str = ""  # A champion's plain emoji: text never shows custom ones.
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +161,9 @@ class BoardState:
     # The draft summary: a name for the draft and a GIF.
     draft_name: str = ""
     gif_url: str | None = None
+    # Bebot's turn strip: (action, side) for each ban and pick, and the one on turn.
+    champion_steps: tuple[tuple[str, str], ...] = ()
+    champion_step: int | None = None
 
     @property
     def hold_until(self) -> datetime | None:
@@ -173,6 +177,15 @@ class BoardState:
 
     def team_name(self, team: str) -> str:
         return team_name(self.captains.get(team, "Captain"))
+
+    def side_of(self, team: str) -> str:
+        """ "hk" or "am", once the coinflip has set the sides."""
+        return "hk" if team == self.hidden_king_team else "am"
+
+    @property
+    def side_order(self) -> tuple[str, str]:
+        """The teams in Bebot's order: The Hidden King's first."""
+        return ("A", "B") if self.hidden_king_team != "B" else ("B", "A")
 
 
 def _turn_progress(plan: tuple[PlanStep, ...], index: int) -> tuple[int, int]:
@@ -250,6 +263,7 @@ def board_state(match_id: int) -> BoardState:
         state.host_name = match.lobby_code_host.display_name
 
     champion_names = dict(Champion.objects.values_list("pk", "name"))
+    champion_emojis = dict(Champion.objects.values_list("pk", "unicode_emoji"))
     actions = match.draft_actions.select_related("target_player").order_by("step_index")
     for action in actions:
         if action.target_player is not None:
@@ -260,12 +274,25 @@ def board_state(match_id: int) -> BoardState:
             label = "skipped"
         state.actions.append(
             DraftLine(
-                action.action, action.team, label, action.source == "timeout", action.random_choice
+                action.action,
+                action.team,
+                label,
+                action.source == "timeout",
+                action.random_choice,
+                emoji=champion_emojis.get(action.target_champion_id or 0, "") or "",
             )
         )
 
     plan = build_plan(mode)
     state.steps_total = len(plan)
+    if match.hidden_king_team and match.champion_first_pick:
+        start = player_draft_length(mode)
+        state.champion_steps = tuple(
+            (step.action, state.side_of(team_for_role(step.role, match.champion_first_pick)))
+            for step in plan[start:]
+        )
+        if match.status == Status.CHAMPION_DRAFT:
+            state.champion_step = match.step_index - start
     if match.status in {Status.PLAYER_DRAFT, Status.CHAMPION_DRAFT} and match.step_index < len(
         plan
     ):

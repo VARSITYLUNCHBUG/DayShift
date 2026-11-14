@@ -24,7 +24,7 @@ from league.domain.engine import (
     Status,
 )
 from league.models.subs import SubStatus
-from league.services.boards import BoardState, ChampionOption, PlayerLine, SubLine
+from league.services.boards import BoardState, ChampionOption, DraftLine, PlayerLine, SubLine
 from league.services.subs import OfferInfo
 
 ACCENT_LIVE = style.LOBBY_COLOUR
@@ -121,16 +121,11 @@ def _team_line(state: BoardState, team: str) -> str:
     return f"{_team_heading(state, team, lines)}: {names}"
 
 
-def _picks(state: BoardState, action: str, team: str | None = None) -> str:
-    labels = [
-        ("⏱ " if line.auto else "🎲 " if line.random_choice else "") + line.label
-        for line in state.actions
-        if line.action == action and (team is None or line.team == team)
-    ]
-    return ", ".join(labels) if labels else "-"
-
-
 def _header(state: BoardState) -> str:
+    if state.status == Status.CHAMPION_DRAFT:
+        # Bebot's title. The timer sits on the acting captain's line, unless a sub has paused it.
+        title = f"## {style.draft_title(state.match_id, state.draft_name)}"
+        return f"{title}\n{countdown(state)}" if state.on_hold else title
     title = STATUS_TITLES.get(state.status, state.status)
     timer = countdown(state)
     line = f"## Match #{state.match_id}: {title}"
@@ -316,20 +311,58 @@ def _champion_selects(state: BoardState) -> list[ActionRow[Any]]:
     ]
 
 
+def _hero_text(line: DraftLine) -> str:
+    """Bebot's hero line: plain emoji, name, and "(random choice)" or "(randomed)"."""
+    emoji = style.hero_emoji_text(line.emoji)
+    return style.hero_line(emoji, line.label, random_choice=line.random_choice, auto=line.auto)
+
+
+def _captains_block(state: BoardState, *, final: bool) -> list[str]:
+    rows = [f"{style.CAPTAIN_EMOJI} **Captains**"]
+    for team in state.side_order:
+        emoji = style.side_emoji(state.side_of(team))
+        name = state.captains.get(team, "-")
+        if not final and team == state.acting_team:
+            timer = "" if state.on_hold else style.countdown(state.deadline_at)
+            rows.append(f"{emoji} **{name}** {state.step_action} a hero!{timer}")
+        else:
+            rows.append(f"{emoji} {name}")
+    return rows
+
+
+def draft_summary(state: BoardState, *, final: bool) -> str:
+    """Bebot's draft: captains, bans, then each side's heroes, one per line."""
+    bans = [_hero_text(line) for line in state.actions if line.action == "ban"]
+    parts = [*_captains_block(state, final=final), "", f"{style.BAN_EMOJI} **Bans**"]
+    parts.append(style.hero_list(bans))
+    for team in state.side_order:
+        side = state.side_of(team)
+        picks = [
+            _hero_text(line)
+            for line in state.actions
+            if line.action == "pick" and line.team == team
+        ]
+        parts += [
+            "",
+            f"{style.side_emoji(side)} **{style.side_name(side)}**: {state.team_name(team)}",
+        ]
+        parts.append(style.hero_list(picks))
+    return "\n".join(parts)
+
+
 def _champion_draft(state: BoardState, box: Container[Any]) -> None:
-    box.add_item(TextDisplay(_team_line(state, "A") + "\n" + _team_line(state, "B")))
-    box.add_item(Separator())
-    box.add_item(
-        TextDisplay(
-            f"**Bans:** {_picks(state, 'ban')}\n"
-            f"**{state.team_name('A')} picks:** {_picks(state, 'pick', 'A')}\n"
-            f"**{state.team_name('B')} picks:** {_picks(state, 'pick', 'B')}"
-        )
+    box.add_item(TextDisplay(draft_summary(state, final=False)))
+    box.add_item(TextDisplay(style.timeline_block(state.champion_steps, state.champion_step)))
+    # Our extras: each team's rating, and where the draft is up to.
+    ratings = "\n".join(
+        f"-# {_team_heading(state, team, _team(state, team))}"
+        for team in state.side_order
+        if _team(state, team)
     )
-    verb, noun = ("banning", "ban") if state.step_action == "ban" else ("picking", "pick")
-    progress = f": {noun} {state.turn_position} of {state.turn_total}" if state.turn_total else ""
+    noun = "Ban" if state.step_action == "ban" else "Pick"
+    progress = f"{noun} {state.turn_position} of {state.turn_total}." if state.turn_total else ""
     box.add_item(
-        TextDisplay(f"**{state.acting_captain_name}** is {verb}{progress}.{_next_up(state)}")
+        TextDisplay(f"{progress}{_next_up(state)}".strip() + (f"\n{ratings}" if ratings else ""))
     )
 
 
@@ -359,18 +392,14 @@ def render_pickers(state: BoardState) -> list[LayoutView]:
 
 
 def _final_draft_summary(state: BoardState) -> str:
-    return (
-        _team_block(state, "A")
-        + f"\nChampions: {_picks(state, 'pick', 'A')}\n\n"
-        + _team_block(state, "B")
-        + f"\nChampions: {_picks(state, 'pick', 'B')}\n\n"
-        + f"**Bans:** {_picks(state, 'ban')}"
-    )
+    """Bebot's finished draft, then who's on each team for the lobby."""
+    teams = "\n".join(_team_line(state, team) for team in state.side_order)
+    return f"{draft_summary(state, final=True)}\n\n{teams}"
 
 
 def _lobby_code(state: BoardState, box: Container[Any]) -> None:
     # The draft ends with a name, the summary, a GIF and GLHF.
-    box.add_item(TextDisplay(f"### 🏆 Draft: {state.draft_name} 🏆"))
+    box.add_item(TextDisplay(f"### {style.draft_title(state.match_id, state.draft_name)}"))
     box.add_item(TextDisplay(_final_draft_summary(state)))
     if state.gif_url:
         box.add_item(MediaGallery(discord.MediaGalleryItem(state.gif_url)))
@@ -545,6 +574,10 @@ _SECTIONS = {
 def _accent(state: BoardState) -> int:
     if state.on_hold:
         return ACCENT_ATTENTION
+    if state.status == Status.COINFLIP:
+        return style.COINFLIP_COLOUR
+    if state.status == Status.CHAMPION_DRAFT and state.acting_team:
+        return style.side_colour(state.side_of(state.acting_team))
     if state.status == Status.COMPLETED:
         return ACCENT_DONE
     if state.status == Status.VOIDED:

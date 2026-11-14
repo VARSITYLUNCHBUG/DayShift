@@ -290,7 +290,36 @@ def test_champion_board_says_how_far_along_the_draft_is(popped: Match) -> None:
     match = to_champion_draft(popped)
     state = boards.board_state(match.pk)
     payload = str(render_board(state).to_components())
-    assert f"**{state.acting_captain_name}** is banning: ban 1 of 4." in payload
+    assert "Ban 1 of 4." in payload
+    assert f"**{state.acting_captain_name}** ban a hero! ⌛ <t:" in payload
+
+
+@pytest.mark.django_db
+def test_champion_board_is_bebots_draft(popped: Match) -> None:
+    """Bebot's title, captains, bans, each side's heroes and turn strip, plus each team's rating."""
+    match = to_champion_draft(popped)
+    captain = acting_captain(match)
+    draft_service.choose_random_champion(match.pk, captain, match.step_index)
+    state = boards.board_state(fresh(match).pk)
+    text = str(render_board(state).to_components())
+    assert f"🏆 Draft #{match.pk}: {state.draft_name} 🏆" in text
+    assert "👑 **Captains**" in text and "🚫 **Bans**" in text
+    assert "🔶 **The Hidden King**" in text and "🔷 **The Archmother**" in text
+    assert " (random choice)" in text  # The 🎲 ban, in Bebot's words.
+    assert "Bans\\n" in text and "Picks\\n" in text  # The turn strip, in a code block.
+    assert "avg " in text and "to win" in text  # Our extra: each team's rating.
+    # The Hidden King's side comes first, as in Bebot.
+    assert text.index("🔶 **The Hidden King**") < text.index("🔷 **The Archmother**")
+
+
+@pytest.mark.django_db
+def test_champion_board_takes_the_acting_sides_colour(popped: Match) -> None:
+    from bot.renderers import style
+
+    match = to_champion_draft(popped)
+    state = boards.board_state(match.pk)
+    side = state.side_of(state.acting_team)
+    assert render_board(state).to_components()[0]["accent_color"] == style.side_colour(side)
 
 
 @pytest.mark.django_db
