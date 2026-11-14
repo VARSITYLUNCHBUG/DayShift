@@ -24,7 +24,6 @@ from league.domain.mode_schema import DraftMode, ModeValidationError, parse_mode
 
 PRESETS = Path(__file__).resolve().parent.parent / "presets"
 THREE_BAN = yaml.safe_load((PRESETS / "threeban_1win_2026.yaml").read_text(encoding="utf-8"))
-DCS = yaml.safe_load((PRESETS / "dcs_s3_2ban.yaml").read_text(encoding="utf-8"))
 BEBOT = yaml.safe_load((PRESETS / "bebot_2ban.yaml").read_text(encoding="utf-8"))
 
 
@@ -35,17 +34,16 @@ def body(**changes: object) -> dict[str, object]:
 # --- Mode schema ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("raw", [BEBOT, THREE_BAN, DCS])
+@pytest.mark.parametrize("raw", [BEBOT, THREE_BAN])
 def test_presets_parse(raw: dict[str, object]) -> None:
     assert isinstance(parse_mode(raw), DraftMode)
 
 
-def test_bebot_preset_is_dcs_order_at_40_seconds() -> None:
+def test_bebot_preset_timers() -> None:
     mode = parse_mode(BEBOT)
     assert mode.captains.vote_seconds == 45
     assert mode.champion_draft.side_seconds == 20
     assert mode.champion_draft.seconds == 40
-    assert BEBOT["champion_draft"]["steps"] == DCS["champion_draft"]["steps"]
 
 
 @pytest.mark.parametrize(
@@ -91,8 +89,8 @@ def test_three_ban_expands_to_exact_1win_table() -> None:
     ]
 
 
-def test_dcs_preset_matches_rulebook_16_steps() -> None:
-    plan = build_plan(parse_mode(DCS))
+def test_bebot_preset_runs_its_16_steps() -> None:
+    plan = build_plan(parse_mode(BEBOT))
     champion_steps = "".join(
         ("b" if step.action == "ban" else "p") + step.role[0].upper() for step in plan[10:]
     )

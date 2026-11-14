@@ -1,5 +1,5 @@
-"""Bebot's standalone draft commands: /startdraft, /stopdraft, /captains_coinflip, /coinflip and
-/randomdraft. They work in any channel of a set-up server and never touch ratings.
+"""Bebot's standalone draft commands: /startdraft, /stopdraft, /captains_coinflip and /randomdraft.
+They work in any channel of a set-up server and never touch ratings.
 
 The draft message is posted by the outbox, like every board, so a command only records the draft
 and says so. It checks first that the bot can post and read in the channel, because a draft it
@@ -8,7 +8,6 @@ can't show would hold the channel until it timed out.
 
 from __future__ import annotations
 
-import secrets
 from typing import Any
 
 import discord
@@ -16,7 +15,7 @@ from discord import Interaction, app_commands
 
 from bot.db import db
 from bot.handlers.common import community_of, is_staff
-from bot.renderers.quick_draft import render_coinflip, render_random_draft
+from bot.renderers.quick_draft import render_random_draft
 from bot.routing import guarded, reply
 from league.domain.errors import InvalidAction
 from league.services import quick_drafts
@@ -114,27 +113,6 @@ async def captains_coinflip_command(
 
 
 @app_commands.command(
-    name="coinflip", description="Flip a coin: who takes The Hidden King (first pick)"
-)
-@app_commands.describe(player1="One player", player2="The other player")
-async def coinflip_command(
-    interaction: Interaction[Any], player1: discord.Member, player2: discord.Member
-) -> None:
-    async def run() -> None:
-        if player1.id == player2.id:
-            raise InvalidAction("You can't flip a coin between the same player!")
-        first = (player1.id, _name(player1))
-        second = (player2.id, _name(player2))
-        winner, loser = (first, second) if secrets.randbelow(2) == 0 else (second, first)
-        await interaction.response.send_message(
-            view=render_coinflip(winner, loser),
-            allowed_mentions=discord.AllowedMentions(users=[player1, player2]),
-        )
-
-    await guarded(interaction, run)
-
-
-@app_commands.command(
     name="randomdraft", description="Random bans and picks for both sides, in this server's mode"
 )
 async def randomdraft_command(interaction: Interaction[Any]) -> None:
@@ -151,6 +129,5 @@ COMMANDS: tuple[app_commands.Command[Any, Any, Any], ...] = (
     startdraft_command,
     stopdraft_command,
     captains_coinflip_command,
-    coinflip_command,
     randomdraft_command,
 )

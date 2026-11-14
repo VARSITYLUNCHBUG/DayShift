@@ -74,7 +74,6 @@ judgements, not published standards.
 | Mode | Champion draft |
 |---|---|
 | `bebot_2ban` (default) | Bebot's 16-step, 2-ban order, 40 s a turn |
-| `dcs_s3_2ban` | The same 16 steps, 30 s a turn |
 | `threeban_1win_2026` | The 1win 18-step table, 3 bans a team, 30 s a turn |
 
 Switch with `/mode activate slug:<slug>`. Bebot's custom hero emojis are in
@@ -376,8 +375,7 @@ the draft moves back below the chat once a few messages push it up.
 - `/captains_coinflip captain1 captain2` flips a coin. The winner chooses First Pick, Last Pick,
   🔶 Hidden King or 🔷 Archmother; the loser chooses from the other kind; either captain presses
   Start Draft. Here The Archmother can go first.
-- `/coinflip player1 player2` only says who should take The Hidden King. `/randomdraft` posts a
-  random ban and pick for both sides.
+- `/randomdraft` posts a random ban and pick for both sides.
 - `/stopdraft` stops it and deletes its messages. The captains, whoever started it, and staff can.
 - One draft per channel, and at most 10 at once per server. A draft whose captains never show up
   frees the channel after 15 minutes. With `DEBUG` on, one person can captain both sides.
@@ -419,9 +417,9 @@ full traceback.
 
 ## Commands
 
-**Players:** `/leaderboard`, `/stats`, `/rating history`, `/queue status`, `/link`, `/unlink`,
+**Players:** `/leaderboard`, `/stats`, `/queue status`, `/link`, `/unlink`,
 `/submit` (fallback for when the report form's upload fails), `/startdraft`, `/stopdraft`,
-`/captains_coinflip`, `/coinflip`, `/randomdraft`, `/prio`, `/ping`, `/pings`.
+`/captains_coinflip`, `/randomdraft`, `/prio`, `/ping`, `/pings`.
 
 **Staff:** `/setup`, `/match status|void|rescore|sub|explain|awards|names|early_leave`,
 `/rating seed|adjust`, `/queue kick|clear`, `/penalty add|revoke|strikes`,

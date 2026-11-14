@@ -85,7 +85,7 @@ def test_a_draft_runs_the_modes_bans_and_picks_in_order(league: Community) -> No
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("slug", ["bebot_2ban", "dcs_s3_2ban", "threeban_1win_2026"])
+@pytest.mark.parametrize("slug", ["bebot_2ban", "threeban_1win_2026"])
 def test_every_preset_mode_runs_to_the_end(league: Community, slug: str) -> None:
     activate(league, slug)
     draft = _run_draft(_captained(league))

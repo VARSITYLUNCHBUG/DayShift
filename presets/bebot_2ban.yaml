@@ -1,7 +1,7 @@
 # The default mode, carried over from Bebot (simpleDraft). Every mode runs the same flow: players
 # vote for captains, the captains draft players, then claim a side. Hidden King ("first") bans and
 # picks first, a timeout takes a random champion and captains can press Random.
-# The hero order is Bebot's 16 steps, the same as dcs_s3_2ban, at 40 s a turn.
+# The hero order is Bebot's 16 steps (DCS Season 3's 2-ban order), at 40 s a turn.
 schema_version: 1
 slug: bebot_2ban
 name: "2-ban draft (Bebot flow)"

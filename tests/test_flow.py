@@ -444,7 +444,7 @@ def test_side_claim_timeout_flips_a_coin(voting: Match, clock: Clock) -> None:
 
 @pytest.mark.parametrize(
     ("slug", "steps", "bans", "seconds"),
-    [("bebot_2ban", 16, 4, 40), ("dcs_s3_2ban", 16, 4, 30), ("threeban_1win_2026", 18, 6, 30)],
+    [("bebot_2ban", 16, 4, 40), ("threeban_1win_2026", 18, 6, 30)],
 )
 def test_every_preset_runs_the_same_flow(
     league: Community, players: list[Player], slug: str, steps: int, bans: int, seconds: int

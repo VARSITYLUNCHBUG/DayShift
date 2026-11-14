@@ -152,21 +152,7 @@ async def queue_status(interaction: Interaction[Any]) -> None:
     await guarded(interaction, run)
 
 
-rating_group = app_commands.Group(name="rating", description="Rating history and staff adjustments")
-
-
-@rating_group.command(name="history", description="A player's recent rating changes")
-@app_commands.describe(player="Leave empty for yourself")
-async def rating_history(
-    interaction: Interaction[Any], player: discord.Member | None = None
-) -> None:
-    async def run() -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        community = await community_of(interaction)
-        target = await _resolve_target(interaction, player)
-        await reply(interaction, await db(_stats_text, community, target))
-
-    await guarded(interaction, run)
+rating_group = app_commands.Group(name="rating", description="Staff rating adjustments")
 
 
 # --- Steam -----------------------------------------------------------------------------------

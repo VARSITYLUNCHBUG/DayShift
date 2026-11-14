@@ -1,4 +1,4 @@
-"""The standalone draft's messages in Bebot's look, and /coinflip and /randomdraft. Pure: no I/O.
+"""The standalone draft's messages in Bebot's look, and /randomdraft. Pure: no I/O.
 
 The draft message comes first; while drafting, the hero grid follows in messages of its own, as
 in the match flow. The draft ID rides in the custom_id's match slot.
@@ -283,21 +283,7 @@ def render_draft(state: QuickDraftState) -> LayoutView:
     return _view(TextDisplay("Draft stopped."))
 
 
-# --- /coinflip and /randomdraft -------------------------------------------------------------
-
-
-def render_coinflip(winner: tuple[int, str], loser: tuple[int, str]) -> LayoutView:
-    """Bebot's /coinflip: who should take The Hidden King (first pick)."""
-    box: Container[Any] = Container(
-        TextDisplay(
-            f"### {bebot.COIN_EMOJI} Captain Coinflip\n"
-            f"**{winner[1]}** wins the flip!\n\n"
-            f"{_mention(*winner)} should select {bebot.HIDDEN_KING} (first pick)\n"
-            f"{_mention(*loser)} should select {bebot.ARCHMOTHER}"
-        ),
-        accent_colour=bebot.COINFLIP_COLOUR,
-    )
-    return _view(box)
+# --- /randomdraft -------------------------------------------------------------------------
 
 
 def _option_list(heroes: list[HeroOption]) -> str:

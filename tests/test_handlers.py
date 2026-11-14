@@ -707,9 +707,9 @@ def test_mode_commands(wired: Community) -> None:
     assert "(active)" in replies(interaction)[0]
 
     interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="dcs_s3_2ban")
+    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="threeban_1win_2026")
     wired.refresh_from_db()
-    assert wired.active_mode == DraftModeVersion.objects.get(slug="dcs_s3_2ban")
+    assert wired.active_mode == DraftModeVersion.objects.get(slug="threeban_1win_2026")
 
     interaction = fake_interaction(admin, administrator=True)
     run_command(subcommand(staff.mode_group, "activate"), interaction, slug="nope")
@@ -800,12 +800,13 @@ def test_every_command_serialises_for_discord() -> None:
     names = {payload["name"] for payload in payloads}
     assert {"queue", "rating", "match", "penalty", "mode", "roster", "setup", "submit"} <= names
     assert {"link", "unlink", "captain", "ocr", "deadlock"} <= names
-    assert {"startdraft", "stopdraft", "captains_coinflip", "coinflip", "randomdraft"} <= names
+    assert {"startdraft", "stopdraft", "captains_coinflip", "randomdraft"} <= names
+    assert "coinflip" not in names
     assert {"priolist", "prio", "refresh", "removeprio"} <= names
     assert {"pingchannel", "removeping", "pings", "ping"} <= names
     assert {"seterrorchannel", "clearerrorchannel"} <= names
     rating = next(payload for payload in payloads if payload["name"] == "rating")
-    assert {option["name"] for option in rating["options"]} == {"history", "seed", "adjust"}
+    assert {option["name"] for option in rating["options"]} == {"seed", "adjust"}
     queue_payload = next(payload for payload in payloads if payload["name"] == "queue")
     assert {option["name"] for option in queue_payload["options"]} == {"status", "kick", "clear"}
 
