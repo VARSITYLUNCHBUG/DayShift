@@ -164,6 +164,8 @@ def test_a_draft_nobody_starts_frees_the_channel(league: Community, clock: Clock
 @pytest.mark.django_db
 def test_a_draft_never_posted_frees_the_channel(league: Community, clock: Clock) -> None:
     draft = _start(league)
+    # Its render ran but never recorded a message: say the bot stopped in between.
+    OutboxEffect.objects.filter(lane=draft.lane).update(status=EffectStatus.DONE)
     clock.advance(quick_drafts.UNPOSTED_SECONDS + 1)
     deadlines.tick()
     assert _fresh(draft).status == QuickDraftStatus.STOPPED
@@ -456,3 +458,90 @@ def test_settle_needs_a_side() -> None:
     for first, second in itertools.product(quick_drafts.PICK_CHOICES, repeat=2):
         with pytest.raises(ValueError):
             quick_drafts.settle_coinflip(first, second)
+
+
+# --- Review fixes -------------------------------------------------------------------------------
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_finished_draft_forgets_its_whole_grid(wired: Community) -> None:  # noqa: F811
+    """Clearing both grid slots used to shift the second into the first and keep its ID."""
+    gateway = FakeGateway()
+    draft = _captained(wired)
+    drain(gateway)
+    assert len(_messages(draft).grid_ids) == 2
+    _run_draft(_fresh(draft))
+    drain(gateway)
+    done = _messages(draft)
+    assert done.grid_ids == ()
+    assert gateway.messages[CHANNEL] == [done.board_id]
+
+
+@pytest.mark.django_db
+def test_clearing_a_grid_slot_keeps_the_others_in_place(league: Community) -> None:
+    draft = _start(league)
+    quick_drafts.record_grid(draft.pk, 0, 11)
+    quick_drafts.record_grid(draft.pk, 1, 22)
+    quick_drafts.record_grid(draft.pk, 0, None)
+    assert _fresh(draft).grid_message_ids == [None, 22]
+    quick_drafts.record_grid(draft.pk, 1, None)
+    assert _fresh(draft).grid_message_ids == []
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_failed_delete_is_retried_on_its_own(wired: Community) -> None:  # noqa: F811
+    gateway = FakeGateway()
+    draft = _captained(wired)
+    drain(gateway)
+    old_grid = _messages(draft).grid_ids
+    draft = _fresh(draft)
+    gateway.fail_next["delete_message"] = _http_error(500, 0)
+    quick_drafts.choose_hero(
+        draft.pk, _on_turn(draft), draft.step_index, quick_drafts.available(draft)[0]
+    )
+    drain(gateway)
+    retried = OutboxEffect.objects.filter(kind="delete_message", lane=draft.lane)
+    assert retried.count() == 1 and retried.get().status == EffectStatus.DONE
+    assert not set(old_grid) & set(gateway.messages[CHANNEL])  # Nothing left behind.
+
+
+@pytest.mark.django_db
+def test_a_draft_still_waiting_for_its_first_post_is_kept(league: Community, clock: Clock) -> None:
+    draft = _start(league)  # Its first render is still queued, as after a restart.
+    clock.advance(quick_drafts.UNPOSTED_SECONDS + 1)
+    deadlines.tick()
+    assert _fresh(draft).status == QuickDraftStatus.CAPTAINS
+    OutboxEffect.objects.filter(lane=draft.lane).update(status=EffectStatus.FAILED)
+    deadlines.tick()  # Nothing left to post it: now it frees the channel.
+    assert _fresh(draft).status == QuickDraftStatus.STOPPED
+
+
+@pytest.mark.django_db
+def test_startup_grace_also_covers_drafts_waiting_for_captains(
+    league: Community, clock: Clock
+) -> None:
+    draft = _start(league)
+    quick_drafts.record_board(draft.pk, 1)
+    clock.advance(quick_drafts.IDLE_SECONDS + 600)
+    deadlines.extend_past_due()
+    deadlines.tick()
+    assert _fresh(draft).status == QuickDraftStatus.CAPTAINS
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_failed_chat_move_leaves_the_draft_running(wired: Community) -> None:  # noqa: F811
+    from bot.effects.worker import EffectWorker
+
+    draft = _captained(wired)
+    effect = OutboxEffect.objects.create(
+        community=wired,
+        kind=quick_drafts.MOVE_KIND,
+        lane=draft.lane,
+        payload={"draft_id": draft.pk},
+        run_after=draft.created_at,
+        created_at=draft.created_at,
+    )
+    import asyncio
+
+    asyncio.run(EffectWorker(FakeGateway())._on_failed(effect, "403"))
+    assert _fresh(draft).status == QuickDraftStatus.DRAFTING

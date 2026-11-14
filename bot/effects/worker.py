@@ -151,6 +151,7 @@ class EffectWorker:
         if effect.kind == "create_lobby" and effect.match_id is not None:
             # With no lobby, nobody can continue: cancel and put everyone back in line.
             await db(lobby.fail_lobby_setup, effect.match_id, "Discord couldn't create the lobby")
-        if effect.kind in (quick_drafts.RENDER_KIND, quick_drafts.MOVE_KIND):
+        if effect.kind == quick_drafts.RENDER_KIND:
             # A draft nobody can see would hold its channel: close it so they can start again.
+            # A failed move doesn't count: the draft is still there, just higher up.
             await db(quick_drafts.close_gone, int(effect.payload["draft_id"]))

@@ -398,8 +398,9 @@ Bebot's voice queue, for running inhouses by hand. It follows the Waiting Room s
 
 `/priolist` posts the list in a channel (staff). Waits are Discord timestamps, so they count up
 on their own and the message only changes when the list does. `/prio` shows it to you,
-`/refresh` re-posts it and `/removeprio` takes someone off (staff). It catches up with the
-Waiting Room when the bot starts.
+`/refresh` re-posts it below the chat and `/removeprio` takes someone off (staff). It catches up
+with the Waiting Room when the bot starts or reconnects, and when someone leaves a match early. Bots
+in the Waiting Room aren't listed, and a match in another server doesn't count.
 
 ### Pings
 

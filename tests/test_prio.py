@@ -206,3 +206,89 @@ def test_the_display_is_posted_and_reposted(wired: Community) -> None:  # noqa: 
     drain(gateway)
     wired.refresh_from_db()
     assert wired.prio_message_id not in (None, first)
+
+
+# --- Review fixes -------------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_match_in_another_server_doesnt_take_you_off_this_list(room: Community) -> None:
+    from league.services import community as community_service
+
+    other = community_service.ensure(1234, "Another server")
+    players = [make_player(n) for n in range(1, 13)]
+    for player in players:
+        queue.join(other.pk, player)  # A live match over there.
+    _join(room, players[0].discord_user_id, players[0].display_name)
+    assert _names(room) == [players[0].display_name]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_unloaded_waiting_room_isnt_read_as_empty(wired: Community) -> None:  # noqa: F811
+    class Loading(FakeGateway):
+        def voice_members(self, guild_id, channel_id):  # type: ignore[no-untyped-def]
+            return None  # Discord hasn't sent this server's channels yet.
+
+    _join(wired, 1, "Ann")
+    players = [make_player(n) for n in range(10, 22)]
+    for player in players:
+        queue.join(wired.pk, player)
+    gateway = Loading()
+    drain(gateway)
+    finish(to_in_progress(Match.objects.get()), winner="A")
+    drain(gateway)
+    assert PrioEntry.objects.get(discord_user_id=1).grace_until is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_refresh_reposts_and_removes_the_old_list(wired: Community) -> None:  # noqa: F811
+    gateway = FakeGateway()
+    prio.set_display(wired.pk, 7100)
+    drain(gateway)
+    wired.refresh_from_db()
+    first = wired.prio_message_id
+    gateway.chat(7100)  # Chat pushes the list up.
+    assert prio.repost(wired.pk)
+    drain(gateway)
+    wired.refresh_from_db()
+    assert wired.prio_message_id not in (None, first)
+    assert gateway.messages[7100][-1] == wired.prio_message_id
+    assert first not in gateway.messages[7100]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_player_who_misses_the_ready_check_goes_back_on(wired: Community) -> None:  # noqa: F811
+    gateway = FakeGateway()
+    players = [make_player(n) for n in range(1, 13)]
+    for player in players:
+        gateway.voice.setdefault(WAITING_ROOM, set()).add(player.discord_user_id)
+        _join(wired, player.discord_user_id, player.display_name)
+        queue.join(wired.pk, player)
+    drain(gateway)  # Moved into the lobby, off the list.
+    assert _names(wired) == []
+    match = Match.objects.get()
+    late = players[0]
+    for users in gateway.voice.values():
+        users.discard(late.discord_user_id)
+    gateway.voice[WAITING_ROOM].add(late.discord_user_id)  # Back in the room, no event.
+    for participant in match.participants.exclude(player=late):
+        lobby.mark_ready(match.pk, participant.player)
+    match.deadline_at = match.created_at
+    match.save(update_fields=["deadline_at"])
+    deadlines.tick()  # They missed it.
+    drain(gateway)
+    assert late.display_name in _names(wired)
+
+
+def test_bots_in_the_waiting_room_dont_queue() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from bot.client import DraftBot
+
+    calls: list[object] = []
+    bot = SimpleNamespace(wake_effects=lambda: calls.append("woke"))
+    member = SimpleNamespace(bot=True, id=1, guild=SimpleNamespace(id=1), display_name="Music")
+    # No database is touched: the test has no database access, so any query would fail.
+    asyncio.run(DraftBot._update_prio(bot, member, None, None))  # type: ignore[arg-type]
+    assert calls == []

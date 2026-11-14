@@ -36,8 +36,10 @@ class Gateway(Protocol):
 
     def voice_member_ids(self, guild_id: int, channel_id: int | None) -> set[int]: ...
 
-    def voice_members(self, guild_id: int, channel_id: int | None) -> dict[int, str]:
-        """Who is in this voice channel: user ID to display name, blank where it isn't cached."""
+    def voice_members(self, guild_id: int, channel_id: int | None) -> dict[int, str] | None:
+        """Who is in this voice channel, bots left out: user ID to display name, blank where it
+        isn't cached. None if Discord hasn't sent the channel (the server is still loading,
+        say), which is different from an empty room."""
         ...
 
     async def move_member(self, guild_id: int, user_id: int, channel_id: int) -> bool:
@@ -198,11 +200,18 @@ class DiscordGateway:
         # A low-level mapping that works without the privileged Members intent.
         return set(channel.voice_states)
 
-    def voice_members(self, guild_id: int, channel_id: int | None) -> dict[int, str]:
+    def voice_members(self, guild_id: int, channel_id: int | None) -> dict[int, str] | None:
+        guild = self.client.get_guild(guild_id)
+        if guild is None or guild.unavailable or channel_id is None:
+            return None
+        channel = guild.get_channel(channel_id)
+        if not isinstance(channel, discord.VoiceChannel | discord.StageChannel):
+            return None
         found = {}
-        guild = self._guild(guild_id)
-        for user_id in self.voice_member_ids(guild_id, channel_id):
+        for user_id in channel.voice_states:
             member = guild.get_member(user_id)
+            if member is not None and member.bot:
+                continue
             found[user_id] = member.display_name if member is not None else ""
         return found
 

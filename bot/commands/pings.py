@@ -30,18 +30,18 @@ async def _staff(interaction: Interaction[Any]) -> Community:
 
 
 def _unpingable_roles(interaction: Interaction[Any], role_ids: list[int]) -> list[str]:
-    """Roles the ping would show but not notify: not mentionable, and no Mention Everyone."""
+    """Check the roles belong to this server and aren't @everyone. Returns the ones the ping
+    would show but not notify: not mentionable, while the bot lacks Mention Everyone."""
     guild = interaction.guild
     if guild is None:
-        return []
-    if interaction.app_permissions.mention_everyone:
-        return []
+        raise InvalidAction("Run this in your server.")
+    can_mention_any = interaction.app_permissions.mention_everyone
     unpingable = []
     for role_id in role_ids:
         role = guild.get_role(role_id)
-        if role is None:
-            raise InvalidAction("Only mention roles from this server.")
-        if not role.mentionable:
+        if role is None or role.is_default():  # The @everyone role has the server's own ID.
+            raise InvalidAction("Only mention roles from this server, and not @everyone.")
+        if not role.mentionable and not can_mention_any:
             unpingable.append(role.name)
     return unpingable
 
@@ -155,8 +155,10 @@ async def ping_command(
     interaction: Interaction[Any], message: str, name: str | None = None
 ) -> None:
     async def run() -> None:
-        await community_of(interaction)
-        if interaction.channel_id is None:
+        # One database call before answering: Discord allows three seconds, and the ping itself
+        # has to be the answer, since mentions in a later edit don't notify anyone. A channel
+        # only has pings if staff set them up, so there's no separate server check.
+        if interaction.guild_id is None or interaction.channel_id is None:
             raise InvalidAction("Run this in a server channel.")
         roles = getattr(interaction.user, "roles", [])
         claim = await db(pings.claim, interaction.channel_id, name, {role.id for role in roles})
@@ -171,11 +173,14 @@ async def ping_command(
         )
         try:
             await interaction.response.send_message(content, allowed_mentions=allowed)
-        except discord.HTTPException as exc:
+        except Exception as exc:
+            # Nothing went out (refused, timed out, connection dropped): give the cooldown back.
             await db(pings.release, claim)
-            raise InvalidAction(
-                "Discord didn't take the ping, so its cooldown wasn't used."
-            ) from exc
+            if isinstance(exc, discord.HTTPException):
+                raise InvalidAction(
+                    "Discord didn't take the ping, so its cooldown wasn't used."
+                ) from exc
+            raise
 
     await guarded(interaction, run)
 

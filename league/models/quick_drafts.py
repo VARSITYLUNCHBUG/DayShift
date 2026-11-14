@@ -58,9 +58,10 @@ class QuickDraft(models.Model):
     deadline_at = models.DateTimeField(null=True, blank=True)
     rng_seed = models.BigIntegerField()
     champion_pool = ArrayField(models.PositiveIntegerField(), default=list)
-    # The draft message, and the hero grid's messages below it, top to bottom.
+    # The draft message, and the hero grid's messages below it, top to bottom. A grid slot keeps
+    # its place, null once its message is gone, so clearing one can't shift the others.
     board_message_id = models.BigIntegerField(null=True, blank=True)
-    grid_message_ids = ArrayField(models.BigIntegerField(), default=list, blank=True)
+    grid_message_ids = ArrayField(models.BigIntegerField(null=True), default=list, blank=True)
     # Whether the bot could use the custom hero emojis in this channel when it started.
     custom_emojis = models.BooleanField(default=True)
     created_at = models.DateTimeField()

@@ -184,3 +184,29 @@ def test_autocomplete_lists_this_channels_pings(wired: Community) -> None:  # no
     interaction = _ping_interaction()
     choices = asyncio.run(ping_commands._ping_names(interaction, "r"))
     assert [choice.value for choice in choices] == ["ranked"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_ping_lost_in_transit_keeps_its_cooldown_free(wired: Community) -> None:  # noqa: F811
+    _add(wired)
+    interaction = _ping_interaction()
+    interaction.response.send_message = AsyncMock(side_effect=[TimeoutError(), None])
+    interaction.response.is_done = MagicMock(return_value=False)
+    asyncio.run(
+        ping_commands.ping_command.callback(  # type: ignore[call-arg]
+            interaction, message="hello", name=None
+        )
+    )
+    assert ChannelPing.objects.get().last_ping_at is None
+
+
+def test_pingchannel_refuses_the_everyone_role() -> None:
+    interaction = MagicMock()
+    everyone = MagicMock(is_default=MagicMock(return_value=True), mentionable=True)
+    interaction.guild.get_role = MagicMock(return_value=everyone)
+    interaction.app_permissions.mention_everyone = True
+    with pytest.raises(InvalidAction, match="everyone"):
+        ping_commands._unpingable_roles(interaction, [ROLE])
+    interaction.guild.get_role = MagicMock(return_value=None)  # Another server's role.
+    with pytest.raises(InvalidAction):
+        ping_commands._unpingable_roles(interaction, [ROLE])

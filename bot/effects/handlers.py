@@ -29,7 +29,7 @@ from bot.renderers.results import (
 from league.domain.engine import Status
 from league.domain.errors import DomainError
 from league.integrations import deadlock_api
-from league.models import Community, Match, OutboxEffect, Player
+from league.models import Community, Match, OutboxEffect, Player, QuickDraft
 from league.models.matches import ResourceKind
 from league.models.quick_drafts import QuickDraftStatus
 from league.services import (
@@ -361,6 +361,9 @@ class _MatchFlowStore:
             await db(effects.mark_resource_deleted, self.match_id, kind)
         else:
             await db(effects.record_resource, self.match_id, kind, message_id)
+
+    async def delete_later(self, channel_id: int, message_id: int) -> None:
+        await db(_queue_delete, channel_id, message_id, match_id=self.match_id)
 
 
 async def _render_board(env: Env) -> None:
@@ -759,7 +762,32 @@ async def cleanup_voice(env: Env) -> None:
     if waiting:
         # Everyone now in the Waiting Room goes on the back of the priority list, including
         # anyone who was already there and so got no voice event for it.
-        await db(prio.reconcile, env.community.pk, env.gateway.voice_members(env.guild_id, waiting))
+        await _reconcile_prio(env, waiting)
+
+
+async def _reconcile_prio(env: Env, waiting: int) -> None:
+    members = env.gateway.voice_members(env.guild_id, waiting)
+    if members is None:
+        # Discord hasn't sent the room. Treating that as empty would start everyone's grace.
+        logger.info("Waiting Room not loaded; priority list left as it is")
+        return
+    await db(prio.reconcile, env.community.pk, members)
+
+
+@effect(prio.RECONCILE_KIND)
+async def reconcile_prio_effect(env: Env) -> None:
+    """Someone left a live match while sitting in the Waiting Room: put them back on."""
+    community = await db(_reload_community, env.community.pk)
+    if not community.waiting_room_channel_id:
+        raise Skip("No Waiting Room.")
+    await _reconcile_prio(env, community.waiting_room_channel_id)
+
+
+@effect(prio.DELETE_KIND)
+async def delete_prio_message(env: Env) -> None:
+    """The list was posted afresh; the old message goes."""
+    payload = env.effect.payload
+    await env.gateway.delete_message(int(payload["channel_id"]), int(payload["message_id"]))
 
 
 @effect("delete_text_channel")
@@ -786,11 +814,40 @@ class _DraftFlowStore:
     async def save_grid(self, index: int, message_id: int | None) -> None:
         await db(quick_drafts.record_grid, self.draft_id, index, message_id)
 
+    async def delete_later(self, channel_id: int, message_id: int) -> None:
+        await db(_queue_delete, channel_id, message_id, draft_id=self.draft_id)
+
 
 def _draft_flow(messages: quick_drafts.Messages) -> flow.FlowMessages:
-    slots: list[int | None] = [*messages.grid_ids]
+    slots: list[int | None] = [*messages.grid_ids][:GRID_MESSAGES]
     slots += [None] * (GRID_MESSAGES - len(slots))
     return flow.FlowMessages(messages.channel_id, messages.board_id, tuple(slots))
+
+
+def _queue_delete(
+    channel_id: int, message_id: int, *, match_id: int | None = None, draft_id: int | None = None
+) -> None:
+    """A delete that failed mid-render, retried as a job of its own in the same lane."""
+    if match_id is not None:
+        match = Match.objects.select_related("community").get(pk=match_id)
+        community, lane = match.community, None
+    else:
+        assert draft_id is not None
+        draft = QuickDraft.objects.select_related("community").get(pk=draft_id)
+        community, lane, match = draft.community, draft.lane, None
+    add_effect(
+        community,
+        "delete_message",
+        {"channel_id": channel_id, "message_id": message_id},
+        match=match,
+        lane=lane,
+    )
+
+
+@effect("delete_message")
+async def delete_message_effect(env: Env) -> None:
+    payload = env.effect.payload
+    await env.gateway.delete_message(int(payload["channel_id"]), int(payload["message_id"]))
 
 
 def _draft_id(env: Env) -> int:
@@ -832,7 +889,12 @@ async def move_quick_draft(env: Env) -> None:
     messages = await db(quick_drafts.messages, draft_id)
     if messages.status != QuickDraftStatus.DRAFTING or messages.board_id is None:
         raise Skip("Only a draft in progress follows the chat.")
-    if await flow.at_bottom(env.gateway, _draft_flow(messages)):
+    try:
+        bottom = await flow.at_bottom(env.gateway, _draft_flow(messages))
+    except ChannelGone:
+        await db(quick_drafts.close_gone, draft_id)
+        raise
+    if bottom:
         raise Skip("The draft is already last.")
     await _render_quick_draft(env, draft_id, messages)
 
@@ -844,8 +906,9 @@ async def delete_quick_draft(env: Env) -> None:
     messages = await db(quick_drafts.messages, draft_id)
     store = _DraftFlowStore(draft_id)
     for index, message_id in reversed(list(enumerate(messages.grid_ids))):
-        await env.gateway.delete_message(messages.channel_id, message_id)
-        await store.save_grid(index, None)
+        if message_id is not None:
+            await env.gateway.delete_message(messages.channel_id, message_id)
+            await store.save_grid(index, None)
     if messages.board_id is not None:
         await env.gateway.delete_message(messages.channel_id, messages.board_id)
         await db(quick_drafts.record_board, draft_id, None)

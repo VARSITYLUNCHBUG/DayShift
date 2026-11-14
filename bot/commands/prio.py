@@ -60,10 +60,9 @@ async def prio_command(interaction: Interaction[Any]) -> None:
 async def refresh_command(interaction: Interaction[Any]) -> None:
     async def run() -> None:
         community = await _staff(interaction)
-        if not community.prio_channel_id:
+        if not await db(prio.repost, community.pk):
             raise InvalidAction("There's no priority list yet. Use /priolist first.")
-        await db(prio.render, community.pk)
-        await reply(interaction, "Priority list refreshed.")
+        await reply(interaction, "Posting the priority list again, below the chat.")
 
     await guarded(interaction, run)
 

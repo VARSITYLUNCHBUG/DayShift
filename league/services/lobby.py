@@ -106,6 +106,11 @@ def _matched(community: Community, players: Sequence[Player]) -> None:
     prio.drop_players(community.pk, [player.discord_user_id for player in players])
 
 
+def _unmatched(community: Community) -> None:
+    """Someone left a live match before it ended. Every early way out calls this."""
+    prio.recheck(community)
+
+
 def _gather(match: Match, player: Player, *, sub: bool = False) -> None:
     """Get them into voice. A sub joins mid-match, so they go to their team's channel if it's up."""
     add_effect(
@@ -188,6 +193,8 @@ def on_ready_timeout(match: Match) -> None:
         _gather(match, entry.player)
     QueueEntry.objects.filter(pk__in=[entry.pk for entry in replacements]).delete()
     _matched(community, [entry.player for entry in replacements])
+    if missed:
+        _unmatched(community)
 
     match.deadline_at = seconds_from_now(mode.ready_check.seconds)
     bump(match, "deadline_at")
@@ -483,6 +490,7 @@ def swap_player(match: Match, leaving: MatchParticipant, in_player: Player, *, r
     community = lock_community(match.community_id)
     QueueEntry.objects.filter(community=community, player=in_player).delete()
     _matched(community, [in_player])
+    _unmatched(community)  # The player subbed out.
     heir = _captaincy_heir(match, leaving, in_player) if leaving.is_captain else None
     MatchParticipant.objects.create(
         match=match,

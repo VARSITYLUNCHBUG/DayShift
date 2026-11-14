@@ -26,22 +26,27 @@ from datetime import datetime, timedelta
 from django.db import transaction
 
 from league.models import Community, MatchParticipant, Player, PrioEntry
-from league.services.common import now, request_render
+from league.services.common import add_effect, now, request_render
 
 logger = logging.getLogger(__name__)
 
 GRACE_SECONDS = 300
 RENDER_KIND = "render_prio"
+DELETE_KIND = "delete_prio_message"
+RECONCILE_KIND = "reconcile_prio"
 
 
 def tracked_communities() -> list[Community]:
     return list(Community.objects.filter(waiting_room_channel_id__isnull=False))
 
 
-def _in_match(user_ids: Collection[int]) -> set[int]:
-    """Which of these Discord users are in a live match."""
+def _in_match(community_id: int, user_ids: Collection[int]) -> set[int]:
+    """Which of these Discord users are in a live match in this server. A match elsewhere
+    doesn't count: the bot can run in several servers, and players can be in more than one."""
     rows = MatchParticipant.objects.filter(
-        is_active=True, player__discord_user_id__in=list(user_ids)
+        is_active=True,
+        match__community_id=community_id,
+        player__discord_user_id__in=list(user_ids),
     )
     return set(rows.values_list("player__discord_user_id", flat=True))
 
@@ -53,12 +58,34 @@ def render(community_id: int) -> None:
         request_render(community, RENDER_KIND)
 
 
+@transaction.atomic
 def set_display(community_id: int, channel_id: int) -> None:
-    """/priolist: post a fresh list in this channel. A list posted elsewhere stops updating."""
-    Community.objects.filter(pk=community_id).update(
-        prio_channel_id=channel_id, prio_message_id=None
-    )
+    """/priolist: post a fresh list in this channel, at the bottom. The old message goes."""
+    community = Community.objects.select_for_update().get(pk=community_id)
+    old_channel, old_message = community.prio_channel_id, community.prio_message_id
+    community.prio_channel_id, community.prio_message_id = channel_id, None
+    community.save(update_fields=["prio_channel_id", "prio_message_id"])
+    if old_channel and old_message:
+        add_effect(community, DELETE_KIND, {"channel_id": old_channel, "message_id": old_message})
     render(community_id)
+
+
+def repost(community_id: int) -> bool:
+    """/refresh: post the list again below any chat. False if there's no list yet."""
+    channel_id = (
+        Community.objects.filter(pk=community_id).values_list("prio_channel_id", flat=True).first()
+    )
+    if not channel_id:
+        return False
+    set_display(community_id, channel_id)
+    return True
+
+
+def recheck(community: Community) -> None:
+    """Someone left a live match early (a missed ready check, subbed out). If they're already
+    in the Waiting Room they get no voice event, so read the room again."""
+    if community.waiting_room_channel_id:
+        request_render(community, RECONCILE_KIND)
 
 
 def save_display(community_id: int, channel_id: int, message_id: int) -> None:
@@ -104,7 +131,7 @@ def on_voice_state(
     """Someone moved in voice. Only moves into or out of the Waiting Room matter."""
     if waiting_room_id not in (before_id, after_id) or before_id == after_id:
         return
-    if _in_match([user_id]):
+    if _in_match(community_id, [user_id]):
         # Matched players are off the list wherever they go, until the match ends.
         drop_players(community_id, [user_id])
         return
@@ -145,7 +172,7 @@ def reconcile(community_id: int, waiting: Mapping[int, str]) -> None:
     the user IDs there to display names; a blank name is looked up from their player record.
     """
     moment = now()
-    busy = _in_match(waiting)
+    busy = _in_match(community_id, waiting)
     unnamed = [user_id for user_id, name in waiting.items() if not name]
     known = dict(
         Player.objects.filter(discord_user_id__in=unnamed).values_list(
@@ -196,7 +223,7 @@ class PrioView:
 def prio_view(community_id: int) -> PrioView:
     """Longest wait first. Anyone in a live match is left off, in case a move was missed."""
     entries = list(PrioEntry.objects.filter(community_id=community_id).order_by("queued_at", "id"))
-    busy = _in_match([entry.discord_user_id for entry in entries])
+    busy = _in_match(community_id, [entry.discord_user_id for entry in entries])
     return PrioView(
         [
             PrioLine(entry.discord_user_id, entry.display_name, entry.queued_at, entry.grace_until)

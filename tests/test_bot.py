@@ -723,6 +723,7 @@ class FakeGateway:
     async def delete_message(self, channel_id, message_id) -> None:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
+        self._maybe_fail("delete_message")
         if message_id in self.messages.get(channel_id, []):
             self.messages[channel_id].remove(message_id)
 

@@ -20,7 +20,8 @@ from league.domain.draft_plan import PlanStep, champion_plan
 from league.domain.engine import auto_champion, draft_name, pick_gif, seeded_rng
 from league.domain.errors import DomainError, InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import DraftMode, parse_mode
-from league.models import Champion, Community, QuickDraft, QuickDraftAction
+from league.models import Champion, Community, OutboxEffect, QuickDraft, QuickDraftAction
+from league.models.outbox import EffectStatus
 from league.models.quick_drafts import QUICK_DRAFT_LIVE, QuickDraftStatus, Side
 from league.services import champions
 from league.services.common import add_effect, lock_community, now, request_render
@@ -449,11 +450,17 @@ def tick(moment: datetime) -> int:
     """Run due turn timers and free channels held by drafts that never got going."""
     fired = 0
     due = QuickDraft.objects.filter(status__in=QUICK_DRAFT_LIVE, deadline_at__lte=moment)
+    # Only once nothing is left to post it: a first render still queued or retrying (after a
+    # restart, or a Discord outage) gets its chance, and one that fails for good closes the
+    # draft itself.
+    waiting_renders = OutboxEffect.objects.filter(
+        kind=RENDER_KIND, status=EffectStatus.PENDING, lane__startswith="quick_draft:"
+    ).values_list("lane", flat=True)
     unposted = QuickDraft.objects.filter(
         status__in=QUICK_DRAFT_LIVE,
         board_message_id__isnull=True,
         created_at__lt=moment - timedelta(seconds=UNPOSTED_SECONDS),
-    )
+    ).exclude(pk__in=[int(lane.split(":", 1)[1]) for lane in waiting_renders])
     for draft_id, guild_id in due.values_list("pk", "community__discord_guild_id"):
         with log_context.bind(guild=guild_id, draft=draft_id):
             fired += _fire_one(draft_id)
@@ -478,9 +485,10 @@ def _fire_one(draft_id: int) -> int:
 
 
 def extend_past_due(new_deadline: datetime) -> int:
-    """After downtime, give a turn on the clock the same grace a match gets."""
+    """After downtime, give a turn on the clock, or a draft waiting for captains, the same
+    grace a match gets."""
     return QuickDraft.objects.filter(
-        status=QuickDraftStatus.DRAFTING, deadline_at__lt=new_deadline
+        status__in=QUICK_DRAFT_LIVE, deadline_at__lt=new_deadline
     ).update(deadline_at=new_deadline)
 
 
@@ -532,7 +540,7 @@ class Messages:
     channel_id: int
     status: str
     board_id: int | None
-    grid_ids: tuple[int, ...]
+    grid_ids: tuple[int | None, ...]  # One per slot, None where the slot is empty.
 
 
 def messages(draft_id: int) -> Messages:
@@ -557,8 +565,8 @@ def record_grid(draft_id: int, index: int, message_id: int | None) -> None:
         ids.append(None)
     ids[index] = message_id
     while ids and ids[-1] is None:
-        ids.pop()
-    draft.grid_message_ids = [i for i in ids if i is not None]
+        ids.pop()  # Slots keep their places; only empty ones at the end are dropped.
+    draft.grid_message_ids = ids
     draft.save(update_fields=["grid_message_ids"])
 
 

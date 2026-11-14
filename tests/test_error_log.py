@@ -207,3 +207,45 @@ def test_worker_retries_are_warnings_not_errors(
         asyncio.run(worker._run_effect(effect))  # type: ignore[arg-type]
     assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
     assert any(record.message == "Effect raised" for record in caplog.records)
+
+
+# --- Review fixes -------------------------------------------------------------------------------
+
+
+def test_a_failed_lookup_still_reaches_the_operator() -> None:
+    client = FakeClient()
+
+    async def broken(guild_id: int) -> int | None:
+        raise RuntimeError("database is down")
+
+    sink = ErrorSink(client, broken, OPERATOR)  # type: ignore[arg-type]
+    asyncio.run(sink.handle(build_report(_record(guild=GUILD_A))))
+    assert [channel for channel, _ in client.sent] == [OPERATOR]
+
+
+def test_a_long_trace_keeps_its_end() -> None:
+    def deep(n: int) -> None:
+        if n == 0:
+            raise ValueError("the real cause")
+        deep(n - 1)
+
+    try:
+        deep(60)
+    except ValueError:
+        record = logging.LogRecord("x", logging.ERROR, __file__, 1, "boom", (), sys.exc_info())
+    report = build_report(record)
+    assert "ValueError: the real cause" in report.full
+    assert len(report.full) <= error_log.MAX_LENGTH + 20
+
+
+def test_one_noisy_server_cant_crowd_the_operator() -> None:
+    client = FakeClient()
+    sink = _sink(client, {}, extra={"clock": lambda: 0.0})
+
+    async def scenario() -> None:
+        for _ in range(error_log.BURST_LIMIT + 5):
+            await sink.handle(build_report(_record(guild=GUILD_A)))
+        await sink.handle(build_report(_record(guild=GUILD_B)))
+
+    asyncio.run(scenario())
+    assert len(client.sent) == error_log.BURST_LIMIT + 1  # Server B's error still went out.

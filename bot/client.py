@@ -18,7 +18,7 @@ from bot.commands import errors as error_commands
 from bot.commands import pings as ping_commands
 from bot.commands import prio as prio_commands
 from bot.db import db
-from bot.effects.gateway import ChannelGone, DiscordGateway
+from bot.effects.gateway import DiscordGateway
 from bot.effects.worker import EffectWorker
 from bot.error_log import ErrorSink, discord_error_handler
 
@@ -96,7 +96,10 @@ class DraftBot(discord.Client):
     async def on_ready(self) -> None:
         logger.info("Connected", extra={"user": str(self.user), "guilds": len(self.guilds)})
         if self._started:
-            return  # on_ready fires again after reconnects.
+            # on_ready fires again after a full reconnect. Discord doesn't replay voice moves
+            # made while the bot was away, so catch the priority list up again.
+            await self._reconcile_prio()
+            return
         self._started = True
         queue = discord_error_handler.queue
         if queue is not None:
@@ -127,14 +130,19 @@ class DraftBot(discord.Client):
 
     async def _reconcile_prio(self) -> None:
         """Catch the priority list up with voice moves made while the bot was down."""
-        for community in await db(prio.tracked_communities):
+        try:
+            communities = await db(prio.tracked_communities)
+        except Exception:
+            logger.exception("Priority list catch-up failed")
+            return  # Never stop startup over it: the list catches up at the next match end.
+        for community in communities:
             try:
                 waiting = self.gateway.voice_members(
                     community.discord_guild_id, community.waiting_room_channel_id
                 )
+                if waiting is None:
+                    continue  # Discord hasn't sent that server yet; it isn't an empty room.
                 await db(prio.reconcile, community.pk, waiting)
-            except ChannelGone:
-                pass  # The bot has left that server.
             except Exception:
                 logger.exception(
                     "Priority list catch-up failed", extra={"guild": community.discord_guild_id}
@@ -192,7 +200,9 @@ class DraftBot(discord.Client):
         before: discord.VoiceChannel | discord.StageChannel | None,
         after: discord.VoiceChannel | discord.StageChannel | None,
     ) -> None:
-        """The priority list follows the Waiting Room."""
+        """The priority list follows the Waiting Room. Bots (music, recording) don't queue."""
+        if member.bot:
+            return
         try:
             community = await db(community_service.get, member.guild.id)
             if community is None or not community.waiting_room_channel_id:
