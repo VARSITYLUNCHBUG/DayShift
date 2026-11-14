@@ -29,8 +29,11 @@ def _when(moment: Any) -> str:
 
 def _title(card: AlertCard) -> str:
     subject = f"Match #{card.match_id}" if card.match_id is not None else "Staff alert"
-    icon = {AlertStatus.OPEN: "⚠️", AlertStatus.RESOLVED: "✅", AlertStatus.DISMISSED: "☑️"}
-    return f"### {icon[card.status]} {subject} {TITLES[card.kind]}"
+    if card.status == AlertStatus.OPEN:
+        return f"### ⚠️ {subject} {TITLES[card.kind]}"
+    # Closed: say what it was, not what it needed.
+    done = "resolved" if card.status == AlertStatus.RESOLVED else "dismissed"
+    return f"### {'✅' if done == 'resolved' else '☑️'} {subject}: {card.kind.label}, {done}"
 
 
 def _footer(card: AlertCard) -> str:

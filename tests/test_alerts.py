@@ -129,6 +129,7 @@ def test_a_ruling_from_the_card_closes_it(server: Community) -> None:
     card = gateway.views[message_id]
     assert _custom_ids(card) == []
     assert "Resolved by P91" in _text(card)
+    assert "Disputed result, resolved" in _text(card) and "needs a decision" not in _text(card)
 
 
 def test_a_void_answers_the_dispute(server: Community) -> None:
