@@ -534,30 +534,6 @@ DEBUG=true uv run python manage.py load_presets
 DEBUG=true uv run python manage.py runbot
 ```
 
-### Testing alone
-
-With `DEBUG=true` and `DEV_FAKE_PLAYERS=true`, this fills the queue with fake players. They ready up
-by themselves, and Discord calls for them are skipped:
-
-```bash
-DEBUG=true DEV_FAKE_PLAYERS=true uv run python manage.py dev_fill_queue --count 11
-```
-
-Join the queue yourself as the twelfth. Fake players have no completed matches, so nobody here can
-captain under the 5-match rule and captains are chosen by experience. To captain your own test
-lobby, run `/captain allow` on yourself, then vote for yourself. Fake captains' turns and side claims time out on the normal clocks, so a match still reaches
-you. The bot process needs `DEV_FAKE_PLAYERS=true` too. It's refused outside `DEBUG`.
-
-To watch a whole match with no clicking, run this alongside the bot. It puts every real player who
-has played into the lobby, holds at each stage for screenshots, and reuses an archived scoreboard, so
-one match must already have been reported by hand:
-
-```bash
-DEBUG=true DEV_FAKE_PLAYERS=true uv run python manage.py dev_autoplay --pause 20 --step 2
-```
-
-It stands in for the people clicking, so it doesn't test the buttons themselves.
-
 ## Check before launch
 
 - Rating convergence. In simulation a strong player seeded as new takes 29 to 81 games to reach

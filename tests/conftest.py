@@ -113,7 +113,7 @@ def league(db: None) -> Community:
 
 
 def make_player(number: int) -> Player:
-    # Well above the fake-player range, like a real Discord ID.
+    # A large number, like a real Discord ID.
     return common.get_or_create_player(10_000_000 + number, f"P{number}")
 
 

@@ -27,12 +27,10 @@ def _quote_lines(rows: list[tuple[int, str, int, int]]) -> str:
     delta_width = max(map(len, deltas), default=0)
     rating_width = max(map(len, ratings), default=0)
     lines = []
-    for (uid, name, _delta, _rating), delta, rating in zip(rows, deltas, ratings, strict=True):
+    for (uid, _name, _delta, _rating), delta, rating in zip(rows, deltas, ratings, strict=True):
         delta_pad = FIGURE_SPACE * (delta_width - len(delta))
         rating_pad = FIGURE_SPACE * (rating_width - len(rating))
-        lines.append(
-            f"> {delta_pad}**{delta}** | {rating_pad}__{rating}__ | {player_mention(uid, name)}"
-        )
+        lines.append(f"> {delta_pad}**{delta}** | {rating_pad}__{rating}__ | {player_mention(uid)}")
     return "\n".join(lines)
 
 

@@ -140,4 +140,3 @@ ERROR_LOG_CHANNEL_ID = int(os.environ.get("ERROR_LOG_CHANNEL_ID") or 0)
 STEAM_WEB_API_KEY = os.environ.get("STEAM_WEB_API_KEY", "")
 
 # Fake players exist only for local smoke tests and are refused outside DEBUG.
-DEV_FAKE_PLAYERS = DEBUG and env_bool("DEV_FAKE_PLAYERS")

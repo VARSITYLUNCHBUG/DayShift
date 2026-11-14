@@ -16,7 +16,6 @@ from bot.renderers.grid import messages as grid_messages
 from bot.routing import RouteButton, RouteSelect
 from league.domain.engine import Status
 from league.models.subs import SubStatus
-from league.services import dev
 from league.services.boards import BoardState, ChampionOption, PlayerLine, SubLine
 from league.services.subs import OfferInfo
 
@@ -42,9 +41,8 @@ STATUS_TITLES = {
 CHECKLIST = "Lobby settings: Normal mode, bots off, cheats off, duplicate heroes off."
 
 
-def player_mention(discord_user_id: int, name: str) -> str:
-    """A real mention. Fake test players have no account, so they show their name."""
-    return f"@{name}" if dev.is_fake(discord_user_id) else f"<@{discord_user_id}>"
+def player_mention(discord_user_id: int) -> str:
+    return f"<@{discord_user_id}>"
 
 
 # What happens when each timer runs out. Each reads on from Discord's "in 18 seconds".

@@ -40,7 +40,7 @@ from league.domain.errors import InvalidAction
 from league.models import Community, Match, OutboxEffect, Player
 from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
-from league.services import boards, common, community, dev, effects, integrity, lobby, queue
+from league.services import boards, common, community, effects, integrity, lobby, queue
 from league.services import draft as draft_service
 from league.services import results as results_service
 from league.services.boards import ResultRow
@@ -429,11 +429,10 @@ def test_timers_say_what_happens_when_they_run_out(status: str, action: str, lab
     assert "<t:" in countdown(state)
 
 
-def test_fake_player_is_not_rendered_as_a_broken_mention() -> None:
+def test_player_mention_is_a_discord_mention() -> None:
     from bot.renderers.board import player_mention
 
-    assert player_mention(2, "Fake 2") == "@Fake 2"
-    assert player_mention(123456789, "MDMT") == "<@123456789>"
+    assert player_mention(123456789) == "<@123456789>"
 
 
 def test_candidate_format_note_is_kept_off_the_players_board() -> None:
@@ -531,10 +530,6 @@ def test_results_lines_are_quotes_with_mentions_and_bold_deltas() -> None:
         "> **+12** | __1512__ | <@123456789>\n> **-12** | \u2007__968__ | <@987654321>"
     )
     assert "```" not in table
-
-
-def test_fake_players_show_a_name_rather_than_a_broken_mention() -> None:
-    assert team_table([_row("Fake 3", 3, 1000, 988)]) == "> **-12** | __988__ | @Fake 3"
 
 
 def test_single_digit_change_is_padded_so_pipes_line_up() -> None:
@@ -821,18 +816,15 @@ def test_closed_dms_fall_back_to_a_lobby_mention(wired: Community) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_lobby_channels_grant_real_members_only(wired: Community) -> None:
-    fakes = dev.fake_players(11)
-    real = make_player(1)
+def test_lobby_channels_grant_the_lobby_members(wired: Community) -> None:
+    players = [make_player(n) for n in range(1, 13)]
     gateway = FakeGateway()
-    for player in [real, *fakes]:
+    for player in players:
         queue.join(wired.pk, player)
     drain(gateway)
     match = Match.objects.get()
-    assert gateway.members_seen[resource(match, ResourceKind.TEXT)] == [real.discord_user_id]
-    # Fake players ready themselves up, so only the real player is outstanding.
-    waiting = match.participants.filter(is_active=True, ready_at__isnull=True)
-    assert [row.player_id for row in waiting] == [real.pk]
+    seen = gateway.members_seen[resource(match, ResourceKind.TEXT)]
+    assert sorted(seen) == sorted(p.discord_user_id for p in players)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -1576,7 +1568,7 @@ def test_sub_offer_dm_says_who_asked_and_has_both_answers() -> None:
         pending=True,
         discord_user_id=10_000_077,
         player_id=77,
-        leaving_name="Fake 3",
+        leaving_name="P3",
         team="A",
         status=Status.IN_PROGRESS,
         source="invite",
@@ -1670,21 +1662,25 @@ def test_sub_not_in_voice_gets_a_dm_with_voice_and_channel_links(wired: Communit
 
 
 @pytest.mark.django_db(transaction=True)
-def test_fake_players_in_the_queue_take_a_sub_spot(wired: Community, settings) -> None:
+def test_a_queued_player_offered_a_sub_spot_can_take_it(wired: Community) -> None:
+    from league.models import SubOffer
     from league.services import subs
 
     players = [make_player(n) for n in range(1, 13)]
     gateway = FakeGateway()
     for player in players:
         queue.join(wired.pk, player)
-    fake = dev.fake_players(1)[0]
-    queue.join(wired.pk, fake)
+    spare = make_player(13)
+    queue.join(wired.pk, spare)
     drain(gateway)
     match = Match.objects.get()
     request = subs.request_sub_out(match.pk, players[3], players[3].pk)
     subs.offer_to_queue(request.pk, players[3])
     drain(gateway)
-    assert fresh(match).participants.filter(player=fake, is_active=True).exists()
+    offer = SubOffer.objects.get(player=spare)
+    assert any(user_id == spare.discord_user_id for user_id, _view in gateway.dms)
+    subs.answer_offer(offer.pk, spare, True)
+    assert fresh(match).participants.filter(player=spare, is_active=True).exists()
 
 
 def test_ready_dm_links_the_match_channel() -> None:

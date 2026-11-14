@@ -27,18 +27,15 @@ from bot.renderers.results import (
     render_scoreboard_notice,
 )
 from league.domain.engine import Status
-from league.domain.errors import DomainError
 from league.integrations import deadlock_api
-from league.models import Community, Match, OutboxEffect, Player, QuickDraft
+from league.models import Community, Match, OutboxEffect, QuickDraft
 from league.models.matches import ResourceKind
 from league.models.quick_drafts import QuickDraftStatus
 from league.services import (
     api_results,
     boards,
-    dev,
     draft,
     effects,
-    lobby,
     ocr,
     prio,
     quick_drafts,
@@ -54,7 +51,7 @@ INVITE_MAX_AGE_SECONDS = 1800
 
 
 class Skip(Exception):
-    """Nothing to do, and that's fine: for example, a fake player has no Discord account."""
+    """Nothing to do, and that's fine: for example, the channel was already deleted."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,10 +86,6 @@ def effect(kind: str) -> Callable[[Handler], Handler]:
         return handler
 
     return register
-
-
-def _real(user_ids: list[int]) -> list[int]:
-    return [user_id for user_id in user_ids if not dev.is_fake(user_id)]
 
 
 def _active_user_ids(match: Match) -> list[int]:
@@ -144,7 +137,7 @@ def _request_board(match_id: int) -> None:
 @effect("create_lobby")
 async def create_lobby(env: Env) -> None:
     existing = await db(effects.resources, env.match_id)
-    members = _real(await db(_active_user_ids, env.required_match))
+    members = await db(_active_user_ids, env.required_match)
     community = env.community
     if ResourceKind.TEXT not in existing:
         text_id = await env.gateway.create_text_channel(
@@ -177,10 +170,6 @@ async def gather_player(env: Env) -> None:
     """In the Waiting Room: move them. Anywhere else: DM an invite. They choose when to join."""
     user_id = int(env.effect.payload["discord_user_id"])
     is_sub = bool(env.effect.payload.get("sub"))
-    if dev.is_fake(user_id):
-        if not is_sub:
-            await db(_auto_ready, env.match_id, int(env.effect.payload["player_id"]))
-        raise Skip("Fake player")
     resources = await db(effects.resources, env.match_id)
     link = channel_url(env.guild_id, resources.get(ResourceKind.TEXT))
     if is_sub:
@@ -252,9 +241,6 @@ async def sub_offer(env: Env) -> None:
     info = await db(subs.offer_info, offer_id)
     if not info.pending:
         raise Skip("The offer has closed.")
-    if dev.is_fake(info.discord_user_id):
-        await db(_auto_accept_offer, offer_id, info.player_id)
-        raise Skip("Fake player")
     team = await db(_team_label, env.match_id, info.team)
     if not await env.gateway.send_dm(info.discord_user_id, render_sub_offer_dm(info, team)):
         await db(subs.fail_offer, offer_id)
@@ -265,27 +251,9 @@ def _team_label(match_id: int, team: str) -> str:
     return boards.team_name(captains[team]) if team in captains else ""
 
 
-def _auto_accept_offer(offer_id: int, player_id: int) -> None:
-    """Smoke tests only: a fake player in the queue takes any spot offered to them."""
-    try:
-        subs.answer_offer(offer_id, Player.objects.get(pk=player_id), True)
-    except DomainError:
-        logger.debug("Fake player could not sub in", extra={"offer": offer_id})
-
-
-def _auto_ready(match_id: int, player_id: int) -> None:
-    """Smoke tests only: fake players can't click, so they ready up as soon as they're gathered."""
-    try:
-        lobby.mark_ready(match_id, Player.objects.get(pk=player_id))
-    except DomainError:
-        logger.debug("Fake player could not ready", extra={"match": match_id})
-
-
 @effect("grant_access")
 async def grant_access(env: Env) -> None:
     user_id = int(env.effect.payload["discord_user_id"])
-    if dev.is_fake(user_id):
-        raise Skip("Fake player")
     resources = await db(effects.resources, env.match_id)
     team = await db(_team_of, env.match_id, user_id)
     kinds = (ResourceKind.TEXT, ResourceKind.LOBBY_VOICE, _team_voice_kind(team))
@@ -311,8 +279,6 @@ def _team_voice_kind(team: str) -> str:
 @effect("remove_player")
 async def remove_player(env: Env) -> None:
     user_id = int(env.effect.payload["discord_user_id"])
-    if dev.is_fake(user_id):
-        raise Skip("Fake player")
     resources = await db(effects.resources, env.match_id)
     voice_kinds = {
         ResourceKind.LOBBY_VOICE,
@@ -461,7 +427,7 @@ async def ping(env: Env) -> None:
     await _notice(
         env,
         str(env.effect.payload["text"]),
-        user_ids=_real([int(uid) for uid in env.effect.payload["user_ids"]]),
+        user_ids=[int(uid) for uid in env.effect.payload["user_ids"]],
     )
 
 
@@ -482,7 +448,7 @@ async def ping_staff(env: Env) -> None:
 @effect("announce_lobby_code")
 async def announce_lobby_code(env: Env) -> None:
     match = await db(_reload, env.match_id)
-    members = _real(await db(_active_user_ids, match))
+    members = await db(_active_user_ids, match)
     await _notice(env, f"Lobby code: `{match.lobby_code}`", user_ids=members)
     resources = await db(effects.resources, env.match_id)
     for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
@@ -500,7 +466,7 @@ async def report_reminder(env: Env) -> None:
     await _notice(
         env,
         "if your game has ended, press the team that won on the board and add the scoreboard.",
-        user_ids=_real(captains),
+        user_ids=captains,
     )
 
 
@@ -548,7 +514,7 @@ async def create_team_voice(env: Env) -> None:
             env.guild_id,
             community.match_category_id,
             boards.team_name(captains.get(team, f"Match {env.match_id}"))[:100],
-            _real(members),
+            members,
             community.staff_role_id,
         )
         await db(effects.record_resource, env.match_id, kind, channel_id)
@@ -559,8 +525,6 @@ async def create_team_voice(env: Env) -> None:
 async def team_move_player(env: Env) -> None:
     """In the lobby VC: move them. Anywhere else: DM an invite to their team's channel."""
     user_id = int(env.effect.payload["discord_user_id"])
-    if dev.is_fake(user_id):
-        raise Skip("Fake player")
     resources = await db(effects.resources, env.match_id)
     team_channel = resources.get(_team_voice_kind(str(env.effect.payload["team"])))
     if team_channel is None:

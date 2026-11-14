@@ -548,16 +548,6 @@ def test_a_failed_chat_move_leaves_the_draft_running(wired: Community) -> None: 
 
 
 @pytest.mark.django_db
-def test_fake_test_players_show_by_name(league: Community) -> None:
-    """In local smoke tests captains can be fake players, who have no Discord account."""
-    draft = quick_drafts.start(league.pk, CHANNEL, STARTER)
-    quick_drafts.claim_captain(draft.pk, "hk", 1, "Fake 1", allow_both=False)
-    quick_drafts.claim_captain(draft.pk, "am", HK, "Hidden", allow_both=False)
-    text = str(render_draft(quick_drafts.state(draft.pk)).to_components())
-    assert "@Fake 1" in text and "<@1>" not in text
-
-
-@pytest.mark.django_db
 def test_draft_text_never_uses_custom_emojis(league: Community) -> None:
     """Discord only draws a custom emoji in text for a bot in the server that owns it; found in a
     live run, where Bebot's hero emojis showed as bare ":mina:". Buttons keep them."""

@@ -6,8 +6,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from django.core.management import call_command
-from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
 
 from bot.renderers.grid import hero_emoji as champion_emoji
@@ -33,7 +31,6 @@ from league.services import (
     boards,
     champions,
     deadlines,
-    dev,
     draft,
     integrity,
     lobby,
@@ -813,31 +810,3 @@ def test_render_requests_coalesce(popped: Match) -> None:
         match=popped, kind="render_board", status=EffectStatus.PENDING
     )
     assert pending.count() == 1
-
-
-# --- Smoke test tool -------------------------------------------------------------------------
-
-
-def test_dev_autoplay_is_refused_outside_debug(league: Community, settings) -> None:
-    settings.DEBUG = False
-    settings.DEV_FAKE_PLAYERS = True
-    with pytest.raises(CommandError, match="DEBUG"):
-        call_command("dev_autoplay", pause=0, step=0)
-
-
-def test_dev_autoplay_plays_a_whole_match(league: Community, settings) -> None:
-    for player in dev.fake_players(12):
-        queue.join(league.pk, player)
-    first = Match.objects.get()
-    finish(to_in_progress(first))  # The tool reuses an archived screenshot from an earlier match.
-    settings.DEBUG = True
-    settings.DEV_FAKE_PLAYERS = True
-    call_command("dev_autoplay", pause=0, step=0, winner="B")
-    match = Match.objects.order_by("-id").first()
-    assert match.pk != first.pk
-    assert match.status == Status.COMPLETED
-    assert match.winner == "B"
-    assert CaptainVote.objects.filter(match=match).exists()
-    assert match.transitions.filter(to_status=Status.SIDE_SELECT).exists()
-    assert match.champion_first_pick == match.hidden_king_team
-    assert integrity.check_all() == []

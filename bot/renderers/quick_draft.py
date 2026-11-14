@@ -30,8 +30,7 @@ from league.services.quick_drafts import (
 
 
 def _mention(user_id: int | None, name: str) -> str:
-    """A real mention, or the name of a fake test player, as the match board shows them."""
-    return player_mention(user_id, name) if user_id is not None else name
+    return player_mention(user_id) if user_id is not None else name
 
 
 def _view(*items: discord.ui.Item[Any]) -> LayoutView:
