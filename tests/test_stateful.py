@@ -308,6 +308,7 @@ def test_match_machine(league, clock: Clock) -> None:
             # Fixed by default, so a failure means something changed rather than bad luck. Set
             # EXPLORE=1 for a longer hunt through sequences this run hasn't tried.
             derandomize=not explore,
+            database=None,  # The same examples in every checkout, not ones saved locally.
             max_examples=150 if explore else 60,
             stateful_step_count=40,
             deadline=None,
