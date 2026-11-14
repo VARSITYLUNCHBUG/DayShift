@@ -152,9 +152,6 @@ async def queue_status(interaction: Interaction[Any]) -> None:
     await guarded(interaction, run)
 
 
-rating_group = app_commands.Group(name="rating", description="Staff rating adjustments")
-
-
 # --- Steam -----------------------------------------------------------------------------------
 
 
@@ -248,5 +245,4 @@ COMMANDS: tuple[Any, ...] = (
     link_command,
     unlink_command,
     queue_group,
-    rating_group,
 )

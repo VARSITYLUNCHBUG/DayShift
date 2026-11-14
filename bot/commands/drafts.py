@@ -1,5 +1,6 @@
 """Bebot's standalone draft commands: /startdraft, /stopdraft, /captains_coinflip and /randomdraft.
-They work in any channel of a set-up server and never touch ratings.
+They work in any channel of a set-up server and never touch ratings. Drafts are run by staff:
+starting and stopping one needs the Scrims area. /randomdraft is open to everyone.
 
 The draft message is posted by the outbox, like every board, so a command only records the draft
 and says so. It checks first that the bot can post and read in the channel, because a draft it
@@ -14,10 +15,12 @@ import discord
 from discord import Interaction, app_commands
 
 from bot.db import db
-from bot.handlers.common import community_of, is_staff
+from bot.handlers.common import community_of
+from bot.handlers.permissions import require_area
 from bot.renderers.quick_draft import render_random_draft
 from bot.routing import guarded, reply
 from league.domain.errors import InvalidAction
+from league.models.permissions import Area
 from league.services import quick_drafts
 
 
@@ -55,6 +58,7 @@ async def startdraft_command(interaction: Interaction[Any]) -> None:
     async def run() -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         community = await community_of(interaction)
+        await require_area(interaction, community, Area.SCRIMS)
         custom_emojis = can_post_here(interaction)
         await db(
             quick_drafts.start,
@@ -73,12 +77,8 @@ async def stopdraft_command(interaction: Interaction[Any]) -> None:
     async def run() -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         community = await community_of(interaction)
-        await db(
-            quick_drafts.stop,
-            _channel_id(interaction),
-            interaction.user.id,
-            staff=is_staff(interaction, community),
-        )
+        await require_area(interaction, community, Area.SCRIMS)
+        await db(quick_drafts.stop, _channel_id(interaction), interaction.user.id, staff=True)
         await reply(interaction, "Draft stopped.")
 
     await guarded(interaction, run)
@@ -97,6 +97,7 @@ async def captains_coinflip_command(
         if captain1.bot or captain2.bot:
             raise InvalidAction("Captains have to be people.")
         community = await community_of(interaction)
+        await require_area(interaction, community, Area.SCRIMS)
         custom_emojis = can_post_here(interaction)
         await db(
             quick_drafts.start_coinflip,

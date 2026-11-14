@@ -41,7 +41,6 @@ def save_wiring(community_id: int, **ids: int | None) -> None:
         "results_channel_id",
         "archive_channel_id",
         "match_category_id",
-        "staff_role_id",
         "error_channel_id",
     }
     unknown = set(ids) - allowed

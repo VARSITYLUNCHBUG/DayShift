@@ -30,6 +30,7 @@ from league.domain.engine import Status
 from league.integrations import deadlock_api
 from league.models import Community, Match, OutboxEffect, QuickDraft
 from league.models.matches import ResourceKind
+from league.models.permissions import Area
 from league.models.quick_drafts import QuickDraftStatus
 from league.services import (
     api_results,
@@ -37,6 +38,7 @@ from league.services import (
     draft,
     effects,
     ocr,
+    permissions,
     prio,
     quick_drafts,
     subs,
@@ -114,17 +116,22 @@ def _reload(match_id: int) -> Match:
 
 
 async def _notice(
-    env: Env, text: str, *, user_ids: Iterable[int] = (), role_id: int | None = None
+    env: Env, text: str, *, user_ids: Iterable[int] = (), role_ids: Iterable[int] = ()
 ) -> None:
     """Post a message about the flow. It stays until the match moves on, with the board below it.
 
     The board moves in its own effect, so a failed move can't retry this and ping people twice.
     """
     message_id = await env.gateway.send_text(
-        await _text_channel(env), text, user_ids=user_ids, role_id=role_id
+        await _text_channel(env), text, user_ids=user_ids, role_ids=role_ids
     )
     await db(effects.record_notice, env.match_id, message_id)
     await db(_request_board, env.match_id)
+
+
+def _match_staff_roles(community_id: int) -> list[int]:
+    """Roles that see every match's channels: whoever looks after matches."""
+    return permissions.role_ids_with(community_id, permissions.MATCH_STAFF_AREAS)
 
 
 def _request_board(match_id: int) -> None:
@@ -145,7 +152,7 @@ async def create_lobby(env: Env) -> None:
             community.match_category_id,
             f"match-{env.match_id}",
             members,
-            community.staff_role_id,
+            await db(_match_staff_roles, community.pk),
         )
         await db(effects.record_resource, env.match_id, ResourceKind.TEXT, text_id)
     if ResourceKind.LOBBY_VOICE not in existing:
@@ -154,7 +161,7 @@ async def create_lobby(env: Env) -> None:
             community.match_category_id,
             f"Match {env.match_id} Lobby",
             members,
-            community.staff_role_id,
+            await db(_match_staff_roles, community.pk),
         )
         await db(effects.record_resource, env.match_id, ResourceKind.LOBBY_VOICE, voice_id)
     await _notice(env, "your lobby is ready. Press **Ready** on the board below.", user_ids=members)
@@ -441,7 +448,7 @@ async def ping_staff(env: Env) -> None:
     await _notice(
         env,
         f"Match #{env.match_id} {env.effect.payload['text']}",
-        role_id=env.community.staff_role_id,
+        role_ids=await db(permissions.role_ids_with, env.community.pk, [Area.DISPUTES]),
     )
 
 
@@ -515,7 +522,7 @@ async def create_team_voice(env: Env) -> None:
             community.match_category_id,
             boards.team_name(captains.get(team, f"Match {env.match_id}"))[:100],
             members,
-            community.staff_role_id,
+            await db(_match_staff_roles, community.pk),
         )
         await db(effects.record_resource, env.match_id, kind, channel_id)
     await db(_enqueue_team_moves, env.match_id, assignments)

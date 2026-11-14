@@ -1,7 +1,7 @@
 """Bebot's voice priority list commands: /priolist, /prio, /refresh and /removeprio.
 
-The list follows the Waiting Room set up with /setup. Staff commands are checked at run time,
-like every staff command, so the staff role works as well as administrators.
+The list follows the Waiting Room set up with /setup. /priolist, /refresh and /removeprio need
+the Community area; /prio is open to everyone.
 """
 
 from __future__ import annotations
@@ -12,18 +12,20 @@ import discord
 from discord import Interaction, app_commands
 
 from bot.db import db
-from bot.handlers.common import community_of, require_staff
+from bot.handlers.common import community_of
+from bot.handlers.permissions import require_area
 from bot.renderers.prio import prio_text
 from bot.routing import guarded, reply
 from league.domain.errors import InvalidAction
 from league.models import Community
+from league.models.permissions import Area
 from league.services import prio
 
 
 async def _staff(interaction: Interaction[Any]) -> Community:
     await interaction.response.defer(ephemeral=True, thinking=True)
     community = await community_of(interaction)
-    await require_staff(interaction, community)
+    await require_area(interaction, community, Area.COMMUNITY)
     return community
 
 

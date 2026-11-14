@@ -13,6 +13,7 @@ from league.models.matches import (
 from league.models.moderation import CaptainOverride, Penalty, StrikeAdjustment
 from league.models.modes import DraftModeVersion
 from league.models.outbox import OutboxEffect
+from league.models.permissions import Area, CommunityRoleGrant
 from league.models.pings import ChannelPing
 from league.models.players import Player
 from league.models.prio import PrioEntry
@@ -25,11 +26,13 @@ from league.models.subs import SubOffer, SubRequest
 
 __all__ = [
     "ApiMatchCheck",
+    "Area",
     "CaptainOverride",
     "CaptainVote",
     "Champion",
     "ChannelPing",
     "Community",
+    "CommunityRoleGrant",
     "DraftAction",
     "DraftModeVersion",
     "EarlyLeave",

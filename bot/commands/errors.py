@@ -1,7 +1,6 @@
 """Bebot's /seterrorchannel and /clearerrorchannel: where this server's bot errors are posted.
 
-Only this server's own errors go there, summarised. Like /setup, Discord shows these to
-administrators by default; staff can use them too if the server allows it.
+Only this server's own errors go there, summarised. Both need the Setup area.
 """
 
 from __future__ import annotations
@@ -12,9 +11,11 @@ import discord
 from discord import Interaction, app_commands
 
 from bot.db import db
-from bot.handlers.common import community_of, require_staff
+from bot.handlers.common import community_of
+from bot.handlers.permissions import require_area
 from bot.routing import guarded, reply
 from league.domain.errors import InvalidAction
+from league.models.permissions import Area
 from league.services import community as community_service
 
 
@@ -26,9 +27,8 @@ def _forget(interaction: Interaction[Any]) -> None:
 
 
 @app_commands.command(
-    name="seterrorchannel", description="Post this server's bot errors in a channel (admin)"
+    name="seterrorchannel", description="Post this server's bot errors in a channel (staff)"
 )
-@app_commands.default_permissions(administrator=True)
 @app_commands.describe(channel="Where to post them. Keep it staff-only.")
 async def seterrorchannel_command(
     interaction: Interaction[Any], channel: discord.TextChannel
@@ -36,7 +36,7 @@ async def seterrorchannel_command(
     async def run() -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         community = await community_of(interaction)
-        await require_staff(interaction, community)
+        await require_area(interaction, community, Area.SETUP)
         perms = channel.permissions_for(channel.guild.me) if channel.guild.me else None
         if perms is not None and not (perms.view_channel and perms.send_messages):
             raise InvalidAction(f"I can't post in {channel.mention}: I need Send Messages there.")
@@ -48,14 +48,13 @@ async def seterrorchannel_command(
 
 
 @app_commands.command(
-    name="clearerrorchannel", description="Stop posting this server's bot errors (admin)"
+    name="clearerrorchannel", description="Stop posting this server's bot errors (staff)"
 )
-@app_commands.default_permissions(administrator=True)
 async def clearerrorchannel_command(interaction: Interaction[Any]) -> None:
     async def run() -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         community = await community_of(interaction)
-        await require_staff(interaction, community)
+        await require_area(interaction, community, Area.SETUP)
         await db(community_service.save_wiring, community.pk, error_channel_id=None)
         _forget(interaction)
         await reply(interaction, "Bot errors won't be posted in this server any more.")

@@ -38,8 +38,9 @@ match flow, draft modes, subs, ratings, commands, architecture, operations and d
    ```bash
    docker compose up -d --build
    ```
-5. In Discord, run `/setup` (optionally `staff_role:@YourStaffRole`). It creates the queue, Waiting
-   Room, results and archive channels, and it is safe to run again.
+5. In Discord, run `/setup` as the server owner or an Administrator. It creates the queue,
+   Waiting Room, results and archive channels, and it is safe to run again. Then give your staff
+   roles their areas with `/permissions grant` (see [Permissions](#permissions)).
 6. Create an admin login for `http://127.0.0.1:8000/admin/`:
    ```bash
    docker compose exec web python manage.py createsuperuser
@@ -376,7 +377,7 @@ the draft moves back below the chat once a few messages push it up.
   🔶 Hidden King or 🔷 Archmother; the loser chooses from the other kind; either captain presses
   Start Draft. Here The Archmother can go first.
 - `/randomdraft` posts a random ban and pick for both sides.
-- `/stopdraft` stops it and deletes its messages. The captains, whoever started it, and staff can.
+- Drafts are staff-run: `/startdraft`, `/captains_coinflip` and `/stopdraft` need the Scrims area.
 - One draft per channel, and at most 10 at once per server. A draft whose captains never show up
   frees the channel after 15 minutes. With `DEBUG` on, one person can captain both sides.
 - The bot needs View Channel, Send Messages and Read Message History in the channel, and Use
@@ -394,16 +395,16 @@ Bebot's voice queue, for running inhouses by hand. It follows the Waiting Room s
 | You're put in a match (it pops, you replace someone in the ready check, or you sub in) | You come off. Until it ends, your voice moves don't count |
 | The match ends | Players still in its voice are moved back to the Waiting Room, and everyone there goes on the back. A void counts the same, even a no-fault one |
 
-`/priolist` posts the list in a channel (staff). Waits are Discord timestamps, so they count up
+`/priolist` posts the list in a channel (Community area). Waits are Discord timestamps, so they count up
 on their own and the message only changes when the list does. `/prio` shows it to you,
-`/refresh` re-posts it below the chat and `/removeprio` takes someone off (staff). It catches up
+`/refresh` re-posts it below the chat and `/removeprio` takes someone off (Community area). It catches up
 with the Waiting Room when the bot starts or reconnects, and when someone leaves a match early. Bots
 in the Waiting Room aren't listed, and a match in another server doesn't count.
 
 ### Pings
 
 `/pingchannel channel name mention timer [required_role]` sets up a named ping, such as `pugs`
-mentioning @PUGS at most every 15 minutes (staff). Members send it with `/ping message [name]`,
+mentioning @PUGS at most every 15 minutes (Community area). Members send it with `/ping message [name]`,
 and `/pings` lists a channel's pings and when each is ready. Only the roles and members staff
 chose can be pinged: @everyone, @here and anything typed into the message never are. If Discord
 refuses a ping, its cooldown isn't used. `/removeping` deletes one.
@@ -411,21 +412,44 @@ refuses a ping, its cooldown isn't used. `/removeping` deletes one.
 ### Error channel
 
 `/seterrorchannel channel` posts this server's bot errors in a channel, summarised, at most 10 a
-minute (admins). Only this server's own errors go there. `/clearerrorchannel` stops it. Whoever
+minute (Setup area). Only this server's own errors go there. `/clearerrorchannel` stops it. Whoever
 runs the bot can also set `ERROR_LOG_CHANNEL_ID` to get every error, from every server, with its
 full traceback.
 
+## Permissions
+
+Staff commands are grouped into areas, and each server grants areas to its own roles: a main admin
+role might hold every area, a junior admin Match control and Scrims, a dispute team Disputes. A
+member holds every area any of their roles is granted. The server owner and Administrators hold
+every area without a grant, so a new server is never locked out.
+
+`/permissions grant role area` and `/permissions revoke role area` change grants (either takes
+"Every area"), and `/permissions list` shows them. Only the owner and Administrators can use
+`/permissions`; the grants are also editable under Communities in the Django admin. Match staff
+(Match control, Disputes and Ratings) can see every match channel and the scoreboard archive.
+
+Discord can't hide commands by these grants, so staff commands are visible to everyone and
+refused when they run without the area. `/permissions` alone is hidden from non-Administrators.
+
 ## Commands
 
-**Players:** `/leaderboard`, `/stats`, `/queue status`, `/link`, `/unlink`,
-`/submit` (fallback for when the report form's upload fails), `/startdraft`, `/stopdraft`,
-`/captains_coinflip`, `/randomdraft`, `/prio`, `/ping`, `/pings`.
+**Everyone:** `/leaderboard`, `/stats`, `/queue status`, `/link`, `/unlink`, `/submit` (fallback
+for when the report form's upload fails), `/randomdraft`, `/prio`, `/ping`, `/pings`.
 
-**Staff:** `/setup`, `/match status|void|rescore|sub|explain|awards|names|early_leave`,
-`/rating seed|adjust`, `/queue kick|clear`, `/penalty add|revoke|strikes`,
-`/captain allow|bar|clear`, `/ocr mode|status`, `/deadlock settings|status|check|unlink`,
-`/mode list|activate`, `/roster sync`, `/ledger_check`, `/priolist`, `/refresh`, `/removeprio`,
-`/pingchannel`, `/removeping`, `/seterrorchannel`, `/clearerrorchannel`.
+**Staff, by area:**
+
+| Area | Commands |
+|---|---|
+| Setup | `/setup`, `/seterrorchannel`, `/clearerrorchannel`, `/mode list\|activate`, `/ocr mode\|status`, `/roster sync`, `/deadlock settings\|status` |
+| Match control | `/match status`, `/match void\|sub` on a live match, `/match explain`, `/queue_admin kick\|clear` |
+| Disputes | Dispute buttons, `/match rescore\|names\|early_leave`, `/match void\|sub` on a finished match, `/match explain`, matching any scoreboard name, `/deadlock check` |
+| Ratings | `/rating seed\|adjust`, `/match awards`, `/ledger_check` |
+| Moderation | `/penalty add\|revoke\|strikes`, `/captain allow\|bar\|clear`, `/deadlock unlink` |
+| Community | `/priolist`, `/refresh`, `/removeprio`, `/pingchannel`, `/removeping` |
+| Scrims | `/startdraft`, `/captains_coinflip`, `/stopdraft` |
+
+**Owner and Administrators:** `/permissions grant|revoke|list`.
+
 Anything that rewrites past ratings shows a preview and needs Confirm.
 
 ## Tables
@@ -433,7 +457,7 @@ Anything that rewrites past ratings shows a preview and needs Confirm.
 | Group | Tables |
 |---|---|
 | Players and ratings | `players`, `seasons`, `player_ratings`, `rating_runs`, `rating_events` |
-| Champions and config | `champions`, `draft_mode_versions`, `communities` |
+| Champions and config | `champions`, `draft_mode_versions`, `communities`, `community_role_grants` |
 | Queue | `queue_entries` |
 | Matches | `matches`, `match_participants`, `match_resources`, `match_transitions`, `draft_actions`, `captain_votes`, `sub_requests`, `sub_offers`, `early_leaves` |
 | Results | `result_submissions`, `match_results`, `match_awards`, `scoreboard_reads`, `player_match_stats`, `player_aliases`, `api_match_checks` |

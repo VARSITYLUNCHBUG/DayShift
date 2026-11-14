@@ -17,22 +17,18 @@ from discord import app_commands
 from django.db import connections
 
 from bot.client import DraftBot
-from bot.commands import drafts as draft_commands
-from bot.commands import errors as error_commands
-from bot.commands import pings as ping_commands
 from bot.commands import player as player_commands
-from bot.commands import prio as prio_commands
-from bot.commands import setup as setup_commands
 from bot.commands import staff
+from bot.commands.registry import all_commands
 from bot.db import db
-from bot.handlers.common import is_staff
 from bot.handlers.draft import LobbyCodeModal
 from bot.handlers.results import DisputeModal, ReportModal, process_report
 from bot.routing import Context, _dispatch
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
 from league.models import Community, DraftModeVersion, Match, Player, QueueEntry, ResultSubmission
-from league.services import community, integrity, queue, ratings
+from league.models.permissions import Area
+from league.services import community, integrity, permissions, queue, ratings
 from league.services.common import captain_of, open_season
 from tests.conftest import make_player, publish_presets
 from tests.helpers import (
@@ -174,21 +170,6 @@ def test_join_and_leave_buttons(wired: Community) -> None:
     click(interaction, "leave")
     assert not QueueEntry.objects.filter(player=player).exists()
     assert replies(interaction) == []
-
-
-def test_is_staff_means_an_administrator_or_the_staff_role(wired: Community) -> None:
-    Community.objects.filter(pk=wired.pk).update(staff_role_id=4242)
-    wired.refresh_from_db()
-    player = make_player(1)
-    assert is_staff(fake_interaction(player, administrator=True), wired)
-    assert is_staff(fake_interaction(player, role_ids=(4242,)), wired)
-    assert not is_staff(fake_interaction(player, role_ids=(1,)), wired)
-    Community.objects.filter(pk=wired.pk).update(staff_role_id=None)
-    wired.refresh_from_db()
-    assert not is_staff(fake_interaction(player), wired)
-    dm = fake_interaction(player)
-    dm.user = MagicMock(spec=discord.User)  # Not a member: outside a server.
-    assert not is_staff(dm, wired)
 
 
 def test_leaving_when_not_queued_still_gets_a_reply(wired: Community) -> None:
@@ -486,7 +467,7 @@ def test_dispute_modal_then_staff_buttons(wired: Community) -> None:
 
     outsider = fake_interaction(make_player(90))
     click(outsider, "resolve_b", match.pk)
-    assert "Only staff" in replies(outsider)[0]
+    assert "It needs Disputes access" in replies(outsider)[0]
     assert fresh(match).status == Status.DISPUTED
 
     admin = fake_interaction(make_player(91), administrator=True)
@@ -496,8 +477,8 @@ def test_dispute_modal_then_staff_buttons(wired: Community) -> None:
     assert match.winner == "B"
 
 
-def test_staff_role_counts_as_staff(wired: Community) -> None:
-    Community.objects.filter(pk=wired.pk).update(staff_role_id=555)
+def test_a_disputes_role_can_rule_on_a_dispute(wired: Community) -> None:
+    permissions.grant(wired.pk, 555, [Area.DISPUTES], granted_by=None)
     match = in_progress(wired)
     captain_a = captain_of(match, "A").player
     captain_b = captain_of(match, "B").player
@@ -585,12 +566,12 @@ def test_staff_commands_refuse_non_staff(wired: Community) -> None:
     target = make_player(2)
     interaction = fake_interaction(make_player(1))
     run_command(
-        subcommand(player_commands.rating_group, "seed"),
+        subcommand(staff.rating_group, "seed"),
         interaction,
         player=member(target),
         band=app_commands.Choice(name="High", value="high"),
     )
-    assert "Only staff" in replies(interaction)[0]
+    assert "It needs Ratings access" in replies(interaction)[0]
     assert open_season(wired).ratings.count() == 0
 
 
@@ -599,7 +580,7 @@ def test_seed_and_adjust_commands(wired: Community) -> None:
     target = make_player(2)
     interaction = fake_interaction(admin, administrator=True)
     run_command(
-        subcommand(player_commands.rating_group, "seed"),
+        subcommand(staff.rating_group, "seed"),
         interaction,
         player=member(target),
         band=app_commands.Choice(name="High", value="high"),
@@ -607,7 +588,7 @@ def test_seed_and_adjust_commands(wired: Community) -> None:
     assert "seeded high" in replies(interaction)[0]
     interaction = fake_interaction(admin, administrator=True)
     run_command(
-        subcommand(player_commands.rating_group, "adjust"),
+        subcommand(staff.rating_group, "adjust"),
         interaction,
         player=member(target),
         delta=40,
@@ -721,11 +702,11 @@ def test_queue_kick_and_clear_commands(wired: Community) -> None:
     target = make_player(1)
     queue.join(wired.pk, target)
     interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(player_commands.queue_group, "kick"), interaction, player=member(target))
+    run_command(subcommand(staff.queue_admin_group, "kick"), interaction, player=member(target))
     assert replies(interaction) == ["Removed."]
     queue.join(wired.pk, target)
     interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(player_commands.queue_group, "clear"), interaction)
+    run_command(subcommand(staff.queue_admin_group, "clear"), interaction)
     assert QueueEntry.objects.count() == 0
 
 
@@ -785,20 +766,12 @@ def test_ledger_check_command(wired: Community) -> None:
 def test_every_command_serialises_for_discord() -> None:
     client = discord.Client(intents=discord.Intents.none())
     tree = app_commands.CommandTree(client)
-    for command in (
-        *player_commands.COMMANDS,
-        setup_commands.setup_command,
-        *staff.GROUPS,
-        *staff.COMMANDS,
-        *draft_commands.COMMANDS,
-        *prio_commands.COMMANDS,
-        *ping_commands.COMMANDS,
-        *error_commands.COMMANDS,
-    ):
+    for command in all_commands():
         tree.add_command(command)
     payloads = [command.to_dict(tree) for command in tree.get_commands()]
     names = {payload["name"] for payload in payloads}
-    assert {"queue", "rating", "match", "penalty", "mode", "roster", "setup", "submit"} <= names
+    assert {"queue", "queue_admin", "rating", "match", "penalty", "mode", "roster"} <= names
+    assert {"setup", "submit", "permissions"} <= names
     assert {"link", "unlink", "captain", "ocr", "deadlock"} <= names
     assert {"startdraft", "stopdraft", "captains_coinflip", "randomdraft"} <= names
     assert "coinflip" not in names
@@ -808,7 +781,12 @@ def test_every_command_serialises_for_discord() -> None:
     rating = next(payload for payload in payloads if payload["name"] == "rating")
     assert {option["name"] for option in rating["options"]} == {"seed", "adjust"}
     queue_payload = next(payload for payload in payloads if payload["name"] == "queue")
-    assert {option["name"] for option in queue_payload["options"]} == {"status", "kick", "clear"}
+    assert {option["name"] for option in queue_payload["options"]} == {"status"}
+    queue_admin = next(payload for payload in payloads if payload["name"] == "queue_admin")
+    assert {option["name"] for option in queue_admin["options"]} == {"kick", "clear"}
+    # Discord can't show commands by our grants, so only /permissions is hidden by default.
+    hidden = {p["name"] for p in payloads if p.get("default_member_permissions") is not None}
+    assert hidden == {"permissions"}
 
 
 def test_bot_uses_only_unprivileged_intents() -> None:

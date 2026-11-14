@@ -22,7 +22,7 @@ class Gateway(Protocol):
         category_id: int | None,
         name: str,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
     ) -> int: ...
 
     async def create_voice_channel(
@@ -31,7 +31,7 @@ class Gateway(Protocol):
         category_id: int | None,
         name: str,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
     ) -> int: ...
 
     def voice_member_ids(self, guild_id: int, channel_id: int | None) -> set[int]: ...
@@ -68,7 +68,7 @@ class Gateway(Protocol):
         text: str,
         *,
         user_ids: Iterable[int] = (),
-        role_id: int | None = None,
+        role_ids: Iterable[int] = (),
     ) -> int: ...
 
     async def latest_message_id(self, channel_id: int) -> int | None: ...
@@ -142,7 +142,7 @@ class DiscordGateway:
         self,
         guild: discord.Guild,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
         member_perms: discord.PermissionOverwrite,
         self_perms: discord.PermissionOverwrite,
     ) -> dict[Any, discord.PermissionOverwrite]:
@@ -150,8 +150,8 @@ class DiscordGateway:
             guild.default_role: HIDDEN,
             _member(self.client.user.id): self_perms,  # type: ignore[union-attr]
         }
-        if staff_role_id:
-            overwrites[discord.Object(id=staff_role_id, type=discord.Role)] = member_perms
+        for role_id in staff_role_ids:
+            overwrites[discord.Object(id=role_id, type=discord.Role)] = member_perms
         for user_id in member_ids:
             overwrites[_member(user_id)] = member_perms
         return overwrites
@@ -165,13 +165,13 @@ class DiscordGateway:
         category_id: int | None,
         name: str,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
     ) -> int:
         guild = self._guild(guild_id)
         channel = await guild.create_text_channel(
             name,
             category=self._category(guild, category_id),
-            overwrites=self._overwrites(guild, member_ids, staff_role_id, TEXT_MEMBER, SELF_TEXT),
+            overwrites=self._overwrites(guild, member_ids, staff_role_ids, TEXT_MEMBER, SELF_TEXT),
         )
         return channel.id
 
@@ -181,13 +181,15 @@ class DiscordGateway:
         category_id: int | None,
         name: str,
         member_ids: Iterable[int],
-        staff_role_id: int | None,
+        staff_role_ids: Iterable[int],
     ) -> int:
         guild = self._guild(guild_id)
         channel = await guild.create_voice_channel(
             name,
             category=self._category(guild, category_id),
-            overwrites=self._overwrites(guild, member_ids, staff_role_id, VOICE_MEMBER, SELF_VOICE),
+            overwrites=self._overwrites(
+                guild, member_ids, staff_role_ids, VOICE_MEMBER, SELF_VOICE
+            ),
         )
         return channel.id
 
@@ -285,14 +287,14 @@ class DiscordGateway:
         text: str,
         *,
         user_ids: Iterable[int] = (),
-        role_id: int | None = None,
+        role_ids: Iterable[int] = (),
     ) -> int:
         channel = await self._messageable(channel_id)
-        ids = list(user_ids)
-        prefix = " ".join([*(f"<@{uid}>" for uid in ids), *([f"<@&{role_id}>"] if role_id else [])])
+        ids, roles = list(user_ids), list(role_ids)
+        prefix = " ".join([*(f"<@{uid}>" for uid in ids), *(f"<@&{rid}>" for rid in roles)])
         allowed = discord.AllowedMentions(
             users=[discord.Object(id=uid) for uid in ids],
-            roles=[discord.Object(id=role_id)] if role_id else False,
+            roles=[discord.Object(id=rid) for rid in roles] or False,
             everyone=False,
         )
         content = f"{prefix} {text}".strip()[:2000]

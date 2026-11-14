@@ -7,16 +7,12 @@ import contextlib
 import logging
 import signal
 import time
-from typing import Any
 
 import discord
 from discord import app_commands
 from django.conf import settings
 
-from bot.commands import drafts, player, setup, staff
-from bot.commands import errors as error_commands
-from bot.commands import pings as ping_commands
-from bot.commands import prio as prio_commands
+from bot.commands.registry import all_commands
 from bot.db import db
 from bot.effects.gateway import DiscordGateway
 from bot.effects.worker import EffectWorker
@@ -74,17 +70,7 @@ class DraftBot(discord.Client):
     async def setup_hook(self) -> None:
         discord_error_handler.bind(asyncio.get_running_loop())
         self.add_dynamic_items(RouteButton, RouteSelect, RouteUserSelect)
-        commands: tuple[Any, ...] = (
-            *player.COMMANDS,
-            setup.setup_command,
-            *staff.GROUPS,
-            *staff.COMMANDS,
-            *drafts.COMMANDS,
-            *prio_commands.COMMANDS,
-            *ping_commands.COMMANDS,
-            *error_commands.COMMANDS,
-        )
-        for command in commands:
+        for command in all_commands():
             self.tree.add_command(command)
         if settings.DISCORD_GUILD_ID:
             guild = discord.Object(id=settings.DISCORD_GUILD_ID)

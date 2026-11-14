@@ -8,11 +8,13 @@ import discord
 from discord import Interaction, SelectOption
 
 from bot.db import db
-from bot.handlers.common import actor, require_staff_for_match
+from bot.handlers.common import actor
+from bot.handlers.permissions import community_of_match, has_area, require_area_for_match
 from bot.images import MAX_IMAGE_BYTES, detect_image, sha256
 from bot.routing import Context, RouteSelect, guarded, handles, reply
 from league.domain.errors import InvalidAction, NotAllowed
 from league.models import Match, Player
+from league.models.permissions import Area
 from league.services import awards, early_leave, ocr, results
 from league.services.boards import team_name
 from league.services.common import captain_of, roster
@@ -226,7 +228,7 @@ async def dispute_open(ctx: Context) -> None:
 
 async def _resolve(ctx: Context, outcome: str) -> None:
     await ctx.interaction.response.defer()
-    await require_staff_for_match(ctx.interaction, ctx.match_id)
+    await require_area_for_match(ctx.interaction, ctx.match_id, Area.DISPUTES)
     player = await actor(ctx.interaction)
     await db(
         results.resolve_dispute, ctx.match_id, outcome, player, f"Decided by {player.display_name}"
@@ -252,11 +254,8 @@ async def resolve_void(ctx: Context) -> None:
 
 
 async def _is_staff(interaction: Interaction[Any], match_id: int) -> bool:
-    try:
-        await require_staff_for_match(interaction, match_id)
-    except NotAllowed:
-        return False
-    return True
+    """Disputes staff can match any scoreboard name, not just their own team's."""
+    return await has_area(interaction, await db(community_of_match, match_id), Area.DISPUTES)
 
 
 def name_picker(match_id: int, read_id: int) -> discord.ui.LayoutView | None:

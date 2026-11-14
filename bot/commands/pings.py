@@ -13,10 +13,12 @@ import discord
 from discord import Interaction, app_commands
 
 from bot.db import db
-from bot.handlers.common import community_of, require_staff
+from bot.handlers.common import community_of
+from bot.handlers.permissions import require_area
 from bot.routing import guarded, reply
 from league.domain.errors import InvalidAction
 from league.models import Community
+from league.models.permissions import Area
 from league.services import pings
 
 MAX_MESSAGE = 2000
@@ -25,7 +27,7 @@ MAX_MESSAGE = 2000
 async def _staff(interaction: Interaction[Any]) -> Community:
     await interaction.response.defer(ephemeral=True, thinking=True)
     community = await community_of(interaction)
-    await require_staff(interaction, community)
+    await require_area(interaction, community, Area.COMMUNITY)
     return community
 
 

@@ -613,6 +613,8 @@ class FakeGateway:
     granted: list[tuple[int, int]] = field(default_factory=list)
     revoked: list[tuple[int, int]] = field(default_factory=list)
     members_seen: dict[int, list[int]] = field(default_factory=dict)
+    staff_seen: dict[int, list[int]] = field(default_factory=dict)  # Staff roles per channel.
+    role_pings: list[list[int]] = field(default_factory=list)
     closed_dms: set[int] = field(default_factory=set)
     next_id: int = 500_000
     fail_next: dict[str, Exception] = field(default_factory=dict)
@@ -629,21 +631,23 @@ class FakeGateway:
             raise self.fail_next.pop(method)
 
     async def create_text_channel(
-        self, guild_id, category_id, name, member_ids, staff_role_id
+        self, guild_id, category_id, name, member_ids, staff_role_ids
     ) -> int:
         self._maybe_fail("create_text_channel")
         channel_id = self._id()
         self.channels[channel_id] = name
         self.members_seen[channel_id] = list(member_ids)
+        self.staff_seen[channel_id] = list(staff_role_ids)
         return channel_id
 
     async def create_voice_channel(
-        self, guild_id, category_id, name, member_ids, staff_role_id
+        self, guild_id, category_id, name, member_ids, staff_role_ids
     ) -> int:
         channel_id = self._id()
         self.channels[channel_id] = name
         self.voice[channel_id] = set()
         self.members_seen[channel_id] = list(member_ids)
+        self.staff_seen[channel_id] = list(staff_role_ids)
         return channel_id
 
     def voice_member_ids(self, guild_id, channel_id) -> set[int]:
@@ -692,11 +696,12 @@ class FakeGateway:
         self.edited.add(message_id)
 
     async def send_text(
-        self, channel_id, text, *, user_ids: Iterable[int] = (), role_id=None
+        self, channel_id, text, *, user_ids: Iterable[int] = (), role_ids: Iterable[int] = ()
     ) -> int:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
         self.texts.append((channel_id, text, list(user_ids)))
+        self.role_pings.append(list(role_ids))
         message_id = self._id()
         self.text_by_id[message_id] = text
         self.messages.setdefault(channel_id, []).append(message_id)
@@ -1662,6 +1667,39 @@ def test_sub_not_in_voice_gets_a_dm_with_voice_and_channel_links(wired: Communit
 
 
 @pytest.mark.django_db(transaction=True)
+def test_match_channels_let_in_the_roles_that_look_after_matches(wired: Community) -> None:
+    from league.models import Area
+    from league.services import permissions
+
+    permissions.grant(wired.pk, 71, [Area.MATCH_CONTROL], granted_by=None)
+    permissions.grant(wired.pk, 72, [Area.DISPUTES, Area.RATINGS], granted_by=None)
+    permissions.grant(wired.pk, 73, [Area.SCRIMS, Area.COMMUNITY], granted_by=None)
+    gateway = FakeGateway()
+    for n in range(1, 13):
+        queue.join(wired.pk, make_player(n))
+    drain(gateway)
+    match = Match.objects.get()
+    assert gateway.staff_seen[resource(match, ResourceKind.TEXT)] == [71, 72]
+    assert gateway.staff_seen[resource(match, ResourceKind.LOBBY_VOICE)] == [71, 72]
+
+
+def test_staff_pings_go_to_the_disputes_roles(wired: Community) -> None:
+    from league.models import Area
+    from league.services import permissions
+    from league.services.common import add_effect
+
+    permissions.grant(wired.pk, 81, [Area.DISPUTES], granted_by=None)
+    permissions.grant(wired.pk, 82, [Area.MATCH_CONTROL], granted_by=None)
+    gateway = FakeGateway()
+    for n in range(1, 13):
+        queue.join(wired.pk, make_player(n))
+    drain(gateway)
+    match = Match.objects.get()
+    add_effect(wired, "ping_staff", {"text": "needs a decision"}, match=match)
+    drain(gateway)
+    assert gateway.role_pings[-1] == [81]
+
+
 def test_a_queued_player_offered_a_sub_spot_can_take_it(wired: Community) -> None:
     from league.models import SubOffer
     from league.services import subs

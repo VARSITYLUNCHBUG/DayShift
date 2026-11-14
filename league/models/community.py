@@ -54,7 +54,6 @@ class Community(models.Model):
     active_mode = models.ForeignKey(
         "league.DraftModeVersion", on_delete=models.PROTECT, related_name="+"
     )
-    staff_role_id = models.BigIntegerField(null=True, blank=True)
     queue_channel_id = models.BigIntegerField(null=True, blank=True)
     queue_message_id = models.BigIntegerField(null=True, blank=True)
     waiting_room_channel_id = models.BigIntegerField(null=True, blank=True)

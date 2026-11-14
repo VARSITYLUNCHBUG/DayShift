@@ -17,6 +17,7 @@ from league.models import (
     Champion,
     ChannelPing,
     Community,
+    CommunityRoleGrant,
     DraftAction,
     DraftModeVersion,
     EarlyLeave,
@@ -121,6 +122,15 @@ class DraftModeVersionAdmin(admin.ModelAdmin):
         obj._state.adding = False
 
 
+class RoleGrantInline(admin.TabularInline):
+    """Staff areas by Discord role, as /permissions grants them."""
+
+    model = CommunityRoleGrant
+    extra = 0
+    fields = ("role_id", "area", "granted_by_discord_id", "created_at")
+    readonly_fields = ("granted_by_discord_id", "created_at")
+
+
 @admin.register(Community)
 class CommunityAdmin(admin.ModelAdmin):
     list_display = (
@@ -130,6 +140,7 @@ class CommunityAdmin(admin.ModelAdmin):
         "max_concurrent_matches",
         "score_ocr",
     )
+    inlines = (RoleGrantInline,)
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
