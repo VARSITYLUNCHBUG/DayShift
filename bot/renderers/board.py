@@ -733,24 +733,30 @@ def _sub_text(state: BoardState, line: SubLine) -> str:
     return f"🔁 {who} needs a sub. Nobody in the queue can take it yet, so name someone."
 
 
-def _missed_ready_text(lines: list[SubLine]) -> str:
-    """Every spot a missed ready check left, on one line: they're offered for the players to
-    accept, so there's nothing to click here, and it keeps the board under Discord's limit."""
+# Spots the bot opened itself, offered for players to accept: nobody names a sub for these.
+OPENED_BY_BOT = ("missed_ready", "restart")
+
+
+def _open_spots_text(lines: list[SubLine]) -> str:
+    """Every spot the bot opened (a missed ready check, or a restart), on one line: they're
+    offered for players to accept, so there's nothing to click here, and it keeps the board
+    under Discord's limit."""
     waiting = [f"**{line.offer_name}**" for line in lines if line.offer_name]
     spots = f"{len(lines)} spot{'' if len(lines) == 1 else 's'}"
+    source = "from the ready check" if lines[0].reason == "missed_ready" else "after the restart"
     asked = f" Waiting for {', '.join(waiting)}." if waiting else " Nobody can take them yet."
     return (
-        f"🔁 {spots} open from the ready check, offered to the priority list, then the queue."
+        f"🔁 {spots} open {source}, offered to the priority list, then the queue."
         f"{asked} Cancelled {_stamp(lines[0].deadline_at)} if not filled."
     )
 
 
 def _subs(state: BoardState, box: Container[Any]) -> None:
-    missed = [line for line in state.subs if line.reason == "missed_ready"]
-    if missed:
-        box.add_item(TextDisplay(_missed_ready_text(missed)))
+    opened = [line for line in state.subs if line.reason in OPENED_BY_BOT]
+    if opened:
+        box.add_item(TextDisplay(_open_spots_text(opened)))
     for line in state.subs:
-        if line.reason == "missed_ready":
+        if line.reason in OPENED_BY_BOT:
             continue
         box.add_item(TextDisplay(_sub_text(state, line)))
         box.add_item(ActionRow(*_sub_buttons(state, line)))

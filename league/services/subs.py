@@ -426,11 +426,14 @@ def open_openings(
     _hold(match)
     names = ", ".join(f"**{player.display_name}**" for player in missing)
     why = "missed the ready check" if reason == SubReason.MISSED_READY else "left before the game"
+    one = len(missing) == 1
+    spots = "Their spot is" if one else "Their spots are"
+    filled = "it isn't filled" if one else "they aren't all filled"
     _ping(
         match,
         [],
-        f"{names} {why}. Their spots are offered to the priority list, then the queue. The "
-        f"lobby is cancelled <t:{int(deadline.timestamp())}:R> if they aren't filled.",
+        f"{names} {why}. {spots} offered to the priority list, then the queue. The lobby is "
+        f"cancelled <t:{int(deadline.timestamp())}:R> if {filled}.",
     )
     render_board(match)
 

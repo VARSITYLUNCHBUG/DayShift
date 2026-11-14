@@ -1755,6 +1755,9 @@ def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_lobby(
     assert sitting in gateway.voice[lobby_voice]
     board = gateway.views[resource(successor, ResourceKind.BOARD_MESSAGE)]
     assert f"Restarted from match #{match.pk}" in str(board.to_components())
+    # Found in the live run: the empty seat showed as an ordinary sub out, with Name a sub.
+    assert "1 spot open after the restart" in str(board.to_components())
+    assert "sub_invite_open" not in str(board.to_components())
 
 
 def test_a_queued_player_offered_a_sub_spot_can_take_it(wired: Community) -> None:
