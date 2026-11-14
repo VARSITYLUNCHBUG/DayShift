@@ -1,4 +1,4 @@
-"""The hero grid's layout, shared by the match board and the standalone draft. Pure: no I/O.
+"""The hero grid's layout, under every board, ranked and scrim. Pure: no I/O.
 
 The grid sits in messages of its own directly below the draft message. They hold nothing else,
 so they stack into one grid. Each turn they are posted afresh rather than edited, so no

@@ -24,7 +24,7 @@ from league.domain.engine import (
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import DraftMode
 from league.models import Champion, DraftAction, Match, Player
-from league.models.matches import Source
+from league.models.matches import MatchKind, Source
 from league.services.common import (
     active_participants,
     add_effect,
@@ -251,8 +251,13 @@ def on_coinflip_timeout(match: Match) -> None:
 
 def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | None) -> None:
     mode = mode_of(match)
+    scrim = match.kind == MatchKind.SCRIM
     if not match.coinflip_winner_choice:
         match.coinflip_winner_choice = choice
+        if scrim:  # As in Bebot: no turn timer, only the scrim's idle one.
+            bump(match, "coinflip_winner_choice")
+            render_board(match)
+            return
         match.deadline_at = seconds_from_now(mode.champion_draft.coinflip_seconds)
         bump(match, "coinflip_winner_choice", "deadline_at")
         loser = captain_of(match, coinflip_turn(match)[0]).player
@@ -272,6 +277,20 @@ def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | 
     match.hidden_king_team, match.champion_first_pick = apply_coinflip(
         match.coinflip_winner, match.coinflip_winner_choice, choice
     )
+    if scrim:
+        # Bebot's "Ready to start the draft!": a captain presses Start Draft.
+        from league.services.scrims import IDLE_SECONDS
+
+        transition(
+            match,
+            Status.READY_TO_DRAFT,
+            source=source,
+            actor=actor,
+            deadline_at=seconds_from_now(IDLE_SECONDS),
+        )
+        save_transition(match, "champion_first_pick", "hidden_king_team", "coinflip_loser_choice")
+        render_board(match)
+        return
     begin_champion_draft(match, mode, source=source, actor=actor)
 
 
@@ -290,13 +309,17 @@ def begin_champion_draft(
     save_transition(
         match, "champion_first_pick", "hidden_king_team", "coinflip_loser_choice", "step_index"
     )
-    first = captain_of(match, match.champion_first_pick).player
-    add_effect(
-        match.community,
-        "ping",
-        {"user_ids": [first.discord_user_id], "text": "you ban first. The champion draft is on."},
-        match=match,
-    )
+    if match.kind == MatchKind.RANKED:  # A scrim's channel is public: no notices there.
+        first = captain_of(match, match.champion_first_pick).player
+        add_effect(
+            match.community,
+            "ping",
+            {
+                "user_ids": [first.discord_user_id],
+                "text": "you ban first. The champion draft is on.",
+            },
+            match=match,
+        )
     render_board(match)
 
 
@@ -388,6 +411,11 @@ def _advance_champion_draft(match: Match, mode: DraftMode) -> None:
     plan = build_plan(mode)
     match.step_index += 1
     if match.step_index >= len(plan):
+        if match.kind == MatchKind.SCRIM:
+            from league.services.scrims import finish
+
+            finish(match)  # GLHF: a scrim ends at the draft.
+            return
         begin_lobby_code(match, mode)
         return
     match.deadline_at = seconds_from_now(plan[match.step_index].seconds)

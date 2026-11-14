@@ -9,17 +9,18 @@ from datetime import datetime, timedelta
 from django.db import transaction
 
 from league import log_context
-from league.domain.engine import LIVE, Status
+from league.domain.engine import TIMED, Status
 from league.domain.errors import DomainError
 from league.models import Community, Match
+from league.models.matches import MatchKind
 from league.services import (
     draft,
     early_leave,
     lobby,
     prio,
     queue,
-    quick_drafts,
     results,
+    scrims,
     subs,
 )
 from league.services.common import lock_match, now
@@ -46,9 +47,12 @@ def fire_match_deadline(match_id: int) -> bool:
     with transaction.atomic():
         match = lock_match(match_id)
         # Re-check under the lock: a click may have got here first.
-        if match.deadline_at is None or match.deadline_at > now() or match.status not in LIVE:
+        if match.deadline_at is None or match.deadline_at > now() or match.status not in TIMED:
             return False
-        _HANDLERS[match.status](match)
+        if match.kind == MatchKind.SCRIM:
+            scrims.on_timeout(match)
+        else:
+            _HANDLERS[match.status](match)
         return True
 
 
@@ -56,7 +60,7 @@ def tick() -> int:
     """One poller pass. A failure in one match is logged and cannot block the others."""
     moment = now()
     fired = 0
-    due = Match.objects.filter(status__in=LIVE, deadline_at__lte=moment)
+    due = Match.objects.filter(status__in=TIMED, deadline_at__lte=moment)
     for match_id, guild_id in due.values_list("pk", "community__discord_guild_id"):
         with log_context.bind(guild=guild_id, match=match_id):
             try:
@@ -69,7 +73,7 @@ def tick() -> int:
     fired += subs.tick(moment)
     fired += early_leave.tick(moment)
     # Each of these can fail without stopping the others, or the queue pops below.
-    fired += _side_tick("quick drafts", quick_drafts.tick, moment)
+    fired += _side_tick("scrims", lambda _moment: scrims.tick(), moment)
     fired += _side_tick("priority list", prio.tick, moment)
 
     for community_id in Community.objects.values_list("pk", flat=True):
@@ -84,11 +88,10 @@ def extend_past_due(grace_seconds: int = STARTUP_GRACE_SECONDS) -> int:
     """After downtime, give everyone time to react rather than firing a burst of auto-picks."""
     moment = now()
     new_deadline = moment + timedelta(seconds=grace_seconds)
-    count = Match.objects.filter(status__in=LIVE, deadline_at__lt=new_deadline).update(
+    count = Match.objects.filter(status__in=TIMED, deadline_at__lt=new_deadline).update(
         deadline_at=new_deadline
     )
     count += subs.extend_past_due(new_deadline)
-    count += quick_drafts.extend_past_due(new_deadline)
     return count
 
 

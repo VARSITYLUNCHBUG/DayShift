@@ -9,9 +9,10 @@ from discord import Interaction
 from bot.db import db
 from bot.handlers.common import actor
 from bot.routing import Context, guarded, handles, reply
+from league.domain import copy
 from league.integrations import deadlock_api
 from league.models import Player
-from league.services import draft
+from league.services import draft, scrims
 
 
 @handles("pick_player")
@@ -63,6 +64,21 @@ async def random_champion(ctx: Context) -> None:
         int(ctx.arg),
         ctx.interaction.id,
     )
+
+
+@handles("claim_captain")
+async def claim_captain(ctx: Context) -> None:
+    """A scrim's Become Captain button. The arg is the side, "hk" or "am"."""
+    await ctx.interaction.response.defer(ephemeral=True, thinking=True)
+    label = await db(scrims.claim_captain, ctx.match_id, await actor(ctx.interaction), ctx.arg)
+    await reply(ctx.interaction, copy.now_captain(label))
+
+
+@handles("start_draft")
+async def start_draft(ctx: Context) -> None:
+    """A scrim's Start Draft button, after the coinflip."""
+    await ctx.interaction.response.defer()
+    await db(scrims.start_draft, ctx.match_id, await actor(ctx.interaction))
 
 
 @handles("coin_choice")

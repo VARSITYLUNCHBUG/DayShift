@@ -1,6 +1,6 @@
 """Keeps a draft message, and the hero grid below it, at the bottom of a channel.
 
-The match board and the standalone draft share this. The draft message is edited in place while
+Every board uses this, ranked and scrim. The board message is edited in place while
 it's still at the bottom, and posted again below any chat otherwise. The grid is posted afresh
 each time, never edited: an edited message gets an "(edited)" tag, which would split the grid.
 

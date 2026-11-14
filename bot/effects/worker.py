@@ -20,7 +20,7 @@ from bot.effects.handlers import HANDLERS, Env, Skip
 from league import log_context
 from league.models import OutboxEffect
 from league.models.outbox import EffectStatus
-from league.services import effects, lobby, quick_drafts
+from league.services import effects, lobby, scrims
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ class EffectWorker:
         if effect.kind == "create_lobby" and effect.match_id is not None:
             # With no lobby, nobody can continue: cancel and put everyone back in line.
             await db(lobby.fail_lobby_setup, effect.match_id, "Discord couldn't create the lobby")
-        if effect.kind == quick_drafts.RENDER_KIND:
-            # A draft nobody can see would hold its channel: close it so they can start again.
-            # A failed move doesn't count: the draft is still there, just higher up.
-            await db(quick_drafts.close_gone, int(effect.payload["draft_id"]))
+        if effect.kind == "render_board" and effect.match_id is not None:
+            # A scrim nobody can see would hold its channel: close it so they can start again.
+            # A failed move doesn't count: the board is still there, just higher up.
+            await db(scrims.close_gone, effect.match_id)

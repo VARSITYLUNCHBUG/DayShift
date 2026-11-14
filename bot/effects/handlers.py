@@ -19,10 +19,8 @@ from bot.renderers.board import (
     render_sub_offer_dm,
     render_voice_dm,
 )
-from bot.renderers.grid import GRID_MESSAGES
 from bot.renderers.prio import render_prio
 from bot.renderers.queue import render_queue
-from bot.renderers.quick_draft import render_draft, render_grid
 from bot.renderers.results import (
     render_correction,
     render_results,
@@ -30,10 +28,9 @@ from bot.renderers.results import (
 )
 from league.domain.engine import Status
 from league.integrations import deadlock_api
-from league.models import Community, Match, OutboxEffect, QuickDraft
+from league.models import Community, Match, OutboxEffect
 from league.models.alerts import AlertStatus
 from league.models.matches import ResourceKind
-from league.models.quick_drafts import QuickDraftStatus
 from league.services import (
     alerts,
     api_results,
@@ -43,7 +40,7 @@ from league.services import (
     ocr,
     permissions,
     prio,
-    quick_drafts,
+    scrims,
     subs,
 )
 from league.services.common import add_effect
@@ -344,18 +341,24 @@ class _MatchFlowStore:
 
 async def _render_board(env: Env) -> None:
     resources = await db(effects.resources, env.match_id)
-    text_id = resources.get(ResourceKind.TEXT)
-    if text_id is None:
+    channel_id = await db(effects.board_channel, env.match_id)
+    if channel_id is None:
         raise Skip("Lobby channel isn't up yet; creating it renders the board.")
     state = await db(boards.board_state, env.match_id)
-    reposted = await flow.render(
-        env.gateway,
-        _MatchFlowStore(env.match_id),
-        _match_flow(resources, text_id),
-        render_board(state),
-        render_pickers(state),
-        log_extra={"match": env.match_id},
-    )
+    try:
+        reposted = await flow.render(
+            env.gateway,
+            _MatchFlowStore(env.match_id),
+            _match_flow(resources, channel_id),
+            render_board(state),
+            render_pickers(state),
+            log_extra={"match": env.match_id},
+        )
+    except ChannelGone:
+        if state.is_scrim:
+            # Its channel is gone, or was never ours to post in: free it rather than block it.
+            await db(scrims.close_gone, env.match_id)
+        raise
     if reposted:
         await db(effects.cancel_board_moves, env.match_id)  # Chat now starts counting afresh.
 
@@ -369,10 +372,16 @@ async def render_board_effect(env: Env) -> None:
 async def move_board(env: Env) -> None:
     """Chat has built up below the board, unless a state change has already moved it since."""
     resources = await db(effects.resources, env.match_id)
-    text_id = resources.get(ResourceKind.TEXT)
-    if text_id is None:
+    channel_id = await db(effects.board_channel, env.match_id)
+    if channel_id is None or ResourceKind.BOARD_MESSAGE not in resources:
         raise Skip("The channel has closed.")
-    if await flow.at_bottom(env.gateway, _match_flow(resources, text_id)):
+    try:
+        bottom = await flow.at_bottom(env.gateway, _match_flow(resources, channel_id))
+    except ChannelGone:
+        if await db(scrims.is_host_channel, channel_id):
+            await db(scrims.close_gone, env.match_id)
+        raise
+    if bottom:
         raise Skip("The board is already last.")
     await _render_board(env)
 
@@ -804,52 +813,45 @@ async def delete_text_channel(env: Env) -> None:
     channel_id = await db(effects.resource_id, env.match_id, ResourceKind.TEXT)
     if channel_id is None:
         raise Skip("Already deleted.")
+    if await db(scrims.is_host_channel, channel_id):
+        raise Skip("A public channel a scrim ran in: never the bot's to delete.")
     await env.gateway.delete_channel(channel_id)
     await db(effects.mark_resource_deleted, env.match_id, ResourceKind.TEXT)
 
 
-# --- Standalone drafts (/startdraft) ----------------------------------------------------------
+# --- Scrims ------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
-class _DraftFlowStore:
-    """A standalone draft's messages live on its row."""
+@effect(scrims.DELETE_KIND)
+async def delete_board(env: Env) -> None:
+    """A stopped scrim: delete its board and grid, as Bebot did. Runs after any render in flight,
+    so it reads the message IDs that render recorded."""
+    channel_id = await db(effects.board_channel, env.match_id)
+    if channel_id is None:
+        raise Skip("No channel.")
+    resources = await db(effects.resources, env.match_id)
+    store = _MatchFlowStore(env.match_id)
+    for index, kind in reversed(list(enumerate(GRID_KINDS))):
+        message_id = resources.get(kind)
+        if message_id is not None:
+            with contextlib.suppress(ChannelGone):
+                await env.gateway.delete_message(channel_id, message_id)
+            await store.save_grid(index, None)
+    board_id = resources.get(ResourceKind.BOARD_MESSAGE)
+    if board_id is not None:
+        with contextlib.suppress(ChannelGone):
+            await env.gateway.delete_message(channel_id, board_id)
+        await db(effects.mark_resource_deleted, env.match_id, ResourceKind.BOARD_MESSAGE)
 
-    draft_id: int
 
-    async def save_board(self, message_id: int) -> None:
-        await db(quick_drafts.record_board, self.draft_id, message_id)
-
-    async def save_grid(self, index: int, message_id: int | None) -> None:
-        await db(quick_drafts.record_grid, self.draft_id, index, message_id)
-
-    async def delete_later(self, channel_id: int, message_id: int) -> None:
-        await db(_queue_delete, channel_id, message_id, draft_id=self.draft_id)
-
-
-def _draft_flow(messages: quick_drafts.Messages) -> flow.FlowMessages:
-    slots: list[int | None] = [*messages.grid_ids][:GRID_MESSAGES]
-    slots += [None] * (GRID_MESSAGES - len(slots))
-    return flow.FlowMessages(messages.channel_id, messages.board_id, tuple(slots))
-
-
-def _queue_delete(
-    channel_id: int, message_id: int, *, match_id: int | None = None, draft_id: int | None = None
-) -> None:
-    """A delete that failed mid-render, retried as a job of its own in the same lane."""
-    if match_id is not None:
-        match = Match.objects.select_related("community").get(pk=match_id)
-        community, lane = match.community, None
-    else:
-        assert draft_id is not None
-        draft = QuickDraft.objects.select_related("community").get(pk=draft_id)
-        community, lane, match = draft.community, draft.lane, None
+def _queue_delete(channel_id: int, message_id: int, *, match_id: int) -> None:
+    """A delete that failed mid-render, retried as a job of its own in the match's lane."""
+    match = Match.objects.select_related("community").get(pk=match_id)
     add_effect(
-        community,
+        match.community,
         "delete_message",
         {"channel_id": channel_id, "message_id": message_id},
         match=match,
-        lane=lane,
     )
 
 
@@ -857,67 +859,3 @@ def _queue_delete(
 async def delete_message_effect(env: Env) -> None:
     payload = env.effect.payload
     await env.gateway.delete_message(int(payload["channel_id"]), int(payload["message_id"]))
-
-
-def _draft_id(env: Env) -> int:
-    return int(env.effect.payload["draft_id"])
-
-
-async def _render_quick_draft(env: Env, draft_id: int, messages: quick_drafts.Messages) -> None:
-    state = await db(quick_drafts.state, draft_id)
-    try:
-        reposted = await flow.render(
-            env.gateway,
-            _DraftFlowStore(draft_id),
-            _draft_flow(messages),
-            render_draft(state),
-            render_grid(state),
-            log_extra={"draft": draft_id},
-        )
-    except ChannelGone:
-        # The channel is gone, or it was never ours to post in: free it rather than block it.
-        await db(quick_drafts.close_gone, draft_id)
-        raise
-    if reposted:
-        await db(effects.cancel_moves, quick_drafts.MOVE_KIND, lane=f"quick_draft:{draft_id}")
-
-
-@effect(quick_drafts.RENDER_KIND)
-async def render_quick_draft(env: Env) -> None:
-    draft_id = _draft_id(env)
-    messages = await db(quick_drafts.messages, draft_id)
-    if messages.status == QuickDraftStatus.STOPPED:
-        raise Skip("The draft was stopped; its messages are being deleted.")
-    await _render_quick_draft(env, draft_id, messages)
-
-
-@effect(quick_drafts.MOVE_KIND)
-async def move_quick_draft(env: Env) -> None:
-    """Chat has built up below the draft, unless a pick has already moved it since."""
-    draft_id = _draft_id(env)
-    messages = await db(quick_drafts.messages, draft_id)
-    if messages.status != QuickDraftStatus.DRAFTING or messages.board_id is None:
-        raise Skip("Only a draft in progress follows the chat.")
-    try:
-        bottom = await flow.at_bottom(env.gateway, _draft_flow(messages))
-    except ChannelGone:
-        await db(quick_drafts.close_gone, draft_id)
-        raise
-    if bottom:
-        raise Skip("The draft is already last.")
-    await _render_quick_draft(env, draft_id, messages)
-
-
-@effect(quick_drafts.DELETE_KIND)
-async def delete_quick_draft(env: Env) -> None:
-    """Runs after any render in flight, so it reads the message IDs that render recorded."""
-    draft_id = _draft_id(env)
-    messages = await db(quick_drafts.messages, draft_id)
-    store = _DraftFlowStore(draft_id)
-    for index, message_id in reversed(list(enumerate(messages.grid_ids))):
-        if message_id is not None:
-            await env.gateway.delete_message(messages.channel_id, message_id)
-            await store.save_grid(index, None)
-    if messages.board_id is not None:
-        await env.gateway.delete_message(messages.channel_id, messages.board_id)
-        await db(quick_drafts.record_board, draft_id, None)

@@ -102,7 +102,7 @@ def transition(
     deadline_at: datetime | None = None,
 ) -> None:
     """Move a locked match to a new status, recording the change."""
-    if not can_transition(match.status, target):
+    if not can_transition(match.status, target, match.kind):
         raise StaleAction("This match has already moved on.")
     MatchTransition.objects.create(
         match=match,
@@ -194,7 +194,8 @@ def request_render(
 
 def clear_notices(match: Match) -> None:
     """Remove the notices posted so far. Effects run in order, so later ones are unaffected."""
-    add_effect(match.community, "clear_notices", match=match)
+    if match.kind != "scrim":  # A scrim posts no notices: its channel is public.
+        add_effect(match.community, "clear_notices", match=match)
 
 
 def render_board(match: Match) -> None:

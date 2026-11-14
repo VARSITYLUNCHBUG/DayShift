@@ -40,7 +40,7 @@ def player_draft_length(mode: DraftMode) -> int:
 
 
 def champion_plan(mode: DraftMode) -> tuple[PlanStep, ...]:
-    """Just the bans and picks, indexed from 0. A standalone draft has no player draft."""
+    """Just the bans and picks, indexed from 0: what a scrim drafts."""
     champion_steps = build_plan(mode)[player_draft_length(mode) :]
     return tuple(
         PlanStep(index, step.action, step.role, step.seconds)

@@ -24,6 +24,15 @@ class MatchStatus(models.TextChoices):
     DISPUTED = S.DISPUTED, "Disputed"
     COMPLETED = S.COMPLETED, "Completed"
     VOIDED = S.VOIDED, "Voided"
+    CAPTAIN_CLAIM = S.CAPTAIN_CLAIM, "Scrim: claiming sides"
+    READY_TO_DRAFT = S.READY_TO_DRAFT, "Scrim: ready to draft"
+    DRAFTED = S.DRAFTED, "Scrim: drafted"
+
+
+class MatchKind(models.TextChoices):
+    RANKED = "ranked", "Ranked"
+    # /startdraft and /captains_coinflip: the champion draft only, in a public channel, unrated.
+    SCRIM = "scrim", "Scrim"
 
 
 class Source(models.TextChoices):
@@ -40,6 +49,15 @@ class Match(models.Model):
         "league.DraftModeVersion", on_delete=models.PROTECT, related_name="+"
     )
     status = models.CharField(max_length=24, choices=MatchStatus.choices)
+    kind = models.CharField(max_length=8, choices=MatchKind.choices, default=MatchKind.RANKED)
+    # A scrim runs in the public channel it was started in. Never one of the match's own
+    # resources, so nothing ever deletes it.
+    host_channel_id = models.BigIntegerField(null=True, blank=True)
+    # Whether the bot can use custom hero emojis there (Use External Emojis).
+    custom_emojis = models.BooleanField(default=True)
+    started_by = models.ForeignKey(
+        "league.Player", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     version = models.PositiveIntegerField(default=0)
     step_index = models.PositiveSmallIntegerField(default=0)
     deadline_at = models.DateTimeField(null=True, blank=True)
@@ -81,6 +99,17 @@ class Match(models.Model):
             ),
             models.Index(fields=("community", "status"), name="match_community_status_idx"),
             models.Index(fields=("season", "ended_at", "id"), name="match_season_timeline_idx"),
+        ]
+        constraints = [
+            # One live scrim per channel. Also the index chat lookups use.
+            models.UniqueConstraint(
+                fields=("host_channel_id",),
+                condition=Q(
+                    kind="scrim",
+                    status__in=("captain_claim", "coinflip", "ready_to_draft", "champion_draft"),
+                ),
+                name="uniq_live_scrim_per_channel",
+            ),
         ]
 
     def __str__(self) -> str:

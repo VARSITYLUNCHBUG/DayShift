@@ -23,7 +23,6 @@ from bot.handlers import alerts as _alerts  # noqa: F401
 from bot.handlers import draft as _draft  # noqa: F401
 from bot.handlers import lobby as _lobby  # noqa: F401
 from bot.handlers import queue as _queue  # noqa: F401
-from bot.handlers import quick_draft as _quick_draft  # noqa: F401
 from bot.handlers import results as _results  # noqa: F401
 from bot.handlers import subs as _subs  # noqa: F401
 from bot.routing import RouteButton, RouteSelect, RouteUserSelect

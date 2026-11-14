@@ -35,8 +35,6 @@ from league.models import (
     PlayerRating,
     PrioEntry,
     QueueEntry,
-    QuickDraft,
-    QuickDraftAction,
     RatingEvent,
     RatingRun,
     ResultSubmission,
@@ -253,7 +251,7 @@ class ResultInline(ReadOnlyInline):
 @admin.register(Match)
 class MatchAdmin(ReadOnlyAdmin):
     list_display = ("id", "status", "winner", "mode_version", "created_at", "ended_at")
-    list_filter = ("status", "season")
+    list_filter = ("kind", "status", "season")
     inlines = (
         ParticipantInline,
         DraftActionInline,
@@ -392,28 +390,6 @@ class ApiMatchCheckAdmin(ReadOnlyAdmin):
 class EarlyLeaveAdmin(ReadOnlyAdmin):
     list_display = ("match", "leaver", "requested_by", "status", "resolved_by", "created_at")
     list_filter = ("status",)
-
-
-class QuickDraftActionInline(ReadOnlyInline):
-    model = QuickDraftAction
-    fields = ("step_index", "action", "side", "champion", "source", "random_choice", "actor_id")
-
-
-@admin.register(QuickDraft)
-class QuickDraftAdmin(ReadOnlyAdmin):
-    """Standalone drafts (/startdraft). Read-only: stop one with /stopdraft."""
-
-    list_display = (
-        "id",
-        "community",
-        "status",
-        "channel_id",
-        "hk_captain_name",
-        "am_captain_name",
-        "created_at",
-    )
-    list_filter = ("status",)
-    inlines = (QuickDraftActionInline,)
 
 
 @admin.register(PrioEntry)

@@ -60,6 +60,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     monkeypatch.setattr(common, "now", instance.now)
     # Services import `now` by name, so each one needs patching too.
     from league.services import (
+        alerts,
         api_results,
         awards,
         corrections,
@@ -72,8 +73,8 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
         penalties,
         pings,
         prio,
-        quick_drafts,
         results,
+        scrims,
         standing,
         steam,
         subs,
@@ -82,6 +83,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     from league.services import ratings as ratings_service
 
     for module in (
+        alerts,
         api_results,
         awards,
         corrections,
@@ -95,9 +97,9 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
         pings,
         prio,
         queue_service,
-        quick_drafts,
         ratings_service,
         results,
+        scrims,
         standing,
         steam,
         subs,

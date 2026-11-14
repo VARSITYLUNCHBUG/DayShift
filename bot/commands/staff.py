@@ -89,7 +89,7 @@ async def _staff_start(interaction: Interaction[Any], *areas: Area) -> Community
 def _get_match(community: Community, match_id: int) -> Match:
     match = (
         Match.objects.select_related("season", "community", "mode_version")
-        .filter(pk=match_id, community=community)
+        .filter(pk=match_id, community=community, kind="ranked")  # Scrims have no staff tools.
         .first()
     )
     if match is None:

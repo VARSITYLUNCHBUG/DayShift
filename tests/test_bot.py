@@ -291,7 +291,8 @@ def test_champion_board_says_how_far_along_the_draft_is(popped: Match) -> None:
     state = boards.board_state(match.pk)
     payload = str(render_board(state).to_components())
     assert "Ban 1 of 4." in payload
-    assert f"**{state.acting_captain_name}** ban a hero! ⌛ <t:" in payload
+    # Bebot's "@Pike ban a hero!": a mention, which a board never pings.
+    assert f"<@{acting_captain(match).discord_user_id}> ban a hero! ⌛ <t:" in payload
 
 
 @pytest.mark.django_db

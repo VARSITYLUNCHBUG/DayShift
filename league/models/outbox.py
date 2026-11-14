@@ -25,7 +25,7 @@ class OutboxEffect(models.Model):
     )
     kind = models.CharField(max_length=32)
     # Effects in one lane run in order. A match's effects share the match's lane; work outside a
-    # match names its own here (a standalone draft, say). Blank means one lane per kind and server.
+    # match can name its own here. Blank means one lane per kind and server.
     # See `league.services.effects.lane_of`.
     lane = models.CharField(max_length=48, blank=True)
     payload = models.JSONField(default=dict)

@@ -6,24 +6,21 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from league.domain.engine import LIVE
+from league.domain.engine import TIMED, Status
 from league.models import (
     Community,
     Match,
     MatchParticipant,
     MatchResource,
     OutboxEffect,
-    QuickDraft,
 )
-from league.models.matches import ResourceKind
+from league.models.matches import MatchKind, ResourceKind
 from league.models.outbox import EffectStatus
-from league.models.quick_drafts import QUICK_DRAFT_LIVE, QuickDraftStatus
 from league.services.common import (
     add_effect,
     now,
     render_board,
     render_queue,
-    request_render,
 )
 
 MAX_ATTEMPTS = 8
@@ -45,9 +42,9 @@ Lane = int | str
 def lane_key(match_id: int | None, lane: str, kind: str, community_id: int) -> Lane:
     """Which effects must run in order with this one.
 
-    A match's effects share its lane. Work outside a match runs in the lane it names (one per
-    standalone draft, say), or else one lane per kind and server, so a queue panel that keeps
-    failing in one server never holds up another server or another kind of work.
+    A match's effects share its lane, scrims included. Work outside a match runs in the lane it
+    names (a server's staff alerts, say), or else one lane per kind and server, so a queue panel
+    that keeps failing in one server never holds up another server or another kind of work.
     """
     if match_id is not None:
         return match_id
@@ -181,15 +178,25 @@ BOARD_MOVE = MoveTiming(
     BOARD_MOVE_MAX_WAIT_SECONDS,
     BOARD_MOVE_IDLE_SECONDS,
 )
-# A standalone draft runs in an ordinary channel, which is busier than a match's own, and each
-# move reposts three messages, so it waits for more chat before following it.
-QUICK_DRAFT_MOVE = MoveTiming(
-    after_messages=5, quiet_seconds=5, max_wait_seconds=30, idle_seconds=600
-)
+# A scrim runs in an ordinary channel, which is busier than a match's own, and each move reposts
+# three messages, so it waits for more chat before following it.
+SCRIM_MOVE = MoveTiming(after_messages=5, quiet_seconds=5, max_wait_seconds=30, idle_seconds=600)
+
+
+def board_channel(match_id: int) -> int | None:
+    """Where a match's board is: its own text channel, or the public channel a scrim runs in."""
+    text_id = resource_id(match_id, ResourceKind.TEXT)
+    if text_id is not None:
+        return text_id
+    return (
+        Match.objects.filter(pk=match_id, kind=MatchKind.SCRIM)
+        .values_list("host_channel_id", flat=True)
+        .first()
+    )
 
 
 def note_chat(channel_id: int) -> None:
-    """Count a chat message towards moving a match board, or a standalone draft, back below it."""
+    """Count a chat message towards moving a match board, or a scrim's, back below it."""
     resource = (
         MatchResource.objects.filter(
             kind=ResourceKind.TEXT, discord_id=channel_id, deleted_at__isnull=True
@@ -201,19 +208,15 @@ def note_chat(channel_id: int) -> None:
         match = resource.match
         _debounce_move(match.community, "move_board", BOARD_MOVE, match=match)
         return
-    draft = (
-        QuickDraft.objects.filter(channel_id=channel_id, status=QuickDraftStatus.DRAFTING)
+    scrim = (
+        Match.objects.filter(
+            kind=MatchKind.SCRIM, host_channel_id=channel_id, status=Status.CHAMPION_DRAFT
+        )
         .select_related("community")
         .first()
     )
-    if draft is not None and draft.board_message_id is not None:
-        _debounce_move(
-            draft.community,
-            "move_quick_draft",
-            QUICK_DRAFT_MOVE,
-            lane=draft.lane,
-            payload={"draft_id": draft.pk},
-        )
+    if scrim is not None and resource_id(scrim.pk, ResourceKind.BOARD_MESSAGE) is not None:
+        _debounce_move(scrim.community, "move_board", SCRIM_MOVE, match=scrim)
     # Any other channel in the server: nothing to keep in view.
 
 
@@ -311,7 +314,9 @@ def on_voice_join(discord_user_id: int, joined_channel_id: int) -> tuple[int, in
 
 def stale_resources() -> list[tuple[int, str, int]]:
     """Channels of finished matches whose delete effect has failed for good."""
-    finished = Match.objects.filter(status__in=("completed", "voided"), ended_at__isnull=False)
+    finished = Match.objects.filter(
+        kind=MatchKind.RANKED, status__in=("completed", "voided"), ended_at__isnull=False
+    )
     failed = OutboxEffect.objects.filter(
         match__in=finished,
         kind__in=("cleanup_voice", "delete_text_channel"),
@@ -331,15 +336,9 @@ def request_reconcile() -> int:
     for community in Community.objects.all():
         render_queue(community)
         count += 1
-    live = Match.objects.filter(status__in=LIVE).select_related("community")
+    live = Match.objects.filter(status__in=TIMED).select_related("community")
     for match in live:
         render_board(match)
-        count += 1
-    drafts = QuickDraft.objects.filter(status__in=QUICK_DRAFT_LIVE).select_related("community")
-    for draft in drafts:
-        request_render(
-            draft.community, "render_quick_draft", lane=draft.lane, payload={"draft_id": draft.pk}
-        )
         count += 1
     return count
 

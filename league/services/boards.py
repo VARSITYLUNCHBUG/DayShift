@@ -23,6 +23,7 @@ from league.models import (
     ResultSubmission,
     Season,
 )
+from league.models.matches import MatchKind
 from league.models.subs import UNRESOLVED, OfferSource, OfferStatus, SubRequest, SubStatus
 from league.services import awards as award_service
 from league.services import ocr, ratings, standing
@@ -122,6 +123,7 @@ class BoardState:
     turn_total: int = 0
     champions: list[ChampionOption] = field(default_factory=list)
     hidden_king_team: str = ""
+    champion_first_pick: str = ""
     # The captain coinflip: the winner's team, each captain's choice, and the buttons on turn.
     coinflip_winner: str = ""
     coinflip_winner_choice: str = ""
@@ -164,6 +166,12 @@ class BoardState:
     # Bebot's turn strip: (action, side) for each ban and pick, and the one on turn.
     champion_steps: tuple[tuple[str, str], ...] = ()
     champion_step: int | None = None
+    # "ranked" or "scrim". A scrim shows Bebot's screens only, in a public channel.
+    kind: str = "ranked"
+
+    @property
+    def is_scrim(self) -> bool:
+        return self.kind == "scrim"
 
     @property
     def hold_until(self) -> datetime | None:
@@ -240,6 +248,8 @@ def board_state(match_id: int) -> BoardState:
         step_index=match.step_index,
         players=players,
         hidden_king_team=match.hidden_king_team,
+        champion_first_pick=match.champion_first_pick,
+        kind=match.kind,
         coinflip_winner=match.coinflip_winner,
         coinflip_winner_choice=match.coinflip_winner_choice,
         coinflip_loser_choice=match.coinflip_loser_choice,
@@ -317,7 +327,8 @@ def board_state(match_id: int) -> BoardState:
             ChampionOption(
                 row.pk,
                 row.name,
-                row.discord_emoji_id,
+                # Where the bot can't use external emojis, buttons fall back to the plain one.
+                row.discord_emoji_id if match.custom_emojis else None,
                 taken=row.pk in used,
                 unicode_emoji=row.unicode_emoji,
             )
@@ -364,7 +375,7 @@ def board_state(match_id: int) -> BoardState:
     state.draft_name = draft_name(match.rng_seed)
     state.gif_url = pick_gif(match.rng_seed, draft_gifs())
     state.on_hold = match.held_seconds is not None
-    state.can_request_sub = match.status in SUBBABLE
+    state.can_request_sub = match.kind == MatchKind.RANKED and match.status in SUBBABLE
     state.subs = _sub_lines(match)
     return state
 
@@ -437,7 +448,9 @@ def queue_view(community: Community) -> QueueView:
         capacity=mode.lobby_size,
         players=[entry.player.display_name for entry in entries],
         mode_name=mode.name,
-        live_matches=Match.objects.filter(community=community).exclude(status__in=TERMINAL).count(),
+        live_matches=Match.objects.filter(community=community, kind=MatchKind.RANKED)
+        .exclude(status__in=TERMINAL)
+        .count(),
         waiting_room_channel_id=community.waiting_room_channel_id,
     )
 

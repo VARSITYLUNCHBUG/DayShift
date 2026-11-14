@@ -19,7 +19,6 @@ from league.models.pings import ChannelPing
 from league.models.players import Player
 from league.models.prio import PrioEntry
 from league.models.queue import QueueEntry
-from league.models.quick_drafts import QuickDraft, QuickDraftAction
 from league.models.ratings import PlayerRating, RatingEvent, RatingRun, Season
 from league.models.results import MatchResult, ResultSubmission
 from league.models.scoreboards import MatchAward, PlayerAlias, PlayerMatchStat, ScoreboardRead
@@ -51,8 +50,6 @@ __all__ = [
     "PlayerRating",
     "PrioEntry",
     "QueueEntry",
-    "QuickDraft",
-    "QuickDraftAction",
     "RatingEvent",
     "RatingRun",
     "ResultSubmission",

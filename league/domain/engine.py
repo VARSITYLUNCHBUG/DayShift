@@ -27,9 +27,13 @@ class Status:
     DISPUTED = "disputed"
     COMPLETED = "completed"
     VOIDED = "voided"
+    # Scrims only: claiming a side, waiting for Start Draft after the coinflip, and done at GLHF.
+    CAPTAIN_CLAIM = "captain_claim"
+    READY_TO_DRAFT = "ready_to_draft"
+    DRAFTED = "drafted"
 
 
-TERMINAL = frozenset({Status.COMPLETED, Status.VOIDED})
+TERMINAL = frozenset({Status.COMPLETED, Status.VOIDED, Status.DRAFTED})
 LIVE = frozenset(
     {
         Status.READY_CHECK,
@@ -43,6 +47,13 @@ LIVE = frozenset(
         Status.DISPUTED,
     }
 )
+# A scrim holds its channel while it's in one of these.
+SCRIM_LIVE = frozenset(
+    {Status.CAPTAIN_CLAIM, Status.COINFLIP, Status.READY_TO_DRAFT, Status.CHAMPION_DRAFT}
+)
+# Every status with a timer the poller runs, ranked or scrim.
+TIMED = LIVE | SCRIM_LIVE
+SIDE_LABELS = {"hk": "The Hidden King", "am": "The Archmother"}
 
 _TRANSITIONS: dict[str, frozenset[str]] = {
     Status.READY_CHECK: frozenset({Status.CAPTAIN_PHASE, Status.VOIDED}),
@@ -60,8 +71,19 @@ _TRANSITIONS: dict[str, frozenset[str]] = {
 }
 
 
-def can_transition(current: str, target: str) -> bool:
-    return target in _TRANSITIONS.get(current, frozenset())
+_SCRIM_TRANSITIONS: dict[str, frozenset[str]] = {
+    # /startdraft: both captains claimed, straight into the draft.
+    Status.CAPTAIN_CLAIM: frozenset({Status.CHAMPION_DRAFT, Status.VOIDED}),
+    # /captains_coinflip: both chose, then a captain presses Start Draft.
+    Status.COINFLIP: frozenset({Status.READY_TO_DRAFT, Status.VOIDED}),
+    Status.READY_TO_DRAFT: frozenset({Status.CHAMPION_DRAFT, Status.VOIDED}),
+    Status.CHAMPION_DRAFT: frozenset({Status.DRAFTED, Status.VOIDED}),
+}
+
+
+def can_transition(current: str, target: str, kind: str = "ranked") -> bool:
+    table = _SCRIM_TRANSITIONS if kind == "scrim" else _TRANSITIONS
+    return target in table.get(current, frozenset())
 
 
 def seeded_rng(seed: int, purpose: str) -> random.Random:

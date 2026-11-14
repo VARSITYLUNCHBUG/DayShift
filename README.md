@@ -365,29 +365,32 @@ cooldown's strikes too, unless told to keep them, and `/penalty strikes` adds or
 hand. All the numbers are in each server's `penalty_policy`, editable in admin. They are starting
 judgements.
 
-## Bebot's tools
+## Scrims and Bebot's tools
 
 Alongside the match flow, the server keeps Bebot's other tools. None of them touches ratings.
 
-### Standalone draft
+### Scrims
 
 `/startdraft` runs a hero ban and pick in any channel, for scrims or anything outside the queue.
 Two people press **Become The Hidden King Captain** and **Become The Archmother Captain**, then the
-active mode's bans and picks run, The Hidden King first. Only the captain on turn can choose;
-🎲 Random picks for them, and a turn that runs out picks at random, shown as "(randomed)". It
-looks the way it did in Bebot: the 👑 Captains block, 🚫 Bans, each side's heroes, the turn strip,
-and `# GLHF` with a GIF at the end. The hero grid sits below the draft in messages of its own, and
-the draft moves back below the chat once a few messages push it up.
+active mode's bans and picks run, The Hidden King first. `/captains_coinflip captain1 captain2`
+flips a coin instead: the winner chooses First Pick, Last Pick, 🔶 Hidden King or 🔷 Archmother,
+the loser chooses from the other kind, and either captain presses **Start Draft**.
 
-- `/captains_coinflip captain1 captain2` flips a coin. The winner chooses First Pick, Last Pick,
-  🔶 Hidden King or 🔷 Archmother; the loser chooses from the other kind; either captain presses
-  Start Draft. Here The Archmother can go first.
-- `/randomdraft` posts a random ban and pick for both sides.
-- Drafts are staff-run: `/startdraft`, `/captains_coinflip` and `/stopdraft` need the Scrims area.
-- One draft per channel, and at most 10 at once per server. A draft whose captains never show up
-  frees the channel after 15 minutes. With `DEBUG` on, one person can captain both sides.
-- The bot needs View Channel, Send Messages and Read Message History in the channel, and Use
-  External Emojis for the hero icons. Without that last one, heroes show their plain emoji.
+A scrim is a match of its own kind, run by the same engine as a ranked one, so it looks and
+behaves the same: Bebot's board, the red-to-ban, green-to-pick grid below it, 🎲 Random, a random
+pick when a turn runs out, and the board following the chat. It ends at `# GLHF` with a GIF.
+
+- It's recorded (every ban and pick is kept) and never rated. Its captains aren't held by it, so
+  they can queue for ranked meanwhile, and it doesn't count against the server's match capacity.
+- Scrims are staff-run: `/startdraft`, `/captains_coinflip` and `/stopdraft` need the Scrims area.
+  `/stopdraft` deletes the scrim's messages. `/randomdraft` posts a random ban and pick for both
+  sides, for anyone.
+- One scrim per channel, and at most 10 at once per server. One whose captains never show up frees
+  the channel after 15 minutes.
+- The bot never creates, moves or deletes the channel a scrim runs in. It needs View Channel, Send
+  Messages and Read Message History there, and Use External Emojis for the hero icons. Without
+  that last one, heroes show their plain emoji.
 
 ### Priority list
 
@@ -487,7 +490,7 @@ Anything that rewrites past ratings shows a preview and needs Confirm.
 | Matches | `matches`, `match_participants`, `match_resources`, `match_transitions`, `draft_actions`, `captain_votes`, `sub_requests`, `sub_offers`, `early_leaves` |
 | Results | `result_submissions`, `match_results`, `match_awards`, `scoreboard_reads`, `player_match_stats`, `player_aliases`, `api_match_checks` |
 | Operations | `penalties`, `strike_adjustments`, `captain_overrides`, `staff_alerts`, `outbox_effects` |
-| Bebot's tools | `quick_drafts`, `quick_draft_actions`, `prio_entries`, `channel_pings` |
+| Bebot's tools | `prio_entries`, `channel_pings` (scrims are `matches` with `kind = scrim`) |
 
 For analytics, start at `result_submissions`. Screenshots are in the archive channel: use
 `archive_message_id` and `attachment_id` with the Discord API, because CDN URLs expire. Join
@@ -503,7 +506,7 @@ league/domain/    Pure rules, no Django or Discord: ratings (openskill_v1), stri
 league/models/    The tables
 league/services/  Transactions: queue, lobby, draft, results, ratings, corrections, awards,
                   standing, penalties, ocr, steam, api_results, calibration, deadlines,
-                  and Bebot's tools: quick_drafts, prio, pings
+                  and Bebot's tools: scrims, prio, pings
 league/integrations/  The deadlock-api client. Network only, no database
 league/web/       The staff calibration dashboard
 league/admin/     Django admin
@@ -523,8 +526,8 @@ The rules that keep it reliable:
 - **Timers are rows.** A poller applies timeouts through the same path as a click. After downtime,
   past-due deadlines get 60 s of grace.
 - **Discord calls happen after commit.** State changes write `outbox_effects` in the same transaction,
-  and a worker runs them in order per lane, retrying on server errors. Each match is a lane, each
-  standalone draft is a lane, and other work gets one lane per kind and server, so one that keeps
+  and a worker runs them in order per lane, retrying on server errors. Each match (or scrim) is a lane,
+  and other work gets one lane per kind and server, so one that keeps
   failing never holds up another.
 
 ## Operations

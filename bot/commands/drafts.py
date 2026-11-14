@@ -1,6 +1,7 @@
-"""Bebot's standalone draft commands: /startdraft, /stopdraft, /captains_coinflip and /randomdraft.
-They work in any channel of a set-up server and never touch ratings. Drafts are run by staff:
-starting and stopping one needs the Scrims area. /randomdraft is open to everyone.
+"""Bebot's scrim commands: /startdraft, /stopdraft, /captains_coinflip and /randomdraft.
+A scrim is a match of its own kind, run in any channel of a set-up server, recorded and never
+rated. Scrims are run by staff: starting and stopping one needs the Scrims area. /randomdraft is
+open to everyone.
 
 The draft message is posted by the outbox, like every board, so a command only records the draft
 and says so. It checks first that the bot can post and read in the channel, because a draft it
@@ -15,14 +16,14 @@ import discord
 from discord import Interaction, app_commands
 
 from bot.db import db
-from bot.handlers.common import community_of
+from bot.handlers.common import actor, community_of
 from bot.handlers.permissions import require_area
-from bot.renderers.quick_draft import render_random_draft
+from bot.renderers.random_draft import render_random_draft
 from bot.routing import guarded, reply
 from league.domain import copy
 from league.domain.errors import InvalidAction
 from league.models.permissions import Area
-from league.services import quick_drafts
+from league.services import common, scrims
 
 
 def _channel_id(interaction: Interaction[Any]) -> int:
@@ -62,10 +63,10 @@ async def startdraft_command(interaction: Interaction[Any]) -> None:
         await require_area(interaction, community, Area.SCRIMS)
         custom_emojis = can_post_here(interaction)
         await db(
-            quick_drafts.start,
+            scrims.start_claim,
             community.pk,
             _channel_id(interaction),
-            interaction.user.id,
+            await actor(interaction),
             custom_emojis=custom_emojis,
         )
         await reply(interaction, "Posting the draft. Captains: claim a side.")
@@ -79,7 +80,7 @@ async def stopdraft_command(interaction: Interaction[Any]) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         community = await community_of(interaction)
         await require_area(interaction, community, Area.SCRIMS)
-        await db(quick_drafts.stop, _channel_id(interaction), interaction.user.id, staff=True)
+        await db(scrims.stop, _channel_id(interaction), await actor(interaction))
         await reply(interaction, copy.DRAFT_STOPPED)
 
     await guarded(interaction, run)
@@ -100,13 +101,15 @@ async def captains_coinflip_command(
         community = await community_of(interaction)
         await require_area(interaction, community, Area.SCRIMS)
         custom_emojis = can_post_here(interaction)
+        first = await db(common.get_or_create_player, captain1.id, _name(captain1))
+        second = await db(common.get_or_create_player, captain2.id, _name(captain2))
         await db(
-            quick_drafts.start_coinflip,
+            scrims.start_coinflip,
             community.pk,
             _channel_id(interaction),
-            interaction.user.id,
-            (captain1.id, _name(captain1)),
-            (captain2.id, _name(captain2)),
+            await actor(interaction),
+            first,
+            second,
             custom_emojis=custom_emojis,
         )
         await reply(interaction, "Flipping the coin...")
@@ -121,7 +124,7 @@ async def randomdraft_command(interaction: Interaction[Any]) -> None:
     async def run() -> None:
         community = await community_of(interaction)  # Before answering: refusals stay private.
         await interaction.response.defer(thinking=True)
-        draft = await db(quick_drafts.random_draft, community)
+        draft = await db(scrims.random_draft, community)
         await interaction.followup.send(view=render_random_draft(draft))
 
     await guarded(interaction, run)

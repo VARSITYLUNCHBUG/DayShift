@@ -44,6 +44,9 @@ STATUS_TITLES = {
     Status.DISPUTED: "Disputed: waiting for staff",
     Status.COMPLETED: "Finished",
     Status.VOIDED: "Cancelled",
+    Status.CAPTAIN_CLAIM: "Claim a side",
+    Status.READY_TO_DRAFT: "Ready to draft",
+    Status.DRAFTED: "Drafted",
 }
 
 CHECKLIST = "Lobby settings: Normal mode, bots off, cheats off, duplicate heroes off."
@@ -121,7 +124,18 @@ def _team_line(state: BoardState, team: str) -> str:
     return f"{_team_heading(state, team, lines)}: {names}"
 
 
+def _scrim_header(state: BoardState) -> str:
+    """Bebot's titles. The coinflip screens carry their own."""
+    if state.status == Status.CAPTAIN_CLAIM:
+        return f"## {style.draft_title(state.match_id)}"
+    if state.status in {Status.CHAMPION_DRAFT, Status.DRAFTED}:
+        return f"## {style.draft_title(state.match_id, state.draft_name)}"
+    return ""
+
+
 def _header(state: BoardState) -> str:
+    if state.is_scrim:
+        return _scrim_header(state)
     if state.status == Status.CHAMPION_DRAFT:
         # Bebot's title. The timer sits on the acting captain's line, unless a sub has paused it.
         title = f"## {style.draft_title(state.match_id, state.draft_name)}"
@@ -228,14 +242,13 @@ def coin_buttons(action: str, target_id: int, options: tuple[str, ...]) -> Actio
 
 
 def _coinflip(state: BoardState, box: Container[Any]) -> None:
-    box.add_item(TextDisplay(_team_block(state, "A") + "\n\n" + _team_block(state, "B")))
-    box.add_item(Separator())
     winner = state.coinflip_winner
     loser = "B" if winner == "A" else "A"
-    lines = [
-        f"### {style.COIN_EMOJI} Captain Coinflip",
-        f"**{state.team_name(winner)}** wins the flip!",
-    ]
+    if not state.is_scrim:
+        box.add_item(TextDisplay(_team_block(state, "A") + "\n\n" + _team_block(state, "B")))
+        box.add_item(Separator())
+    who = state.captains.get(winner, "-") if state.is_scrim else state.team_name(winner)
+    lines = [f"### {style.COIN_EMOJI} Captain Coinflip", f"**{who}** wins the flip!"]
     if not state.coinflip_winner_choice:
         lines.append(f"{state.captains.get(winner, 'Their captain')}, choose your preference:")
     else:
@@ -317,14 +330,21 @@ def _hero_text(line: DraftLine) -> str:
     return style.hero_line(emoji, line.label, random_choice=line.random_choice, auto=line.auto)
 
 
+def _captain_line(state: BoardState, team: str) -> PlayerLine | None:
+    return next((p for p in state.players if p.is_captain and p.team == team), None)
+
+
 def _captains_block(state: BoardState, *, final: bool) -> list[str]:
     rows = [f"{style.CAPTAIN_EMOJI} **Captains**"]
     for team in state.side_order:
         emoji = style.side_emoji(state.side_of(team))
-        name = state.captains.get(team, "-")
-        if not final and team == state.acting_team:
+        captain = _captain_line(state, team)
+        name = captain.name if captain else "-"
+        if not final and team == state.acting_team and captain is not None:
+            # Bebot's "@Pike ban a hero!". Board mentions never ping, but they stand out.
             timer = "" if state.on_hold else style.countdown(state.deadline_at)
-            rows.append(f"{emoji} **{name}** {state.step_action} a hero!{timer}")
+            mention = player_mention(captain.discord_user_id)
+            rows.append(f"{emoji} {mention} {state.step_action} a hero!{timer}")
         else:
             rows.append(f"{emoji} {name}")
     return rows
@@ -353,6 +373,8 @@ def draft_summary(state: BoardState, *, final: bool) -> str:
 def _champion_draft(state: BoardState, box: Container[Any]) -> None:
     box.add_item(TextDisplay(draft_summary(state, final=False)))
     box.add_item(TextDisplay(style.timeline_block(state.champion_steps, state.champion_step)))
+    if state.is_scrim:
+        return  # Bebot's board alone: a scrim has no ratings to show.
     # Our extras: each team's rating, and where the draft is up to.
     ratings = "\n".join(
         f"-# {_team_heading(state, team, _team(state, team))}"
@@ -556,6 +578,77 @@ def _finished(state: BoardState, box: Container[Any]) -> None:
         box.add_item(TextDisplay(f"No rating changes.{_closing(state)}"))
 
 
+def _captain_claim(state: BoardState, box: Container[Any]) -> None:
+    """Bebot's /startdraft: two Become Captain buttons. The Hidden King bans and picks first."""
+    lines = ["Captains: claim a side."]
+    for side, team in (("hk", "A"), ("am", "B")):
+        captain = _captain_line(state, team)
+        lines.append(
+            f"{style.side_emoji(side)} {style.side_name(side)}: {captain.name if captain else '-'}"
+        )
+    box.add_item(TextDisplay("\n".join(lines)))
+    box.add_item(
+        ActionRow(
+            *(
+                RouteButton(
+                    "claim_captain",
+                    state.match_id,
+                    side,
+                    label=f"Become {style.side_name(side)} Captain",
+                    style=button_style,
+                    disabled=_captain_line(state, team) is not None,
+                    emoji=discord.PartialEmoji(name=style.side_emoji(side)),
+                )
+                for side, team, button_style in (
+                    ("hk", "A", ButtonStyle.danger),
+                    ("am", "B", ButtonStyle.primary),
+                )
+            )
+        )
+    )
+
+
+def _ready_to_draft(state: BoardState, box: Container[Any]) -> None:
+    """Bebot's "Captain Coinflip - Complete", with the Start Draft button."""
+    winner = state.coinflip_winner
+    loser = "B" if winner == "A" else "A"
+    first_side = state.side_of(state.champion_first_pick)
+    lines = [
+        f"### {style.COIN_EMOJI} Captain Coinflip - Complete",
+        f"**{state.captains.get(winner, '-')}** chose: "
+        f"{COINFLIP_LABELS[state.coinflip_winner_choice]}",
+        f"**{state.captains.get(loser, '-')}** chose: "
+        f"{COINFLIP_LABELS[state.coinflip_loser_choice]}",
+        "",
+        *(
+            f"{style.side_emoji(state.side_of(team))} {style.side_name(state.side_of(team))}: "
+            f"{state.captains.get(team, '-')}"
+            for team in state.side_order
+        ),
+        f"{style.side_name(first_side)} bans and picks first. Ready to start the draft!",
+    ]
+    box.add_item(TextDisplay("\n".join(lines)))
+    box.add_item(
+        ActionRow(
+            RouteButton(
+                "start_draft", state.match_id, label="Start Draft", style=ButtonStyle.success
+            )
+        )
+    )
+
+
+def _drafted(state: BoardState, box: Container[Any]) -> None:
+    """A scrim's end: Bebot's finished draft, a GIF and GLHF."""
+    box.add_item(TextDisplay(draft_summary(state, final=True)))
+    if state.gif_url:
+        box.add_item(MediaGallery(discord.MediaGalleryItem(state.gif_url)))
+    box.add_item(TextDisplay("# GLHF"))
+
+
+def _stopped(state: BoardState, box: Container[Any]) -> None:
+    box.add_item(TextDisplay("Draft stopped."))
+
+
 _SECTIONS = {
     Status.READY_CHECK: _ready,
     Status.CAPTAIN_PHASE: _captain_vote,
@@ -568,16 +661,23 @@ _SECTIONS = {
     Status.DISPUTED: _disputed,
     Status.COMPLETED: _finished,
     Status.VOIDED: _finished,
+    Status.CAPTAIN_CLAIM: _captain_claim,
+    Status.READY_TO_DRAFT: _ready_to_draft,
+    Status.DRAFTED: _drafted,
 }
 
 
 def _accent(state: BoardState) -> int:
     if state.on_hold:
         return ACCENT_ATTENTION
-    if state.status == Status.COINFLIP:
+    if state.status in {Status.COINFLIP, Status.READY_TO_DRAFT}:
         return style.COINFLIP_COLOUR
+    if state.status == Status.CAPTAIN_CLAIM:
+        return style.HK_COLOUR
     if state.status == Status.CHAMPION_DRAFT and state.acting_team:
         return style.side_colour(state.side_of(state.acting_team))
+    if state.status == Status.DRAFTED and state.champion_steps:
+        return style.side_colour(state.champion_steps[-1][1])  # Bebot: the last side's colour.
     if state.status == Status.COMPLETED:
         return ACCENT_DONE
     if state.status == Status.VOIDED:
@@ -642,9 +742,14 @@ def _strip_buttons(box: Container[Any], start: int) -> None:
 
 def render_board(state: BoardState) -> LayoutView:
     box: Container[Any] = Container(accent_colour=_accent(state))
-    box.add_item(TextDisplay(_header(state)))
+    header = _header(state)
+    if header:
+        box.add_item(TextDisplay(header))
     start = len(box.children)
-    _SECTIONS[state.status](state, box)
+    if state.is_scrim and state.status == Status.VOIDED:
+        _stopped(state, box)
+    else:
+        _SECTIONS[state.status](state, box)
     # A result can still come in while a sub is on the way: the game may have ended anyway.
     if state.on_hold and state.status != Status.IN_PROGRESS:
         _strip_buttons(box, start)
