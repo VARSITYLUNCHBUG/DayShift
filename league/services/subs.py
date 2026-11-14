@@ -5,13 +5,18 @@ can ask for a teammate, which needs the other captain to agree. From the request
 settled the match is on hold: its timer is parked and every action waits.
 
 Sub in fills the slot. Whoever opened it can name someone, who has to accept. If they don't name
-anyone in time, or the person they named says no, the slot is offered down the queue in order.
-Unfilled by the deadline, the match is cancelled with no rating change.
+anyone in time, or the person they named says no, the slot is offered in order: first to whoever
+has been in the Waiting Room longest (the priority list, leaving out anyone who has stepped out),
+then down the queue. Unfilled by the deadline, the match is cancelled with no rating change.
+
+A missed ready check opens spots the same way, with nobody to name a sub: they're offered
+straight away, and a lobby still short after `ready_check.refill_seconds` is cancelled.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -25,13 +30,14 @@ from league.models import (
     Match,
     MatchParticipant,
     Player,
+    PrioEntry,
     QueueEntry,
     SubOffer,
     SubRequest,
 )
 from league.models.matches import Source
 from league.models.moderation import PenaltyKind
-from league.models.subs import UNRESOLVED, OfferSource, OfferStatus, SubStatus
+from league.models.subs import UNRESOLVED, OfferSource, OfferStatus, SubReason, SubStatus
 from league.services import lobby, penalties
 from league.services.common import (
     active_participants,
@@ -208,6 +214,7 @@ def answer_sub_out(request_id: int, player: Player, approve: bool) -> None:
         _open(match, mode_of(match), request)
         return
     _resolve(request, SubStatus.REJECTED)
+    assert request.requested_by is not None  # Only a captain's request needs approving.
     _ping(
         match,
         [request.requested_by.discord_user_id],
@@ -226,6 +233,7 @@ def _open(match: Match, mode: DraftMode, request: SubRequest) -> None:
     request.save(update_fields=["status", "opened_at", "deadline_at", "name_until"])
     _hold(match)
     stamp = int(request.name_until.timestamp())
+    assert request.requested_by is not None  # Someone asked: this is a sub out.
     user_ids = {request.requested_by.discord_user_id, request.leaving.discord_user_id}
     user_ids.update(c.player.discord_user_id for c in _captains(match))
     _ping(
@@ -288,6 +296,8 @@ def _check_eligible(match: Match, request: SubRequest, player: Player) -> None:
         raise InvalidAction(f"{player.display_name} is on a queue cooldown.")
     if request.offers.filter(player=player).exists():
         raise InvalidAction(f"{player.display_name} has already been asked for this spot.")
+    if SubOffer.objects.filter(player=player, status=OfferStatus.PENDING).exists():
+        raise InvalidAction(f"{player.display_name} has already been offered a spot.")
 
 
 @transaction.atomic
@@ -357,20 +367,57 @@ def _make_offer(
     return offer
 
 
+def _candidates(match: Match) -> Iterator[tuple[Player, str]]:
+    """Who to ask, in order: the priority list (longest in the Waiting Room first, leaving out
+    anyone who has stepped out), then the queue. Lazily, so only those needed get looked up."""
+    waiting = PrioEntry.objects.filter(community=match.community, grace_until__isnull=True)
+    for entry in waiting.order_by("queued_at", "id"):
+        yield get_or_create_player(entry.discord_user_id, entry.display_name), OfferSource.PRIO
+    for queued in QueueEntry.objects.filter(community=match.community).select_related("player"):
+        yield queued.player, OfferSource.QUEUE
+
+
 def _offer_next(match: Match, request: SubRequest) -> bool:
-    """Offer the slot to the first person in the queue who hasn't been asked. False if nobody."""
+    """Offer the slot to the first free person who hasn't been asked for it. False if nobody."""
     asked = set(request.offers.values_list("player_id", flat=True))
-    entries = QueueEntry.objects.filter(community=match.community).select_related("player")
-    for entry in entries:
-        if entry.player_id in asked:
+    for player, source in _candidates(match):
+        if player.pk in asked:
             continue
         try:
-            _check_eligible(match, request, entry.player)
+            _check_eligible(match, request, player)
         except InvalidAction:
             continue
-        _make_offer(match, request, entry.player, OfferSource.QUEUE)
+        _make_offer(match, request, player, source)
         return True
     return False
+
+
+def open_missed_ready(match: Match, mode: DraftMode, missed: list[Player]) -> None:
+    """The ready check closed short. Each missing spot is offered straight away; the lobby waits
+    for them, and is cancelled if they aren't all filled in time. Called under the match lock."""
+    moment = now()
+    deadline = moment + timedelta(seconds=mode.ready_check.refill_seconds)
+    for player in missed:
+        request = SubRequest.objects.create(
+            match=match,
+            leaving=player,
+            requested_by=None,
+            reason=SubReason.MISSED_READY,
+            status=SubStatus.OPEN,
+            deadline_at=deadline,
+            created_at=moment,
+            opened_at=moment,
+        )
+        _offer_next(match, request)
+    _hold(match)
+    names = ", ".join(f"**{player.display_name}**" for player in missed)
+    _ping(
+        match,
+        [],
+        f"{names} missed the ready check. Their spots are offered to the priority list, then the "
+        f"queue. The lobby is cancelled <t:{int(deadline.timestamp())}:R> if they aren't filled.",
+    )
+    render_board(match)
 
 
 @transaction.atomic
@@ -396,6 +443,15 @@ def answer_offer(offer_id: int, player: Player, accept: bool) -> None:
 
 
 def _fill(match: Match, request: SubRequest, in_player: Player) -> None:
+    if request.reason == SubReason.MISSED_READY:
+        request.filled_by = in_player
+        _resolve(request, SubStatus.FILLED)
+        _withdraw_offers(request)
+        lobby.add_player(match, in_player)
+        _ping(match, [in_player.discord_user_id], "you're in. Welcome to the lobby.")
+        _release_if_clear(match)
+        logger.info("Ready check spot filled", extra={"match": match.pk, "request": request.pk})
+        return
     leaving = match.participants.select_related("player").get(
         player_id=request.leaving_id, is_active=True
     )
@@ -422,6 +478,8 @@ def _offence(match: Match, request: SubRequest) -> str:
     """What leaving costs. Once the game is on it's leaving a game. Taking yourself out after the
     ready check but before the game is a dodge. During the ready check, or when a captain asked
     for it, nothing."""
+    if request.reason == SubReason.MISSED_READY:
+        return ""  # Already penalised for missing it.
     if _game_on(match):
         return PenaltyKind.LEAVER
     if request.is_self and match.status != Status.READY_CHECK:
@@ -460,10 +518,13 @@ def _after_offer(match: Match, request: SubRequest, why: str) -> None:
             request.name_until = None
             request.save(update_fields=["name_until"])
         if _offer_next(match, request):
-            why += " Asking the next person in the queue."
+            why += " Asking the next person."
         else:
-            why += " Nobody in the queue can take it yet. You can still name someone."
-        _ping(match, [request.requested_by.discord_user_id], why)
+            why += " Nobody can take it yet."
+            if request.reason == SubReason.SUB_OUT:
+                why += " You can still name someone."
+        if request.requested_by is not None:
+            _ping(match, [request.requested_by.discord_user_id], why)
     bump(match)
     render_board(match)
 
@@ -472,12 +533,19 @@ def _close_offer(offer: SubOffer, status: str) -> None:
     offer.status = status
     offer.resolved_at = now()
     offer.save(update_fields=["status", "resolved_at"])
+    close_offer_notice(offer)
+
+
+def close_offer_notice(offer: SubOffer) -> None:
+    """The offer's mention goes once it's answered or over. The effect runs in the match's lane
+    after the one that posted it, so it reads the notice's ID then."""
+    match = Match.objects.select_related("community").get(pk=offer.request.match_id)
+    add_effect(match.community, "close_sub_offer", {"offer_id": offer.pk}, match=match)
 
 
 def _withdraw_offers(request: SubRequest) -> None:
-    request.offers.filter(status=OfferStatus.PENDING).update(
-        status=OfferStatus.WITHDRAWN, resolved_at=now()
-    )
+    for offer in request.offers.filter(status=OfferStatus.PENDING):
+        _close_offer(offer, OfferStatus.WITHDRAWN)
 
 
 def _resolve(request: SubRequest, status: str) -> None:
@@ -538,7 +606,7 @@ def _expire_request(request_id: int, moment: datetime) -> bool:
         match, request = _lock_request(request_id)
         if request.status not in UNRESOLVED or request.deadline_at > moment:
             return False
-        if request.status == SubStatus.AWAITING_APPROVAL:
+        if request.status == SubStatus.AWAITING_APPROVAL and request.requested_by is not None:
             _resolve(request, SubStatus.REJECTED)
             _ping(
                 match,
@@ -557,12 +625,14 @@ def _expire_request(request_id: int, moment: datetime) -> bool:
             match.sub_requests.filter(status__in=UNRESOLVED).values_list("leaving_id", flat=True)
         )
         leaving.add(request.leaving_id)
+        reason = (
+            "Not enough players for the ready check"
+            if request.reason == SubReason.MISSED_READY
+            else f"No sub was found for {request.leaving.display_name}"
+        )
+        # Everyone still in goes back to the queue at their original place: the front.
         lobby.void_live(
-            match,
-            source=Source.TIMEOUT,
-            reason=f"No sub was found for {request.leaving.display_name}",
-            requeue=True,
-            skip_requeue=leaving,
+            match, source=Source.TIMEOUT, reason=reason, requeue=True, skip_requeue=leaving
         )
         return True
 
@@ -658,6 +728,9 @@ class OfferInfo:
     source: str
     invited_by: str
     deadline_at: datetime
+    missed_ready: bool = False
+    notice_channel_id: int | None = None
+    notice_message_id: int | None = None
 
 
 def offer_info(offer_id: int) -> OfferInfo:
@@ -679,4 +752,20 @@ def offer_info(offer_id: int) -> OfferInfo:
         source=offer.source,
         invited_by=offer.invited_by.display_name if offer.invited_by else "",
         deadline_at=offer.deadline_at,
+        missed_ready=request.reason == SubReason.MISSED_READY,
+        notice_channel_id=offer.notice_channel_id,
+        notice_message_id=offer.notice_message_id,
+    )
+
+
+def offer_notice_channel(offer_id: int) -> int | None:
+    """Where an offer's mention goes: the priority list's channel, else the queue's."""
+    offer = SubOffer.objects.select_related("request__match__community").get(pk=offer_id)
+    community = offer.request.match.community
+    return community.prio_channel_id or community.queue_channel_id
+
+
+def record_offer_notice(offer_id: int, channel_id: int | None, message_id: int | None) -> None:
+    SubOffer.objects.filter(pk=offer_id).update(
+        notice_channel_id=channel_id, notice_message_id=message_id
     )

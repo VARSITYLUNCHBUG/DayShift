@@ -93,7 +93,9 @@ class SubLine:
     name_until: datetime | None = None
     offer_name: str = ""
     offer_from_queue: bool = False
+    offer_from_prio: bool = False
     offer_deadline_at: datetime | None = None
+    reason: str = "sub_out"
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,13 +420,15 @@ def _sub_lines(match: Match) -> list[SubLine]:
                 status=row.status,
                 leaving_name=row.leaving.display_name,
                 team=teams.get(row.leaving_id, ""),
-                requested_by_name=row.requested_by.display_name,
+                requested_by_name=row.requested_by.display_name if row.requested_by else "",
                 is_self=row.is_self,
                 deadline_at=row.deadline_at,
                 name_until=row.name_until,
                 offer_name=offer.player.display_name if offer else "",
                 offer_from_queue=bool(offer and offer.source == OfferSource.QUEUE),
+                offer_from_prio=bool(offer and offer.source == OfferSource.PRIO),
                 offer_deadline_at=offer.deadline_at if offer else None,
+                reason=row.reason,
             )
         )
     return lines

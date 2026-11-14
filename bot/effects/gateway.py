@@ -59,8 +59,9 @@ class Gateway(Protocol):
         *,
         file: tuple[str, bytes] | None = None,
         ping_role_ids: Iterable[int] = (),
+        ping_user_ids: Iterable[int] = (),
     ) -> int:
-        """Post a view. Its mentions never ping, except the roles in `ping_role_ids`."""
+        """Post a view. Its mentions never ping, except the roles and members named here."""
         ...
 
     async def edit_view(self, channel_id: int, message_id: int, view: Any) -> None: ...
@@ -265,12 +266,14 @@ class DiscordGateway:
         *,
         file: tuple[str, bytes] | None = None,
         ping_role_ids: Iterable[int] = (),
+        ping_user_ids: Iterable[int] = (),
     ) -> int:
         channel = await self._messageable(channel_id)
         roles = [discord.Object(id=role_id) for role_id in ping_role_ids]
+        users = [discord.Object(id=user_id) for user_id in ping_user_ids]
         allowed = (
-            discord.AllowedMentions(everyone=False, users=False, roles=roles)
-            if roles
+            discord.AllowedMentions(everyone=False, users=users or False, roles=roles or False)
+            if roles or users
             else discord.AllowedMentions.none()
         )
         kwargs: dict[str, Any] = {"view": view, "allowed_mentions": allowed}

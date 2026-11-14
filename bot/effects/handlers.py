@@ -17,6 +17,7 @@ from bot.renderers.board import (
     render_pickers,
     render_ready_dm,
     render_sub_offer_dm,
+    render_sub_offer_notice,
     render_voice_dm,
 )
 from bot.renderers.prio import render_prio
@@ -243,14 +244,38 @@ def _needs_ready(match_id: int, user_id: int) -> bool:
 
 @effect("sub_offer")
 async def sub_offer(env: Env) -> None:
-    """DM the offer of an open spot. If they can't be reached, the next person gets asked."""
+    """Offer an open spot: a DM, and a mention with the same buttons in the priority list's
+    channel (or the queue's). Only if neither reaches them is the next person asked."""
     offer_id = int(env.effect.payload["offer_id"])
     info = await db(subs.offer_info, offer_id)
     if not info.pending:
         raise Skip("The offer has closed.")
     team = await db(_team_label, env.match_id, info.team)
-    if not await env.gateway.send_dm(info.discord_user_id, render_sub_offer_dm(info, team)):
+    reached = await env.gateway.send_dm(info.discord_user_id, render_sub_offer_dm(info, team))
+    channel_id = await db(subs.offer_notice_channel, offer_id)
+    if channel_id is not None and info.notice_message_id is None:
+        try:
+            message_id = await env.gateway.send_view(
+                channel_id,
+                render_sub_offer_notice(info, team),
+                ping_user_ids=[info.discord_user_id],
+            )
+            await db(subs.record_offer_notice, offer_id, channel_id, message_id)
+            reached = True
+        except ChannelGone:
+            logger.info("Offer channel is gone", extra={"offer": offer_id})
+    if not reached:
         await db(subs.fail_offer, offer_id)
+
+
+@effect("close_sub_offer")
+async def close_sub_offer(env: Env) -> None:
+    info = await db(subs.offer_info, int(env.effect.payload["offer_id"]))
+    if info.notice_channel_id is None or info.notice_message_id is None:
+        raise Skip("No mention was posted.")
+    with contextlib.suppress(ChannelGone):
+        await env.gateway.delete_message(info.notice_channel_id, info.notice_message_id)
+    await db(subs.record_offer_notice, info.offer_id, None, None)
 
 
 def _team_label(match_id: int, team: str) -> str:

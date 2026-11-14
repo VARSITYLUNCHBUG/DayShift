@@ -26,7 +26,8 @@ class Provenance(_Strict):
 
 class ReadyCheck(_Strict):
     seconds: Seconds = 180
-    backfill: Literal["next_in_queue"] = "next_in_queue"
+    # Spots left by players who missed it are offered for this long, then the lobby is cancelled.
+    refill_seconds: Seconds = 120
 
 
 class Captains(_Strict):
@@ -86,7 +87,7 @@ class Subs(_Strict):
     approve_seconds: Seconds = 60  # The other captain's window to agree to a captain's request.
     name_seconds: Seconds = 45  # How long whoever opened the slot has to name a sub.
     invite_seconds: Seconds = 60  # How long a named sub has to accept.
-    offer_seconds: Seconds = 30  # How long each queue player has to accept, in queue order.
+    offer_seconds: Seconds = 60  # How long each person offered a spot has to accept.
     max_wait_seconds: Seconds = 180  # Unfilled by then, the match is cancelled.
 
 

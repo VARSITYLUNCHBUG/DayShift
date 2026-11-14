@@ -268,7 +268,7 @@ def test_editing_a_mode_makes_a_new_version(league: Community) -> None:
 
 def test_live_match_keeps_pinned_mode_after_activation(popped: Match) -> None:
     body = dict(popped.mode_version.body)
-    body["ready_check"] = {"seconds": 60, "backfill": "next_in_queue"}
+    body["ready_check"] = {"seconds": 60, "refill_seconds": 120}
     new = modes.publish(body)
     modes.activate(popped.community_id, new.pk)
     match = fresh(popped)

@@ -101,7 +101,13 @@ def test_a_ready_check_replacement_comes_off(room: Community, clock: Clock) -> N
     for participant in match.participants.exclude(player=players[0]):
         lobby.mark_ready(match.pk, participant.player)
     clock.advance(3600)
-    deadlines.tick()  # players[0] missed the ready check; the spare takes the place.
+    deadlines.tick()  # players[0] missed the ready check; the spare is offered the place.
+    from league.models import SubOffer
+    from league.services import subs
+
+    offer = SubOffer.objects.get(player=spare)
+    assert offer.source == "prio"  # In the Waiting Room, so asked before the queue.
+    subs.answer_offer(offer.pk, spare, True)
     assert match.participants.filter(player=spare, is_active=True).exists()
     assert _names(room) == []
 

@@ -147,7 +147,10 @@ def mark_ready(match_id: int, player: Player) -> None:
 
 
 def on_ready_timeout(match: Match) -> None:
-    """Replace everyone who missed it from the queue, or cancel if the queue can't cover them."""
+    """Take out everyone who missed it, and offer their spots: the priority list first, then the
+    queue. The lobby waits for them; unfilled after `refill_seconds`, it's cancelled."""
+    from league.services import subs
+
     community = lock_community(match.community_id)
     mode = mode_of(match)
     missed = list(active_participants(match).filter(ready_at__isnull=True))
@@ -156,9 +159,6 @@ def on_ready_timeout(match: Match) -> None:
         return
 
     moment = now()
-    replacements = list(
-        QueueEntry.objects.filter(community=community).select_related("player")[: len(missed)]
-    )
     for participant in missed:
         participant.is_active = False
         participant.removed_reason = RemovedReason.MISSED_READY
@@ -172,10 +172,6 @@ def on_ready_timeout(match: Match) -> None:
             reason=f"Missed the ready check for match #{match.pk}",
         )
 
-    if len(replacements) < len(missed):
-        void_live(match, source=Source.TIMEOUT, reason="Not enough players ready", requeue=True)
-        return
-
     for participant in missed:
         add_effect(
             community,
@@ -183,25 +179,26 @@ def on_ready_timeout(match: Match) -> None:
             {"discord_user_id": participant.player.discord_user_id},
             match=match,
         )
-    for entry in replacements:
-        MatchParticipant.objects.create(
-            match=match, player=entry.player, queue_joined_at=entry.joined_at
-        )
-        add_effect(
-            community,
-            "grant_access",
-            {"discord_user_id": entry.player.discord_user_id},
-            match=match,
-        )
-        _gather(match, entry.player)
-    QueueEntry.objects.filter(pk__in=[entry.pk for entry in replacements]).delete()
-    _matched(community, [entry.player for entry in replacements])
-    if missed:
-        _unmatched(community)
+    _unmatched(community)
+    subs.open_missed_ready(match, mode, [participant.player for participant in missed])
+    render_queue(community)
 
-    match.deadline_at = seconds_from_now(mode.ready_check.seconds)
-    bump(match, "deadline_at")
-    render_board(match)
+
+def add_player(match: Match, player: Player) -> None:
+    """Someone accepted an open spot in the ready check: they're in, and ready. The caller holds
+    the match lock and has checked they're free."""
+    community = lock_community(match.community_id)
+    entry = QueueEntry.objects.filter(community=community, player=player).first()
+    MatchParticipant.objects.create(
+        match=match,
+        player=player,
+        queue_joined_at=entry.joined_at if entry else now(),
+        ready_at=now(),  # Accepting means they're here.
+    )
+    QueueEntry.objects.filter(community=community, player=player).delete()
+    add_effect(community, "grant_access", {"discord_user_id": player.discord_user_id}, match=match)
+    _gather(match, player)
+    _matched(community, [player])
     render_queue(community)
 
 

@@ -645,6 +645,7 @@ class FakeGateway:
     staff_seen: dict[int, list[int]] = field(default_factory=dict)  # Staff roles per channel.
     role_pings: list[list[int]] = field(default_factory=list)
     view_pings: dict[int, list[int]] = field(default_factory=dict)  # Roles a view pinged.
+    view_user_pings: dict[int, list[int]] = field(default_factory=dict)
     closed_dms: set[int] = field(default_factory=set)
     next_id: int = 500_000
     fail_next: dict[str, Exception] = field(default_factory=dict)
@@ -707,7 +708,9 @@ class FakeGateway:
         self.dms.append((user_id, view))
         return True
 
-    async def send_view(self, channel_id, view, *, file=None, ping_role_ids=()) -> int:
+    async def send_view(
+        self, channel_id, view, *, file=None, ping_role_ids=(), ping_user_ids=()
+    ) -> int:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
         self._maybe_fail("send_view")
@@ -715,6 +718,7 @@ class FakeGateway:
         self.views[message_id] = view
         self.posted_files.append((channel_id, file))
         self.view_pings[message_id] = list(ping_role_ids)
+        self.view_user_pings[message_id] = list(ping_user_ids)
         self.messages.setdefault(channel_id, []).append(message_id)
         return message_id
 
@@ -1605,7 +1609,8 @@ def test_sub_offer_dm_says_who_asked_and_has_both_answers() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_sub_offer_is_dmd_and_closed_dms_move_down_the_queue(wired: Community) -> None:
+def test_an_offer_nobody_can_reach_moves_down_the_queue(wired: Community) -> None:
+    """Closed DMs and no channel to mention them in: the next person is asked."""
     from league.models import SubOffer
     from league.models.subs import OfferStatus
     from league.services import subs
@@ -1619,6 +1624,7 @@ def test_sub_offer_is_dmd_and_closed_dms_move_down_the_queue(wired: Community) -
         queue.join(wired.pk, player)
     drain(gateway)
     match = Match.objects.get()
+    community.save_wiring(wired.pk, queue_channel_id=None)
     request = subs.request_sub_out(match.pk, players[3], players[3].pk)
     gateway.closed_dms.add(waiting[0].discord_user_id)
     subs.offer_to_queue(request.pk, players[3])
@@ -1696,6 +1702,32 @@ def test_match_channels_let_in_the_roles_that_look_after_matches(wired: Communit
     match = Match.objects.get()
     assert gateway.staff_seen[resource(match, ResourceKind.TEXT)] == [71, 72]
     assert gateway.staff_seen[resource(match, ResourceKind.LOBBY_VOICE)] == [71, 72]
+
+
+def test_an_offer_is_a_dm_and_a_mention_that_goes_once_answered(wired: Community) -> None:
+    from league.models import SubOffer
+    from league.services import subs
+
+    players = [make_player(n) for n in range(1, 13)]
+    gateway = FakeGateway()
+    for player in players:
+        queue.join(wired.pk, player)
+    spare = make_player(13)
+    queue.join(wired.pk, spare)
+    drain(gateway)
+    match = Match.objects.get()
+    request = subs.request_sub_out(match.pk, players[3], players[3].pk)
+    subs.offer_to_queue(request.pk, players[3])
+    drain(gateway)
+    offer = SubOffer.objects.get(player=spare)
+    assert offer.notice_channel_id == QUEUE_CHANNEL  # No priority list here: the queue's.
+    assert gateway.view_user_pings[offer.notice_message_id] == [spare.discord_user_id]
+    assert offer.notice_message_id in gateway.messages[QUEUE_CHANNEL]
+    notice = str(gateway.views[offer.notice_message_id].to_components())
+    assert f"<@{spare.discord_user_id}>" in notice and "sub_accept" in notice
+    subs.answer_offer(offer.pk, spare, True)
+    drain(gateway)
+    assert offer.notice_message_id not in gateway.messages[QUEUE_CHANNEL]
 
 
 def test_a_queued_player_offered_a_sub_spot_can_take_it(wired: Community) -> None:

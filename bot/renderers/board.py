@@ -717,7 +717,13 @@ def _sub_text(state: BoardState, line: SubLine) -> str:
             f"The other captain can approve or refuse {_stamp(line.deadline_at)}."
         )
     if line.offer_name:
-        source = "next in the queue" if line.offer_from_queue else "invited"
+        source = (
+            "next in the queue"
+            if line.offer_from_queue
+            else "longest in the Waiting Room"
+            if line.offer_from_prio
+            else "invited"
+        )
         answer = f" {_stamp(line.offer_deadline_at)}" if line.offer_deadline_at else ""
         return f"🔁 {who} is subbing out. Waiting for **{line.offer_name}** ({source}){answer}."
     if line.name_until is not None:
@@ -727,8 +733,25 @@ def _sub_text(state: BoardState, line: SubLine) -> str:
     return f"🔁 {who} needs a sub. Nobody in the queue can take it yet, so name someone."
 
 
+def _missed_ready_text(lines: list[SubLine]) -> str:
+    """Every spot a missed ready check left, on one line: they're offered for the players to
+    accept, so there's nothing to click here, and it keeps the board under Discord's limit."""
+    waiting = [f"**{line.offer_name}**" for line in lines if line.offer_name]
+    spots = f"{len(lines)} spot{'' if len(lines) == 1 else 's'}"
+    asked = f" Waiting for {', '.join(waiting)}." if waiting else " Nobody can take them yet."
+    return (
+        f"🔁 {spots} open from the ready check, offered to the priority list, then the queue."
+        f"{asked} Cancelled {_stamp(lines[0].deadline_at)} if not filled."
+    )
+
+
 def _subs(state: BoardState, box: Container[Any]) -> None:
+    missed = [line for line in state.subs if line.reason == "missed_ready"]
+    if missed:
+        box.add_item(TextDisplay(_missed_ready_text(missed)))
     for line in state.subs:
+        if line.reason == "missed_ready":
+            continue
         box.add_item(TextDisplay(_sub_text(state, line)))
         box.add_item(ActionRow(*_sub_buttons(state, line)))
 
@@ -809,37 +832,53 @@ def render_voice_dm(
     return view
 
 
-def render_sub_offer_dm(info: OfferInfo, team_name: str) -> LayoutView:
-    """Asks someone outside the match to take an open spot."""
+def _offer_intro(info: OfferInfo, team_name: str) -> str:
     team = f" on **{team_name}**" if team_name else ""
     if info.invited_by:
-        intro = f"**{info.invited_by}** asked you to take **{info.leaving_name}**'s spot{team}."
-    else:
-        intro = f"A spot opened{team}, and you're next in the queue."
+        return f"**{info.invited_by}** asked you to take **{info.leaving_name}**'s spot{team}."
+    spot = "A spot opened in the ready check" if info.missed_ready else f"A spot opened{team}"
+    if info.source == "prio":
+        return f"{spot}, and you've waited longest in the Waiting Room."
+    return f"{spot}, and you're next in the queue."
+
+
+def _offer_buttons(info: OfferInfo) -> ActionRow[Any]:
+    return ActionRow(
+        RouteButton(
+            "sub_accept",
+            info.match_id,
+            info.offer_id,
+            label="I'll sub in",
+            style=ButtonStyle.success,
+        ),
+        RouteButton("sub_decline", info.match_id, info.offer_id, label="Can't right now"),
+    )
+
+
+def render_sub_offer_dm(info: OfferInfo, team_name: str) -> LayoutView:
+    """Asks someone outside the match to take an open spot."""
     phase = STATUS_TITLES.get(info.status, info.status)
     lines = [
-        f"## Can you sub in?\nMatch #{info.match_id} ({phase}). {intro}",
+        f"## Can you sub in?\nMatch #{info.match_id} ({phase}). {_offer_intro(info, team_name)}",
         f"Answer {_stamp(info.deadline_at)}.",
     ]
     if info.status == Status.IN_PROGRESS:
         lines.append("-# The game is already running. You take this team's result.")
     view = LayoutView(timeout=None)
     view.add_item(
-        Container(
-            TextDisplay("\n".join(lines)),
-            ActionRow(
-                RouteButton(
-                    "sub_accept",
-                    info.match_id,
-                    info.offer_id,
-                    label="I'll sub in",
-                    style=ButtonStyle.success,
-                ),
-                RouteButton("sub_decline", info.match_id, info.offer_id, label="Can't right now"),
-            ),
-            accent_colour=ACCENT_LIVE,
-        )
+        Container(TextDisplay("\n".join(lines)), _offer_buttons(info), accent_colour=ACCENT_LIVE)
     )
+    return view
+
+
+def render_sub_offer_notice(info: OfferInfo, team_name: str) -> LayoutView:
+    """The same offer as a mention in the priority list's channel, for anyone who misses DMs."""
+    text = (
+        f"{player_mention(info.discord_user_id)} {_offer_intro(info, team_name)} "
+        f"Match #{info.match_id}: answer {_stamp(info.deadline_at)}."
+    )
+    view = LayoutView(timeout=None)
+    view.add_item(Container(TextDisplay(text), _offer_buttons(info), accent_colour=ACCENT_LIVE))
     return view
 
 

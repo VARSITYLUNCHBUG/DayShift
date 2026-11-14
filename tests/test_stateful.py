@@ -19,7 +19,7 @@ from league.domain.draft_plan import build_plan, team_for_role
 from league.domain.engine import LIVE, Status, apply_coinflip
 from league.domain.errors import DomainError
 from league.models import DraftAction, Match, Player, QueueEntry
-from league.services import corrections, deadlines, draft, integrity, lobby, queue, results
+from league.services import corrections, deadlines, draft, integrity, lobby, queue, results, subs
 from league.services.common import captain_of, mode_of
 from tests.conftest import Clock, make_player
 from tests.helpers import (
@@ -165,6 +165,14 @@ class MatchMachine(RuleBasedStateMachine):
         if match.status == Status.AWAITING_CONFIRMATION:
             self._try(results.dispute, match.pk, captain_of(match, team).player, "No")
 
+    @rule(accept=sampled_from([True, True, False]))
+    def answer_offers(self, accept: bool) -> None:
+        """Whoever was offered an open spot answers, as a waiting player would."""
+        from league.models import SubOffer
+
+        for offer in SubOffer.objects.filter(request__match=self.match, status="pending"):
+            self._try(subs.answer_offer, offer.pk, offer.player, accept)
+
     @rule(outcome=sampled_from(["A", "B", "void"]))
     def staff_resolves(self, outcome: str) -> None:
         self._try(results.resolve_dispute, self.match.pk, outcome, None, "Staff")
@@ -235,7 +243,13 @@ class MatchMachine(RuleBasedStateMachine):
     @invariant()
     def live_match_always_has_a_way_forward(self) -> None:
         match = self._fresh()
-        if match.status in LIVE:
+        if match.status not in LIVE:
+            return
+        if match.held_seconds is not None:  # On hold: an open spot's own deadline stands in.
+            assert match.sub_requests.filter(
+                status__in=("approval", "open"), deadline_at__isnull=False
+            ).exists(), f"{match.status} is on hold with nothing to end it"
+        else:
             assert match.deadline_at is not None, f"{match.status} has no deadline: it could hang"
 
     @invariant()

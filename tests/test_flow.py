@@ -26,9 +26,11 @@ from league.models import (
     QueueEntry,
     RatingEvent,
     ResultSubmission,
+    SubOffer,
 )
 from league.models.alerts import StaffAlert
 from league.models.outbox import EffectStatus
+from league.models.subs import OfferStatus
 from league.services import (
     boards,
     champions,
@@ -39,8 +41,9 @@ from league.services import (
     queue,
     ratings,
     results,
+    subs,
 )
-from league.services.common import captain_of
+from league.services.common import captain_of, mode_of
 from tests.conftest import PRESETS, Clock, activate, make_player
 from tests.helpers import (
     acting_captain,
@@ -155,7 +158,7 @@ def test_stranger_cannot_ready(popped: Match) -> None:
         lobby.mark_ready(popped.pk, make_player(99))
 
 
-def test_ready_timeout_backfills_next_in_queue(
+def test_a_missed_ready_check_offers_the_spots_and_keeps_the_lobby(
     popped: Match, league: Community, players: list[Player], clock: Clock
 ) -> None:
     waiting = [make_player(50), make_player(51)]
@@ -168,15 +171,18 @@ def test_ready_timeout_backfills_next_in_queue(
     deadlines.tick()
 
     match = fresh(popped)
-    assert match.status == Status.READY_CHECK
-    active = set(match.participants.filter(is_active=True).values_list("player_id", flat=True))
-    assert waiting[0].pk in active
-    assert waiting[1].pk in active
-    assert players[10].pk not in active
-    assert match.participants.filter(is_active=True, ready_at__isnull=False).count() == 10
+    assert match.status == Status.READY_CHECK and match.held_seconds is not None
+    assert not match.participants.filter(player__in=players[10:], is_active=True).exists()
     assert Penalty.objects.filter(player=players[10], kind="missed_ready").exists()
-    # A fresh timer for the replacements.
-    assert (match.deadline_at - clock.now()).total_seconds() > 170
+    # One spot each, offered down the queue: one person is asked for one spot at a time.
+    offers = SubOffer.objects.filter(request__match=match, status=OfferStatus.PENDING)
+    assert sorted(offer.player_id for offer in offers) == sorted(p.pk for p in waiting)
+    for offer in offers:
+        subs.answer_offer(offer.pk, offer.player, True)
+    match = fresh(match)
+    assert match.status == Status.CAPTAIN_PHASE  # Full and ready: on to the vote.
+    assert match.participants.filter(is_active=True, ready_at__isnull=False).count() == 12
+    assert not QueueEntry.objects.filter(player__in=waiting).exists()
 
 
 def test_ready_timeout_without_replacements_voids_and_requeues(
@@ -185,6 +191,9 @@ def test_ready_timeout_without_replacements_voids_and_requeues(
     for player in players[:11]:
         lobby.mark_ready(popped.pk, player)
     clock.advance(181)
+    deadlines.tick()
+    assert fresh(popped).status == Status.READY_CHECK  # The spot is offered for 2 minutes.
+    clock.advance(mode_of(popped).ready_check.refill_seconds + 1)
     deadlines.tick()
 
     match = fresh(popped)

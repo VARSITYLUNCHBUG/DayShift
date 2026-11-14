@@ -237,9 +237,10 @@ def close_subs(match: Match) -> None:
     Leaves the timer to the caller, which is about to replace it with a transition.
     """
     moment = now()
-    SubOffer.objects.filter(request__match=match, status=OfferStatus.PENDING).update(
-        status=OfferStatus.WITHDRAWN, resolved_at=moment
-    )
+    pending = SubOffer.objects.filter(request__match=match, status=OfferStatus.PENDING)
+    for offer_id in pending.values_list("pk", flat=True):
+        add_effect(match.community, "close_sub_offer", {"offer_id": offer_id}, match=match)
+    pending.update(status=OfferStatus.WITHDRAWN, resolved_at=moment)
     match.sub_requests.filter(status__in=UNRESOLVED).update(
         status=SubStatus.CANCELLED, resolved_at=moment
     )

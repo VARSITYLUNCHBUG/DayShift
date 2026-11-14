@@ -11,7 +11,7 @@ provenance:
   source: "1win rulebook s6.5.5"
   night_shift_status: candidate_unconfirmed
 team_size: 6
-ready_check: { seconds: 180, backfill: next_in_queue }
+ready_check: { seconds: 180, refill_seconds: 120 }
 captains: { vote_seconds: 45, min_games: 5, max_strikes: 3 }
 player_draft: { order: FSSFFSSFFS, seconds: 45, on_timeout: auto_highest_rating }
 champion_draft:

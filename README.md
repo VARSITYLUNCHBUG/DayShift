@@ -56,7 +56,7 @@ The admin binds to localhost. Put a TLS reverse proxy in front of it before expo
 | Queue | Join and Leave buttons, FIFO. Voice isn't required | Blocked by a cooldown or a live match |
 | Pop at 12 | Creates a private text channel and lobby voice channel | Queue waits at `max_concurrent_matches` |
 | Gather | In the Waiting Room: moved. Anywhere else: DM with invite and Ready button. DMs closed: mention in the lobby channel | Joining the Waiting Room later moves them, until they've been in the match's voice once. After that, where they go is up to them |
-| Ready | Ready button on the board and in the DM | 180 s. A miss brings in the next in queue. No replacement: cancel and requeue |
+| Ready | Ready button on the board and in the DM | 180 s. A miss frees the spot, offered to the priority list, then the queue. Unfilled in 2 min: cancel, and everyone left goes back to the front of the queue |
 | Captain vote | Everyone votes for up to two captains, themselves included, from players with 5 completed matches. Most votes wins; rating breaks ties and fills any gap. Two or fewer eligible: no vote | 45 s, or closes early once everyone has voted |
 | Player draft | `FSSFFSSFFS`, lower-rated captain first. Last player is assigned | 45 s, then highest rated |
 | Team voice | Creates team channels and moves anyone in the lobby voice. Everyone else gets a DM invite | Never blocks the draft |
@@ -93,7 +93,7 @@ reported. There are two separate flows:
 | Sub out, yourself | Opens the slot straight away | The match pauses until the slot is filled |
 | Sub out, a teammate | A captain asks for one of their own players or an undrafted one. Not another captain | The other captain approves within 60 s, or the player stays |
 | Sub in, named | The leaving player or their captain picks someone, who gets a DM to accept | 45 s to name someone, 60 s for them to accept |
-| Sub in, queue | If nobody is named, or the named person says no, the queue is asked in order | 30 s each, and the queue is retried as people join |
+| Sub in, offered | If nobody is named, or the named person says no, the spot is offered: first to whoever has waited longest in the Waiting Room, then down the queue | 60 s each, and it's retried as people join |
 
 While any request is pending, the timer is parked and the board hides the phase's buttons (except
 the result buttons once the game is on). The sub takes the leaving player's team, captaincy,
@@ -102,6 +102,20 @@ lobby-host role and result. The timer resumes where it stopped, with at least 15
 player goes back into the queue. Subbing yourself out after the ready check is a dodge, and once the
 game is on it's a leaver; cancelling the request costs nothing. See Captains and dodge strikes. At most 4 requests can be pending at once. All of these timers
 live in the draft mode's `subs` section.
+
+### Filling an opening
+
+The queue is the way into matches; being in the Waiting Room never stops anyone playing. The
+priority list only decides who gets an opening first. An opening (a missed ready check, a sub out
+nobody named, or a restart) is offered to whoever has been in the Waiting Room longest, isn't in a
+match and hasn't stepped out, then to the head of the queue. Each offer is a DM and a mention in
+the priority list's channel (or the queue's) with **I'll sub in** and **Can't right now**, for
+60 s, then the next person. Each person is offered one spot at a time.
+
+A missed ready check keeps the lobby: the players who missed it are taken out (with their usual
+missed-ready cooldown), their spots are offered for 2 minutes (`ready_check.refill_seconds`), and
+once they're filled the captain vote starts. If they aren't, the lobby is cancelled and everyone
+still in it goes back to the front of the queue.
 
 ## The match channel
 

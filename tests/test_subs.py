@@ -506,3 +506,72 @@ def test_downtime_extends_sub_deadlines(popped: Match, players: list[Player], cl
     deadlines.tick()
     request.refresh_from_db()
     assert request.status == SubStatus.OPEN
+
+
+# --- Openings go to the priority list first ------------------------------------------------------
+
+
+def _waiting_room(
+    community: Community, people: list[Player], *, grace: Player | None = None
+) -> None:
+    """Put them on the priority list in this order, as if they'd joined the Waiting Room."""
+    from datetime import timedelta
+
+    from league.models import PrioEntry
+    from league.services.common import now
+
+    start = now() - timedelta(minutes=30)
+    for index, player in enumerate(people):
+        PrioEntry.objects.create(
+            community=community,
+            discord_user_id=player.discord_user_id,
+            display_name=player.display_name,
+            queued_at=start + timedelta(minutes=index),
+            grace_until=now() + timedelta(minutes=5) if player == grace else None,
+        )
+
+
+def test_an_opening_goes_to_the_priority_list_before_the_queue(
+    popped: Match, players: list[Player], league: Community
+) -> None:
+    stepped_out, longest, second = make_player(70), make_player(71), make_player(72)
+    _waiting_room(league, [stepped_out, players[0], longest, second], grace=stepped_out)
+    queued = queue_up(league, range(80, 81))[0]
+    match = in_draft(popped)
+    leaving = non_captain(match)
+    request = self_sub(match, leaving)
+    subs.offer_to_queue(request.pk, leaving)
+    # Not the one who stepped out, nor someone already in this match: the longest wait.
+    offer = SubOffer.objects.get(request=request, status=OfferStatus.PENDING)
+    assert offer.player == longest and offer.source == OfferSource.PRIO
+    subs.answer_offer(offer.pk, longest, False)
+    assert SubOffer.objects.get(request=request, status=OfferStatus.PENDING).player == second
+    subs.answer_offer(SubOffer.objects.get(player=second).pk, second, False)
+    offer = SubOffer.objects.get(request=request, status=OfferStatus.PENDING)
+    assert offer.player == queued and offer.source == OfferSource.QUEUE
+
+
+def test_each_person_is_offered_one_spot_at_a_time(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    only = queue_up(league, range(80, 81))[0]
+    for player in players[:10]:
+        lobby.mark_ready(popped.pk, player)
+    clock.advance(181)
+    deadlines.tick()
+    pending = SubOffer.objects.filter(request__match=popped, status=OfferStatus.PENDING)
+    assert [offer.player for offer in pending] == [only]  # The second spot waits for someone.
+    assert SubRequest.objects.filter(match=popped, status=SubStatus.OPEN).count() == 2
+
+
+def test_a_ready_check_spot_is_never_penalised_twice(
+    popped: Match, players: list[Player], league: Community, clock: Clock
+) -> None:
+    for player in players[:11]:
+        lobby.mark_ready(popped.pk, player)
+    clock.advance(181)
+    deadlines.tick()
+    clock.advance(mode_of(popped).ready_check.refill_seconds + 1)
+    deadlines.tick()
+    assert fresh(popped).status == Status.VOIDED
+    assert Penalty.objects.filter(player=players[11]).count() == 1  # For missing it, only.
