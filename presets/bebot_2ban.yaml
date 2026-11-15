@@ -1,11 +1,11 @@
-# The default mode, carried over from Bebot (simpleDraft). Every mode runs the same flow: players
-# vote for captains, the captains draft players, then Bebot's captain coinflip settles the sides
+# Bebot's mode (simpleDraft), kept as an alternative to the default draft_3ban. It runs the same
+# flow as every mode: a captain vote, the player draft, then the captain coinflip settles the sides
 # and who bans and picks first ("first"). A timeout takes a random champion and captains can press
 # Random.
 # The hero order is Bebot's 16 steps (DCS Season 3's 2-ban order), at 40 s a turn.
 schema_version: 1
 slug: bebot_2ban
-name: "2-ban draft (Bebot flow)"
+name: "2-ban draft"
 provenance:
   source: "Bebot simpleDraft order"
   night_shift_status: not_night_shift

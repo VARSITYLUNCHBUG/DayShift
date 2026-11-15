@@ -16,7 +16,13 @@ from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, ru
 from hypothesis.strategies import integers, sampled_from
 
 from league.domain.draft_plan import build_plan, team_for_role
-from league.domain.engine import LIVE, Status, apply_coinflip
+from league.domain.engine import (
+    LIVE,
+    RANKED_COINFLIP_CHOICES,
+    Status,
+    apply_coinflip,
+    apply_ranked_coinflip,
+)
 from league.domain.errors import DomainError
 from league.models import DraftAction, Match, Player, QueueEntry
 from league.services import corrections, deadlines, draft, integrity, lobby, queue, results, subs
@@ -81,7 +87,7 @@ class MatchMachine(RuleBasedStateMachine):
 
     @rule(
         index=integers(0, 14),
-        choice=sampled_from(["first_pick", "last_pick", "hidden_king", "archmother"]),
+        choice=sampled_from(["hk_pick1", "hk_pick2", "am_pick1", "am_pick2", "first_pick"]),
     )
     def coin_choice(self, index: int, choice: str) -> None:
         self._try(draft.choose_coinflip, self.match.pk, self.players[index], choice)
@@ -263,9 +269,13 @@ class MatchMachine(RuleBasedStateMachine):
 
     @invariant()
     def sides_follow_the_coinflip(self) -> None:
-        """Once both captains have chosen, the sides and first pick are what they chose."""
+        """Once the coinflip is settled, the sides and first pick are what was chosen."""
         match = self._fresh()
-        if match.coinflip_loser_choice:
+        if match.coinflip_winner_choice in RANKED_COINFLIP_CHOICES:
+            assert (match.hidden_king_team, match.champion_first_pick) == apply_ranked_coinflip(
+                match.coinflip_winner, match.coinflip_winner_choice
+            )
+        elif match.coinflip_loser_choice:
             assert (match.hidden_king_team, match.champion_first_pick) == apply_coinflip(
                 match.coinflip_winner, match.coinflip_winner_choice, match.coinflip_loser_choice
             )
@@ -310,7 +320,7 @@ def test_match_machine(league, clock: Clock) -> None:
             derandomize=not explore,
             database=None,  # The same examples in every checkout, not ones saved locally.
             max_examples=150 if explore else 60,
-            stateful_step_count=40,
+            stateful_step_count=56,  # The 18-step champion draft takes a few more.
             deadline=None,
             suppress_health_check=list(HealthCheck),
         ),

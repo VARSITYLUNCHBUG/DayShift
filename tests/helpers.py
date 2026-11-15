@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 from league.domain.draft_plan import build_plan, team_for_role
-from league.domain.engine import ARCHMOTHER, FIRST_PICK, HIDDEN_KING, LAST_PICK, Status
+from league.domain.engine import (
+    AM_PICK2,
+    ARCHMOTHER,
+    FIRST_PICK,
+    HIDDEN_KING,
+    HK_PICK1,
+    LAST_PICK,
+    Status,
+)
 from league.models import Community, Match, Player
+from league.models.matches import MatchKind
 from league.services import draft, lobby, queue, results
 from league.services.common import captain_of, mode_of
 from league.services.results import ImageRef
@@ -54,6 +63,11 @@ def settle_coinflip_for(match: Match, hk_team: str = "A") -> Match:
         return match
     winner = match.coinflip_winner
     loser = "B" if winner == "A" else "A"
+    if match.kind != MatchKind.SCRIM:
+        # Ranked: the winner picks a side and an order in one press.
+        choice = HK_PICK1 if winner == hk_team else AM_PICK2
+        draft.choose_coinflip(match.pk, captain_of(match, winner).player, choice)
+        return fresh(match)
     side = HIDDEN_KING if winner == hk_team else ARCHMOTHER
     draft.choose_coinflip(match.pk, captain_of(match, winner).player, side)
     order = FIRST_PICK if loser == hk_team else LAST_PICK
