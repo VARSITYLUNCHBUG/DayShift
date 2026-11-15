@@ -20,7 +20,16 @@ from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.integrations import deadlock_api
 from league.models import ApiMatchCheck, Community, Match, OutboxEffect, Player, StaffAlert
 from league.models.api import CheckStatus
-from league.services import api_results, draft, integrity, queue, ratings, results, steam
+from league.services import (
+    api_results,
+    draft,
+    integrity,
+    queue,
+    ratings,
+    results,
+    runtime,
+    steam,
+)
 from league.services.common import captain_of
 from tests.conftest import make_player
 from tests.helpers import (
@@ -231,7 +240,7 @@ def test_a_miss_is_retried_with_backoff_then_given_up(live: Match) -> None:
 
 
 def test_checks_stay_off_when_the_server_turns_them_off(league: Community, live: Match) -> None:
-    Community.objects.filter(pk=league.pk).update(api_results=False)
+    runtime.update(league, api_results=False)
     _report(fresh(live), live.hidden_king_team)
     assert not OutboxEffect.objects.filter(kind="check_match_api").exists()
 
@@ -253,7 +262,7 @@ def test_results_show_api_stats_for_linked_players(live: Match) -> None:
 
 @pytest.fixture
 def auto(league: Community) -> Community:
-    Community.objects.filter(pk=league.pk).update(auto_lobby=True, lobby_region="south_africa")
+    runtime.update(league, auto_lobby=True, lobby_region="south_africa")
     league.refresh_from_db()
     return league
 

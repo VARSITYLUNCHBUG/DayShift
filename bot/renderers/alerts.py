@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from discord import ButtonStyle
@@ -90,5 +91,7 @@ def render_alert(card: AlertCard) -> LayoutView:
 
 
 def match_notice(card: AlertCard) -> str:
-    """The short note left in the match channel: staff have it, nobody is pinged."""
-    return f"Sent to staff: {card.text}"
+    """The short note left in the match channel: staff have it, nobody is pinged. Sentences that
+    tell staff which command to run stay on the staff card."""
+    sentences = [part for part in re.split(r"(?<=[.!?])\s+", card.text) if "`/" not in part]
+    return f"Sent to staff: {' '.join(sentences)}"

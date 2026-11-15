@@ -343,7 +343,7 @@ def awards_by_match(match_ids: list[int]) -> Mapping[int, dict[int, str]]:
 
 
 def placement_labels(season: Season, player_ids: list[int]) -> dict[int, str]:
-    """ "P 3/10" for players whose rating is still settling."""
+    """ "placing 3/10" for players whose rating is still settling."""
     params = params_for(season)
     total = int(params["placement_games"])
     games = dict(
@@ -355,5 +355,5 @@ def placement_labels(season: Season, player_ids: list[int]) -> dict[int, str]:
     for player_id in player_ids:
         played = games.get(player_id, 0)
         if in_placement(played, params):
-            labels[player_id] = f"P {played}/{total}"
+            labels[player_id] = f"placing {played}/{total}"
     return labels

@@ -16,10 +16,14 @@ from bot.renderers.grid import fits as grid_fits
 from bot.renderers.grid import messages as grid_messages
 from bot.routing import RouteButton, RouteSelect
 from league.domain.engine import (
+    AM_PICK1,
+    AM_PICK2,
     ARCHMOTHER,
     COINFLIP_LABELS,
     FIRST_PICK,
     HIDDEN_KING,
+    HK_PICK1,
+    HK_PICK2,
     LAST_PICK,
     Status,
 )
@@ -216,12 +220,23 @@ _COIN_STYLE = {
     LAST_PICK: ButtonStyle.primary,
     HIDDEN_KING: ButtonStyle.danger,
     ARCHMOTHER: ButtonStyle.primary,
+    HK_PICK1: ButtonStyle.danger,
+    HK_PICK2: ButtonStyle.danger,
+    AM_PICK1: ButtonStyle.primary,
+    AM_PICK2: ButtonStyle.primary,
 }
-_COIN_EMOJI = {HIDDEN_KING: style.HK_EMOJI, ARCHMOTHER: style.AM_EMOJI}
+_COIN_EMOJI = {
+    HIDDEN_KING: style.HK_EMOJI,
+    ARCHMOTHER: style.AM_EMOJI,
+    HK_PICK1: style.HK_EMOJI,
+    HK_PICK2: style.HK_EMOJI,
+    AM_PICK1: style.AM_EMOJI,
+    AM_PICK2: style.AM_EMOJI,
+}
 
 
 def coin_buttons(action: str, target_id: int, options: tuple[str, ...]) -> ActionRow[Any]:
-    """Bebot's coinflip buttons: First Pick, Last Pick, Hidden King, Archmother."""
+    """The coinflip buttons: a side with Pick 1 or Pick 2 for ranked, Bebot's four for scrims."""
     return ActionRow(
         *(
             RouteButton(
@@ -249,7 +264,12 @@ def _coinflip(state: BoardState, box: Container[Any]) -> None:
         box.add_item(Separator())
     who = state.captains.get(winner, "-") if state.is_scrim else state.team_name(winner)
     lines = [f"### {style.COIN_EMOJI} Captain Coinflip", f"**{who}** wins the flip!"]
-    if not state.coinflip_winner_choice:
+    if not state.is_scrim:
+        lines.append(
+            f"{state.captains.get(winner, 'Their captain')}, choose your side and pick order. "
+            "Pick 1 bans and picks first."
+        )
+    elif not state.coinflip_winner_choice:
         lines.append(f"{state.captains.get(winner, 'Their captain')}, choose your preference:")
     else:
         lines.append(f"Chose: {COINFLIP_LABELS[state.coinflip_winner_choice]}")
@@ -716,21 +736,13 @@ def _sub_text(state: BoardState, line: SubLine) -> str:
             f"🔁 **{line.requested_by_name}** wants to sub out {who}. "
             f"The other captain can approve or refuse {_stamp(line.deadline_at)}."
         )
+    head = f"🔁 **{line.leaving_name}** is subbing out."
     if line.offer_name:
-        source = (
-            "next in the queue"
-            if line.offer_from_queue
-            else "longest in the Waiting Room"
-            if line.offer_from_prio
-            else "invited"
-        )
         answer = f" {_stamp(line.offer_deadline_at)}" if line.offer_deadline_at else ""
-        return f"🔁 {who} is subbing out. Waiting for **{line.offer_name}** ({source}){answer}."
+        return f"{head} Waiting for **{line.offer_name}**.{answer}"
     if line.name_until is not None:
-        return (
-            f"🔁 {who} needs a sub. Name someone, or the queue is asked {_stamp(line.name_until)}."
-        )
-    return f"🔁 {who} needs a sub. Nobody in the queue can take it yet, so name someone."
+        return f"{head} Name a sub, or the queue is asked {_stamp(line.name_until)}."
+    return f"{head} Waiting for someone to join the queue, or name a sub."
 
 
 # Spots the bot opened itself, offered for players to accept: nobody names a sub for these.
@@ -738,17 +750,16 @@ OPENED_BY_BOT = ("missed_ready", "restart")
 
 
 def _open_spots_text(lines: list[SubLine]) -> str:
-    """Every spot the bot opened (a missed ready check, or a restart), on one line: they're
-    offered for players to accept, so there's nothing to click here, and it keeps the board
-    under Discord's limit."""
+    """Every spot the bot opened (a missed ready check, or a restart), in two short lines.
+    They're offered to players by DM, so there's nothing to click here."""
     waiting = [f"**{line.offer_name}**" for line in lines if line.offer_name]
-    spots = f"{len(lines)} spot{'' if len(lines) == 1 else 's'}"
-    source = "from the ready check" if lines[0].reason == "missed_ready" else "after the restart"
-    asked = f" Waiting for {', '.join(waiting)}." if waiting else " Nobody can take them yet."
-    return (
-        f"🔁 {spots} open {source}, offered to the priority list, then the queue."
-        f"{asked} Cancelled {_stamp(lines[0].deadline_at)} if not filled."
+    subs = f"{len(lines)} Sub{'' if len(lines) == 1 else 's'}"
+    asked = (
+        f"Waiting on response from {', '.join(waiting)}"
+        if waiting
+        else "Waiting for someone to join the queue"
     )
+    return f"🔁 **Need {subs}**\n{asked}"
 
 
 def _subs(state: BoardState, box: Container[Any]) -> None:
@@ -787,9 +798,6 @@ def render_board(state: BoardState) -> LayoutView:
         _subs(state, box)
     if state.can_request_sub:
         box.add_item(ActionRow(RouteButton("sub_open", state.match_id, label="Request a sub")))
-    if state.status == Status.READY_CHECK:  # Once is enough: it doesn't change during a match.
-        restart = f" · Restarted from match #{state.restarted_from}" if state.restarted_from else ""
-        box.add_item(TextDisplay(f"-# Format: {state.mode_name}{restart}"))
     view = LayoutView(timeout=None)
     view.add_item(box)
     return view
@@ -823,10 +831,13 @@ def render_voice_dm(
     body: str = "",
     channel_url: str | None = None,
     voice_label: str = "Join team voice",
+    subtitle: bool = True,
 ) -> LayoutView:
-    """A voice invite with no ready step: teams moving to their own channels, or a sub arriving."""
+    """A voice invite with no ready step: teams moving to their own channels, or a sub arriving.
+    Without `subtitle` it's the heading and the buttons alone."""
     intro = f"Match #{match_id}." + (f" {body}" if body else "")
-    items: list[discord.ui.Item[Any]] = [TextDisplay(f"## {heading}\n{intro}")]
+    text = f"## {heading}\n{intro}" if subtitle else f"## {heading}"
+    items: list[discord.ui.Item[Any]] = [TextDisplay(text)]
     links: list[discord.ui.Item[Any]] = []
     if invite_url:
         links.append(discord.ui.Button(label=voice_label, url=invite_url))
@@ -839,13 +850,21 @@ def render_voice_dm(
     return view
 
 
+def render_text_dm(match_id: int, heading: str, text: str) -> LayoutView:
+    """A note for one player only, such as their standing after a match."""
+    view = LayoutView(timeout=None)
+    body: TextDisplay[Any] = TextDisplay(f"## {heading}\nMatch #{match_id}. {text}")
+    view.add_item(Container(body, accent_colour=ACCENT_LIVE))
+    return view
+
+
 def _offer_intro(info: OfferInfo, team_name: str) -> str:
     team = f" on **{team_name}**" if team_name else ""
     if info.invited_by:
         return f"**{info.invited_by}** asked you to take **{info.leaving_name}**'s spot{team}."
     spot = "A spot opened in the ready check" if info.missed_ready else f"A spot opened{team}"
     if info.source == "prio":
-        return f"{spot}, and you've waited longest in the Waiting Room."
+        return f"{spot}, and you've waited longest in the queue."
     return f"{spot}, and you're next in the queue."
 
 
@@ -875,17 +894,6 @@ def render_sub_offer_dm(info: OfferInfo, team_name: str) -> LayoutView:
     view.add_item(
         Container(TextDisplay("\n".join(lines)), _offer_buttons(info), accent_colour=ACCENT_LIVE)
     )
-    return view
-
-
-def render_sub_offer_notice(info: OfferInfo, team_name: str) -> LayoutView:
-    """The same offer as a mention in the priority list's channel, for anyone who misses DMs."""
-    text = (
-        f"{player_mention(info.discord_user_id)} {_offer_intro(info, team_name)} "
-        f"Match #{info.match_id}: answer {_stamp(info.deadline_at)}."
-    )
-    view = LayoutView(timeout=None)
-    view.add_item(Container(TextDisplay(text), _offer_buttons(info), accent_colour=ACCENT_LIVE))
     return view
 
 

@@ -127,7 +127,7 @@ async def api_start(ctx: Context) -> None:
         await asyncio.to_thread(deadlock_api.start_custom_match, party_id)
     except deadlock_api.ApiError as exc:
         hint = "Try again in a moment." if exc.rate_limited else "Start it from the game instead."
-        await reply(ctx.interaction, f"deadlock-api couldn't start the match. {hint}")
+        await reply(ctx.interaction, f"The match couldn't be started. {hint}")
         return
     await db(draft.mark_api_started, ctx.match_id, player)
     await reply(ctx.interaction, "Started.")

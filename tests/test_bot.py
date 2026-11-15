@@ -290,7 +290,7 @@ def test_champion_board_says_how_far_along_the_draft_is(popped: Match) -> None:
     match = to_champion_draft(popped)
     state = boards.board_state(match.pk)
     payload = str(render_board(state).to_components())
-    assert "Ban 1 of 4." in payload
+    assert "Ban 1 of 6." in payload
     # Bebot's "@Pike ban a hero!": a mention, which a board never pings.
     assert f"<@{acting_captain(match).discord_user_id}> ban a hero! ⌛ <t:" in payload
 
@@ -406,9 +406,9 @@ def _state(status: str, **extra: Any) -> boards.BoardState:
     )
 
 
-def test_format_footer_only_shows_on_the_ready_check() -> None:
-    assert "Format:" in str(render_board(_state(Status.READY_CHECK)).to_components())
-    assert "Format:" not in str(render_board(_state(Status.IN_PROGRESS)).to_components())
+def test_no_format_footer_on_any_board() -> None:
+    for status in (Status.READY_CHECK, Status.IN_PROGRESS):
+        assert "Format:" not in str(render_board(_state(status)).to_components())
 
 
 def test_settings_checklist_is_only_for_the_host() -> None:
@@ -477,7 +477,7 @@ def test_candidate_format_note_is_kept_off_the_players_board() -> None:
         players=[],
     )
     payload = str(render_board(state).to_components())
-    assert "Format: 3-ban" in payload
+    assert "3-ban" not in payload
     assert "unconfirmed" not in payload
 
 
@@ -506,7 +506,7 @@ def test_draft_turn_names_who_goes_next() -> None:
     assert "Next: **MDMT** picks." in str(render_board(state).to_components())
 
 
-def test_queue_links_the_waiting_room_and_says_how_many_are_needed() -> None:
+def test_queue_says_how_many_are_needed_and_nothing_else() -> None:
     view = render_queue(
         boards.QueueView(
             size=11,
@@ -518,9 +518,9 @@ def test_queue_links_the_waiting_room_and_says_how_many_are_needed() -> None:
         )
     )
     payload = str(view.to_components())
-    assert "<#7001>" in payload
     assert "1 more to start" in payload
-    assert "1 match in progress" in payload
+    for gone in ("<#7001>", "in progress", "3-ban"):  # The subtitle under the buttons is gone.
+        assert gone not in payload
 
 
 @pytest.mark.django_db
@@ -651,6 +651,8 @@ class FakeGateway:
     fail_next: dict[str, Exception] = field(default_factory=dict)
     messages: dict[int, list[int]] = field(default_factory=dict)
     text_by_id: dict[int, str] = field(default_factory=dict)
+    text_mentions: dict[int, list[int]] = field(default_factory=dict)
+    open_voice: dict[int, bool] = field(default_factory=dict)
     names: dict[int, str] = field(default_factory=dict)  # Display names Discord has cached.
 
     def _id(self) -> int:
@@ -672,9 +674,10 @@ class FakeGateway:
         return channel_id
 
     async def create_voice_channel(
-        self, guild_id, category_id, name, member_ids, staff_role_ids
+        self, guild_id, category_id, name, member_ids, staff_role_ids, *, open_to_everyone=False
     ) -> int:
         channel_id = self._id()
+        self.open_voice[channel_id] = open_to_everyone
         self.channels[channel_id] = name
         self.voice[channel_id] = set()
         self.members_seen[channel_id] = list(member_ids)
@@ -739,8 +742,18 @@ class FakeGateway:
         self.role_pings.append(list(role_ids))
         message_id = self._id()
         self.text_by_id[message_id] = text
+        self.text_mentions[message_id] = list(user_ids)
         self.messages.setdefault(channel_id, []).append(message_id)
         return message_id
+
+    async def edit_text(
+        self, channel_id, message_id, text, *, user_ids: Iterable[int] = ()
+    ) -> None:
+        if message_id not in self.messages.get(channel_id, []):
+            raise ChannelGone(str(message_id))
+        self.text_by_id[message_id] = text
+        self.text_mentions[message_id] = list(user_ids)
+        self.edited.add(message_id)
 
     def chat(self, channel_id: int) -> int:
         """A player's message: it lands in the channel and the bot hears about it."""
@@ -1254,25 +1267,20 @@ def test_board_stays_last_and_only_current_pings_survive_a_whole_match(wired: Co
     match = vote_captains(match)
     drain(gateway)
     assert_board_last(gateway, match)
-    first = captain_of(match, match.player_first_pick).player.display_name
-    captain_a = captain_of(match, "A").player.display_name
-    captain_b = captain_of(match, "B").player.display_name
-    assert live_notice_texts(gateway, match) == [
-        f"the player draft is on. **{first}** picks first.",
-        f"Captains voted in: **{captain_a}** (12 votes) and **{captain_b}** (12 votes).",
-    ]
+    assert live_notice_texts(gateway, match) == []  # The board says who captains and picks.
 
     match = run_player_draft(match)
     drain(gateway)
     assert_board_last(gateway, match)
     assert live_notice_texts(gateway, match) == [
-        "teams are set and you won the coinflip! Choose First Pick, Last Pick or a side."
+        "teams are set and you won the coinflip! Choose your side and Pick 1 or Pick 2 on the "
+        "board. Pick 1 bans and picks first."
     ]
 
     match = settle_coinflip_for(match)
     drain(gateway)
     assert_board_last(gateway, match)
-    assert live_notice_texts(gateway, match) == ["you ban first. The champion draft is on."]
+    assert live_notice_texts(gateway, match) == ["you ban first."]
 
     match = to_in_progress(match)
     drain(gateway)
@@ -1704,7 +1712,7 @@ def test_match_channels_let_in_the_roles_that_look_after_matches(wired: Communit
     assert gateway.staff_seen[resource(match, ResourceKind.LOBBY_VOICE)] == [71, 72]
 
 
-def test_an_offer_is_a_dm_and_a_mention_that_goes_once_answered(wired: Community) -> None:
+def test_an_offer_is_a_dm_and_nothing_in_any_channel(wired: Community) -> None:
     from league.models import SubOffer
     from league.services import subs
 
@@ -1720,14 +1728,38 @@ def test_an_offer_is_a_dm_and_a_mention_that_goes_once_answered(wired: Community
     subs.offer_to_queue(request.pk, players[3])
     drain(gateway)
     offer = SubOffer.objects.get(player=spare)
-    assert offer.notice_channel_id == QUEUE_CHANNEL  # No priority list here: the queue's.
-    assert gateway.view_user_pings[offer.notice_message_id] == [spare.discord_user_id]
-    assert offer.notice_message_id in gateway.messages[QUEUE_CHANNEL]
-    notice = str(gateway.views[offer.notice_message_id].to_components())
-    assert f"<@{spare.discord_user_id}>" in notice and "sub_accept" in notice
+    assert offer.notice_channel_id is None and offer.notice_message_id is None
+    dms = [
+        str(view.to_components())
+        for user_id, view in gateway.dms
+        if user_id == spare.discord_user_id
+    ]
+    assert any("sub_accept" in dm and "Can you sub in?" in dm for dm in dms)
+    pinged = [ids for ids in gateway.view_user_pings.values() if spare.discord_user_id in ids]
+    assert pinged == []  # No mention of them anywhere in the server.
     subs.answer_offer(offer.pk, spare, True)
     drain(gateway)
-    assert offer.notice_message_id not in gateway.messages[QUEUE_CHANNEL]
+
+
+def test_an_offer_to_closed_dms_goes_to_the_next_person(wired: Community) -> None:
+    from league.models import SubOffer
+    from league.services import subs
+
+    players = [make_player(n) for n in range(1, 13)]
+    gateway = FakeGateway()
+    for player in players:
+        queue.join(wired.pk, player)
+    closed, open_ = make_player(13), make_player(14)
+    queue.join(wired.pk, closed)
+    queue.join(wired.pk, open_)
+    gateway.closed_dms.add(closed.discord_user_id)
+    drain(gateway)
+    match = Match.objects.get()
+    request = subs.request_sub_out(match.pk, players[3], players[3].pk)
+    subs.offer_to_queue(request.pk, players[3])
+    drain(gateway)
+    assert SubOffer.objects.get(player=closed).status != "pending"
+    assert SubOffer.objects.get(player=open_).status == "pending"
 
 
 def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_lobby(
@@ -1754,10 +1786,13 @@ def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_lobby(
     assert team_voice in gateway.deleted
     assert sitting in gateway.voice[lobby_voice]
     board = gateway.views[resource(successor, ResourceKind.BOARD_MESSAGE)]
-    assert f"Restarted from match #{match.pk}" in str(board.to_components())
+    assert "Restarted from" not in str(board.to_components())
     # Found in the live run: the empty seat showed as an ordinary sub out, with Name a sub.
-    assert "1 spot open after the restart" in str(board.to_components())
+    assert "Need 1 Sub" in str(board.to_components())
     assert "sub_invite_open" not in str(board.to_components())
+    # Found in the live run: the old match's "champion draft is on" ping stayed up.
+    notices = live_notice_texts(gateway, successor)
+    assert notices and all("left before the game" in text for text in notices), notices
 
 
 def test_a_queued_player_offered_a_sub_spot_can_take_it(wired: Community) -> None:
@@ -1836,21 +1871,24 @@ def test_vote_board_has_a_two_choice_select(voting: Match, players: list[Player]
 
 
 @pytest.mark.django_db
-def test_coinflip_board_offers_the_winner_all_four_then_the_loser_two(voting: Match) -> None:
+def test_coinflip_board_offers_the_winner_a_side_and_pick_order(voting: Match) -> None:
     match = run_player_draft(vote_captains(voting))
     text = str(_check(match))
     assert "Captain Coinflip" in text and "wins the flip!" in text
+    assert "Pick 1 bans and picks first" in text
 
-    def coin_labels(match: Match) -> list[str]:
-        buttons = all_buttons(_check(match))
-        return [b["label"] for b in buttons if ":coin_choice:" in b.get("custom_id", "")]
-
-    assert coin_labels(match) == ["First Pick", "Last Pick", "Hidden King", "Archmother"]
+    buttons = all_buttons(_check(match))
+    labels = [b["label"] for b in buttons if ":coin_choice:" in b.get("custom_id", "")]
+    assert labels == [
+        "Hidden King · Pick 1",
+        "Hidden King · Pick 2",
+        "Archmother · Pick 1",
+        "Archmother · Pick 2",
+    ]
     draft_service.choose_coinflip(
-        match.pk, captain_of(match, match.coinflip_winner).player, "first_pick"
+        match.pk, captain_of(match, match.coinflip_winner).player, "am_pick1"
     )
-    assert coin_labels(fresh(match)) == ["Hidden King", "Archmother"]
-    assert "Chose: First Pick" in str(_check(fresh(match)))
+    assert fresh(match).status == Status.CHAMPION_DRAFT
 
 
 @pytest.mark.django_db
@@ -1871,7 +1909,7 @@ def test_finished_draft_shows_its_name_gif_and_glhf(voting: Match) -> None:
     from league.domain.engine import draft_name
 
     match = to_champion_draft(voting)
-    for _ in range(16):
+    for _ in range(18):
         match = fresh(match)
         draft_service.choose_random_champion(match.pk, acting_captain(match), match.step_index)
     match = fresh(match)
@@ -1890,3 +1928,149 @@ def test_side_board_with_four_pending_subs_stays_within_limits(voting: Match) ->
     for leaving in match.participants.filter(is_captain=False, is_active=True)[:4]:
         subs.request_sub_out(match.pk, leaving.player, leaving.player_id)
     _check(fresh(match))
+
+
+def test_match_channel_names_read_alike() -> None:
+    from bot.renderers import names
+
+    assert names.match_text(12) == "match-12"
+    assert names.lobby_voice(12) == "Match 12 · Lobby"
+    assert names.team_voice(12, "Kestrel") == "Match 12 · Kestrel's Team"
+    assert names.team_voice(12, " Kes​trel \n") == "Match 12 · Kestrel's Team"
+    assert len(names.team_voice(12, "x" * 200)) == 100
+
+
+def test_open_spots_say_how_many_subs_and_who_was_asked() -> None:
+    from datetime import timedelta
+
+    from bot.renderers.board import _open_spots_text
+    from league.services.boards import SubLine
+    from league.services.common import now
+
+    line = SubLine(
+        id=1,
+        status="open",
+        leaving_name="Rook",
+        team="",
+        requested_by_name="",
+        is_self=False,
+        deadline_at=now() + timedelta(minutes=2),
+        offer_name="Lark",
+        reason="missed_ready",
+    )
+    assert _open_spots_text([line]) == "🔁 **Need 1 Sub**\nWaiting on response from **Lark**"
+
+
+def test_grant_and_revoke_go_by_member_id() -> None:
+    """Found in the live run: discord.py's set_permissions refuses a bare ID, so a real member
+    who subbed in was never let into the match channels and the match's effects stalled."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.effects.gateway import MEMBER_OVERWRITE, DiscordGateway
+
+    client = MagicMock()
+    client.get_channel.return_value = MagicMock(spec=discord.TextChannel)
+    client.http.edit_channel_permissions = AsyncMock()
+    client.http.delete_channel_permissions = AsyncMock()
+    gateway = DiscordGateway(client)
+    asyncio.run(gateway.grant_member(55, 123456789012345678))
+    channel_id, user_id, allow, _deny, kind = client.http.edit_channel_permissions.call_args.args
+    assert (channel_id, user_id, kind) == (55, 123456789012345678, MEMBER_OVERWRITE)
+    assert int(allow) & discord.Permissions(view_channel=True, send_messages=True).value
+    asyncio.run(gateway.revoke_member(55, 123456789012345678))
+    client.http.delete_channel_permissions.assert_awaited_once_with(55, 123456789012345678)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_ready_ping_drops_players_as_they_ready(wired: Community) -> None:
+    gateway = FakeGateway()
+    match = popped_match(wired, gateway)
+    ping = resource(match, ResourceKind.READY_PING)
+    everyone = [p.player for p in match.participants.select_related("player")]
+    assert len(gateway.text_mentions[ping]) == 12
+    lobby.mark_ready(match.pk, everyone[0])
+    lobby.mark_ready(match.pk, everyone[1])
+    drain(gateway)
+    left = gateway.text_mentions[ping]
+    assert len(left) == 10 and everyone[0].discord_user_id not in left
+    assert ping in gateway.edited  # An edit, so nobody is pinged again.
+
+
+@pytest.mark.django_db(transaction=True)
+def test_auto_captain_appoints_captains_without_a_vote(wired: Community) -> None:
+    from league.services import runtime
+
+    runtime.update(wired, auto_captain=True)
+    gateway = FakeGateway()
+    match = ready_all(popped_match(wired, gateway))
+    assert match.status == Status.PLAYER_DRAFT
+    assert match.participants.filter(is_captain=True).count() == 2
+    assert not match.captain_votes.exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_match_voice_is_for_players_unless_opened(wired: Community) -> None:
+    from league.services import runtime
+
+    gateway = FakeGateway()
+    first = popped_match(wired, gateway)
+    assert gateway.open_voice[resource(first, ResourceKind.LOBBY_VOICE)] is False
+    runtime.update(wired, open_match_voice=True, max_concurrent_matches=2)
+    for player in [make_player(n) for n in range(20, 32)]:
+        queue.join(wired.pk, player)
+    drain(gateway)
+    second = Match.objects.exclude(pk=first.pk).get()
+    assert gateway.open_voice[resource(second, ResourceKind.LOBBY_VOICE)] is True
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_finished_match_channel_closes_after_three_minutes(wired: Community) -> None:
+    from league.models import RuntimeSettings
+
+    assert RuntimeSettings.objects.get(community=wired).match_channel_close_minutes == 3
+    gateway = FakeGateway()
+    match = finish(to_in_progress(popped_match(wired, gateway)), winner="A")
+    closing = OutboxEffect.objects.get(kind="delete_text_channel", match=match)
+    wait = (closing.run_after - match.ended_at).total_seconds()
+    assert 175 <= wait <= 185
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_teams_dm_is_just_its_heading(wired: Community) -> None:
+    gateway = FakeGateway()
+    match = run_player_draft(vote_captains(ready_all(popped_match(wired, gateway))))
+    drain(gateway)
+    teams = [
+        str(v.to_components()) for _u, v in gateway.dms if "Teams picked" in str(v.to_components())
+    ]
+    assert teams and all("Match #" not in dm for dm in teams)
+    ready = [
+        str(v.to_components()) for _u, v in gateway.dms if "Ready Up" in str(v.to_components())
+    ]
+    assert ready  # The ready check's DM heading.
+    del match
+
+
+def test_a_player_sub_out_line_reads_plainly() -> None:
+    from datetime import timedelta
+
+    from bot.renderers.board import _sub_text
+    from league.services.boards import SubLine
+    from league.services.common import now
+
+    line = SubLine(
+        id=1,
+        status="open",
+        leaving_name="Nyx",
+        team="A",
+        requested_by_name="Nyx",
+        is_self=True,
+        deadline_at=now() + timedelta(minutes=3),
+        offer_name="MDMT",
+        offer_from_prio=True,
+        offer_deadline_at=now() + timedelta(seconds=30),
+    )
+    text = _sub_text(_state(Status.PLAYER_DRAFT), line)
+    assert text.startswith("🔁 **Nyx** is subbing out. Waiting for **MDMT**. <t:")
+    assert "priority list" not in text

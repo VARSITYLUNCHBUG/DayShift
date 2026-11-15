@@ -10,7 +10,7 @@ from league.models.matches import Team
 class CheckStatus(models.TextChoices):
     OK = "ok", "Agrees with the result"
     MISMATCH = "mismatch", "Disagrees with the result"
-    NOT_FOUND = "not_found", "Not in deadlock-api yet"
+    NOT_FOUND = "not_found", "Not in Deadlock's match history yet"
     ERROR = "error", "The request failed"
 
 

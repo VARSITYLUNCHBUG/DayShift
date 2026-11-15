@@ -258,7 +258,9 @@ def test_scrims_need_the_scrims_area(staffed: Community) -> None:
 
 def test_community_commands_need_the_community_area(staffed: Community) -> None:
     interaction = _staffer(60, SCRIMS_ROLE)
-    run_command(prio_commands.priolist_command, interaction)
+    user = MagicMock()
+    user.id, user.display_name = 999, "Someone"
+    run_command(prio_commands.removeprio_command, interaction, user=user)
     assert "It needs Community access" in replies(interaction)[0]
 
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 # Queue and ready check.
 ALREADY_QUEUED = "You're already in queue!"
 NOT_QUEUED = "You're not in queue!"
-NOW_READY = "You are now ready!"
 ALREADY_READY = "You're already ready!"
 
 # Captains.

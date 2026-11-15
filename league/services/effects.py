@@ -151,6 +151,46 @@ def record_notice(match_id: int, message_id: int) -> None:
     MatchResource.objects.create(match_id=match_id, kind=ResourceKind.NOTICE, discord_id=message_id)
 
 
+READY_PING_KIND = "refresh_ready_ping"
+
+
+def request_ready_ping(match: Match) -> None:
+    """Someone readied or left the ready check: refresh who the ping mentions. Coalesces."""
+    from league.services.common import request_render
+
+    request_render(match.community, READY_PING_KIND, match)
+
+
+def record_ready_ping(match_id: int, message_id: int) -> None:
+    """The lobby's "press Ready" ping. It's also a notice, so the next status change clears it."""
+    MatchResource.objects.update_or_create(
+        match_id=match_id,
+        kind=ResourceKind.READY_PING,
+        defaults={"discord_id": message_id, "deleted_at": None},
+    )
+
+
+def ready_ping(match_id: int) -> tuple[int | None, int | None, list[int]]:
+    """(channel, message, players still to press Ready) for the ready ping, while it's live."""
+    match = Match.objects.get(pk=match_id)
+    message_id = (
+        MatchResource.objects.filter(match_id=match_id, kind=ResourceKind.READY_PING)
+        .values_list("discord_id", flat=True)
+        .first()
+    )
+    if match.status != Status.READY_CHECK or message_id is None:
+        return None, None, []
+    still_live = MatchResource.objects.filter(
+        match_id=match_id, kind=ResourceKind.NOTICE, discord_id=message_id, deleted_at__isnull=True
+    ).exists()
+    if not still_live:
+        return None, None, []
+    unready = MatchParticipant.objects.filter(
+        match_id=match_id, is_active=True, ready_at__isnull=True
+    ).values_list("player__discord_user_id", flat=True)
+    return resource_id(match_id, ResourceKind.TEXT), message_id, list(unready)
+
+
 def live_notices(match_id: int) -> list[int]:
     rows = MatchResource.objects.filter(
         match_id=match_id, kind=ResourceKind.NOTICE, deleted_at__isnull=True

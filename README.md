@@ -58,13 +58,13 @@ forward: back it up, start a fresh one, and run `/setup` and `/permissions grant
 | Step | What happens | Clock and fallback |
 |---|---|---|
 | Queue | Join and Leave buttons, FIFO. Voice isn't required | Blocked by a cooldown or a live match |
-| Pop at 12 | Creates a private text channel and lobby voice channel | Queue waits at `max_concurrent_matches` |
+| Pop at 12 | Creates a private text channel, `match-12`, and a voice channel, `Match 12 · Lobby` | Queue waits at `max_concurrent_matches` |
 | Gather | In the Waiting Room: moved. Anywhere else: DM with invite and Ready button. DMs closed: mention in the lobby channel | Joining the Waiting Room later moves them, until they've been in the match's voice once. After that, where they go is up to them |
-| Ready | Ready button on the board and in the DM | 180 s. A miss frees the spot, offered to the priority list, then the queue. Unfilled in 2 min: cancel, and everyone left goes back to the front of the queue |
-| Captain vote | Everyone votes for up to two captains, themselves included, from players with 5 completed matches. Most votes wins; rating breaks ties and fills any gap. Two or fewer eligible: no vote | 45 s, or closes early once everyone has voted |
-| Player draft | `FSSFFSSFFS`, lower-rated captain first. Last player is assigned | 45 s, then highest rated |
-| Team voice | Creates team channels and moves anyone in the lobby voice. Everyone else gets a DM invite | Never blocks the draft |
-| Captain coinflip | Bebot's: the winner chooses First Pick, Last Pick, 🔶 Hidden King or 🔷 Archmother, and the loser chooses from the other kind. Between them the sides and who bans and picks first are set | 20 s each, then a random choice |
+| Ready | Ready button on the board and in the "Ready Up" DM. The board is posted right after the lobby ping, before the invites go out. As players ready, the ping is edited to mention only those still to ready (an edit pings nobody) | 180 s. A miss frees the spot, offered down the priority list (the queue, longest wait first). Unfilled in 2 min: cancel, and everyone left goes back to the front of the queue |
+| Captain vote | Everyone votes for up to two captains, themselves included, from players with 5 completed matches. Most votes wins; rating breaks ties and fills any gap. Two or fewer eligible, or the Auto Captain setting on: no vote, captains are appointed by experience and rating | 45 s, or closes early once everyone has voted |
+| Player draft | `FSSFFSSFFS`, lower-rated captain first. Last player is assigned. No message announces it: the board shows the captains and whose pick it is | 45 s, then highest rated |
+| Team voice | Creates `Match 12 · Kestrel's Team` and the other team's channel, and moves anyone in the lobby voice. Everyone else gets a "Teams picked" DM with the invite | Never blocks the draft |
+| Captain coinflip | The winner chooses their side and pick order in one press: 🔶 Hidden King · Pick 1, 🔶 Hidden King · Pick 2, 🔷 Archmother · Pick 1 or 🔷 Archmother · Pick 2. Pick 1 bans and picks first. (Scrims keep Bebot's two-captain coinflip.) | 20 s, then a random choice |
 | Champion draft | The mode's ban and pick order, from the team the coinflip put first. 🎲 Random takes a champion on purpose | 40 s a turn. A timeout takes a random champion, for bans too |
 | Draft summary | Named like "Crimson Wolf", with a GIF from `presets/draft_gifs.json` and GLHF, above the lobby code prompt | |
 | Lobby code | A random captain enters it; it's posted with the settings checklist. With automatic lobbies, deadlock-api's bot creates it and a captain presses Start match | 3 min, then the other captain, then cancel |
@@ -78,8 +78,8 @@ judgements, not published standards.
 
 | Mode | Champion draft |
 |---|---|
-| `bebot_2ban` (default) | Bebot's 16-step, 2-ban order, 40 s a turn |
-| `threeban_1win_2026` | The 1win 18-step table, 3 bans a team, 30 s a turn |
+| `draft_3ban` (default) | `B1 B2 B1 B2 P1 P2 P2 P1 P2 P1 B2 B1 P2 P1 P1 P2 P1 P2`: 18 steps, 3 bans a team, 40 s a turn. 1 is the Pick 1 team |
+| `bebot_2ban` | Bebot's 16-step, 2-ban order, 40 s a turn |
 
 Switch with `/mode activate slug:<slug>`. Bebot's custom hero emojis are in
 `presets/champion_emojis.yaml`. Load them with `manage.py load_champion_emojis`. The bot must be in
@@ -97,7 +97,7 @@ reported. There are two separate flows:
 | Sub out, yourself | Opens the slot straight away | The match pauses until the slot is filled |
 | Sub out, a teammate | A captain asks for one of their own players or an undrafted one. Not another captain | The other captain approves within 60 s, or the player stays |
 | Sub in, named | The leaving player or their captain picks someone, who gets a DM to accept | 45 s to name someone, 60 s for them to accept |
-| Sub in, offered | If nobody is named, or the named person says no, the spot is offered: first to whoever has waited longest in the Waiting Room, then down the queue | 60 s each, and it's retried as people join |
+| Sub in, offered | If nobody is named, or the named person says no, the spot is offered by DM down the priority list: whoever in the queue has waited longest | 60 s each, and it's retried as people join |
 
 While any request is pending, the timer is parked and the board hides the phase's buttons (except
 the result buttons once the game is on). The sub takes the leaving player's team, captaincy,
@@ -109,12 +109,12 @@ live in the draft mode's `subs` section.
 
 ### Filling an opening
 
-The queue is the way into matches; being in the Waiting Room never stops anyone playing. The
-priority list only decides who gets an opening first. An opening (a missed ready check, a sub out
-nobody named, or a restart) is offered to whoever has been in the Waiting Room longest, isn't in a
-match and hasn't stepped out, then to the head of the queue. Each offer is a DM and a mention in
-the priority list's channel (or the queue's) with **I'll sub in** and **Can't right now**, for
-60 s, then the next person. Each person is offered one spot at a time.
+The queue is the way into matches, and the priority list is the queue in order of wait. An
+opening (a missed ready check, a sub out nobody named, or a restart) is offered down the priority
+list: whoever in the queue has waited longest, isn't in a match and hasn't stepped out. Being in the
+Waiting Room doesn't count: it's a public channel, and not everyone there wants to play. Each offer
+is a DM, and only a DM, with **I'll sub in** and **Can't right now**, for 60 s, then the next
+person. Someone whose DMs are closed is skipped. Each person is offered one spot at a time.
 
 A missed ready check keeps the lobby: the players who missed it are taken out (with their usual
 missed-ready cooldown), their spots are offered for 2 minutes (`ready_check.refill_seconds`), and
@@ -155,6 +155,24 @@ Players can chat freely, and the board stays at the bottom:
 The bot only learns that a message was sent. It doesn't have the Message Content intent, so it
 can't read chat.
 
+## Runtime settings
+
+Each server's switches live in **Runtime settings**, on the server's page in the admin (and in a
+list of their own). Saving applies them at once, with no restart. Staff commands that set some of
+them (`/ocr mode`, `/deadlock settings`) change the same row.
+
+| Setting | Default | What it does |
+|---|---|---|
+| Auto Captain | Off | On: captains are appointed by experience and rating, with no vote. Off: players vote. Scrims are unaffected |
+| Open match voice | Off | On: anyone in the server can see and join a match's voice channels. Off: only its players and match staff |
+| Match channel close minutes | 3 | How long a finished match's text channel stays before it's deleted |
+| Max concurrent matches | 12 | Ranked matches at once; the queue waits beyond this |
+| Score OCR | Off | Reading report screenshots: off, stats only, or on |
+| Auto lobby, lobby region | Off, automatic | deadlock-api creates each custom lobby |
+| API results | On | Check reported results against Deadlock's match history |
+
+A database from before this change is migrated with each server's existing values.
+
 ## Adding things without code
 
 **A champion.** In admin, add a row under Champions, using the
@@ -168,15 +186,14 @@ run `/mode activate slug:<slug>`. Live matches keep the version they started wit
 the code, add a YAML file to `presets/`; `presets/bebot_2ban.yaml` is the reference.
 
 A mode sets the timers, the team size, the player draft order and the champion ban and pick order,
-and can exclude champions. The flow itself isn't configurable. In the steps, `first` is the Hidden
-King team.
+and can exclude champions. The flow itself isn't configurable. In the steps, `first` is the team the
+coinflip made Pick 1.
 
 Version 1 supports sequential bans and picks, with counts and per-step timers. Simultaneous and blind
 steps are rejected until the engine implements them.
 
-**Night Shift's real turn order.** `threeban_1win_2026` is a labelled candidate: Night Shift's exact
-order is unconfirmed. If a #62 or #63 VOD shows a different order, publish a new version and set
-`night_shift_status: confirmed`. The board drops its "unconfirmed" note by itself.
+**Switching an existing server to the default.** A server set up before `draft_3ban` became the
+default keeps the mode it had. Run `/mode activate slug:draft_3ban` once to move it.
 
 ## Ratings
 
@@ -198,7 +215,7 @@ Awards are zero-sum within each team: the MVP and key players take a bigger shar
 update, and their teammates a smaller one, so a team's total change is what it would have been
 without them. The shown rating is the conservative `max(0, mu − 3 × sigma) × 40`. A new player
 shows 0 and climbs as the system becomes sure of them, and a high seed (`/rating seed band:high`,
-mu 35) also starts low on purpose. Players show "P n/10" during placement. Tiers are
+mu 35) also starts low on purpose. Player lists show only the rating; `/stats` shows how many placement matches you've played. Tiers are
 Bronze, Silver from 10, Gold 18, Platinum 25 and Diamond 30, on `mu − 3 × sigma`.
 
 Captain tie-breaks, the first player pick and auto-picks compare mu, not the shown rating, so a
@@ -419,21 +436,21 @@ pick when a turn runs out, and the board following the chat. It ends at `# GLHF`
 
 ### Priority list
 
-Bebot's voice queue, for running inhouses by hand. It follows the Waiting Room set up by
-`/setup` and the match lifecycle:
+Who in the live match queue has waited longest. Only the queue counts: the Waiting Room is a
+public voice channel, so being in it says nothing about wanting to play.
 
 | What happens | The list |
 |---|---|
-| You join the Waiting Room | You go on (🟢), longest wait first |
-| You leave it | You keep your place for 5 minutes (⏳). Come back in time and it's still yours |
-| You're put in a match (it pops, you replace someone in the ready check, or you sub in) | You come off. Until it ends, your voice moves don't count |
-| The match ends | Players still in its voice are moved back to the Waiting Room, and everyone there goes on the back. A void counts the same, even a no-fault one |
+| You join the queue | You go on the back (🟢) |
+| You leave the queue | Your place is held for 3 minutes (⏳). Join again in time and you get it back, in the queue too |
+| You're put in a match (it pops, you replace someone in the ready check, or you sub in) | You come off |
+| Staff take you out of the queue, or clear it | You come off, with no place held |
+| A lobby is cancelled | Its ready players go back in the queue and on the list at their old place |
+| The match ends | Queue again: you go on the back |
 
-`/priolist` posts the list in a channel (Community area). Waits are Discord timestamps, so they count up
-on their own and the message only changes when the list does. `/prio` shows it to you,
-`/refresh` re-posts it below the chat and `/removeprio` takes someone off (Community area). It catches up
-with the Waiting Room when the bot starts or reconnects, and when someone leaves a match early. Bots
-in the Waiting Room aren't listed, and a match in another server doesn't count.
+The list isn't posted in any channel. `/prio` tells you, and only you, your place, how long
+you've waited and, after leaving the queue, how long your place is held. `/removeprio` takes
+someone off (Community area). A match in another server doesn't count.
 
 ### Pings
 
@@ -498,7 +515,7 @@ for when the report form's upload fails), `/randomdraft`, `/prio`, `/ping`, `/pi
 | Disputes | Dispute buttons, `/match rescore\|names\|early_leave`, `/match void\|sub` on a finished match, `/match explain`, matching any scoreboard name, `/deadlock check` |
 | Ratings | `/rating seed\|adjust`, `/match awards`, `/ledger_check` |
 | Moderation | `/penalty add\|revoke\|strikes`, `/captain allow\|bar\|clear`, `/deadlock unlink` |
-| Community | `/priolist`, `/refresh`, `/removeprio`, `/pingchannel`, `/removeping` |
+| Community | `/removeprio`, `/pingchannel`, `/removeping` |
 | Scrims | `/startdraft`, `/captains_coinflip`, `/stopdraft` |
 
 **Owner and Administrators:** `/permissions grant|revoke|list`.
@@ -622,7 +639,6 @@ DEBUG=true uv run python manage.py runbot
   `rating_calibration --simulate 300 --params '{"sigma": 12}'`.
 - deadlock-api's custom lobby start uses the party ID from creation as the lobby ID. Confirm it
   with one real lobby, and that the bot's lobby can be joined and started as described.
-- Night Shift's real turn order, from a #62 or #63 VOD.
 - Voice invite links and modal screenshot upload on desktop, mobile and web.
 - Current custom-lobby steps, for the host checklist text in `bot/renderers/board.py`.
 - Behaviour after Discord's 16 November 2026 channel change. Every channel the bot creates already

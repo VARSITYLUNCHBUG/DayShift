@@ -131,7 +131,10 @@ def staff_void(match_id: int, leaver: Player, actor: Player | None) -> None:
     """Staff deciding it was an early leave, with or without a pending report."""
     match = lock_match(match_id)
     if match.status not in {Status.IN_PROGRESS, Status.AWAITING_CONFIRMATION, Status.DISPUTED}:
-        raise InvalidAction("Only a match being played or awaiting its result can be voided so.")
+        raise InvalidAction(
+            "Only a match that's being played or waiting for its result can be voided for an "
+            "early leave."
+        )
     if not roster(match).filter(player=leaver).exists():
         raise InvalidAction(f"{leaver.display_name} isn't in this match.")
     claim = pending(match) or EarlyLeave.objects.create(
