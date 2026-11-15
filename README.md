@@ -1,5 +1,5 @@
 ## Acknowledgments
-Thank you to \_bacon_ for the base build. This project started from their Bebot draft bot. Without their work made, PUGs would in rigor mortis and none of our current community would be possible.
+Thank you to \_bacon_ for the base build. This project started from their Bebot draft bot. Without their work, PUGs would be in rigor mortis and none of our current community would be possible.
 
 Thanks to datsir for porting Bebot's standalone draft, priority list, pings and error channel,
 which these versions are built from.
@@ -14,10 +14,14 @@ captains, player draft, champion pick/ban, lobby code, screenshot reporting, Ope
 with MVP and key-player awards, and optional score OCR.
 
 Python, Django and Postgres. One codebase and one image, running as two processes: `bot`
-(discord.py) and `web` (Django admin only).
+(discord.py) and `web` (the Django admin and the staff calibration dashboard).
 
-The [wiki](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/wiki) has the longer guides: setup,
-match flow, draft modes, subs, ratings, commands, architecture, operations and development.
+This README is for whoever runs the bot. Players have the
+[wiki](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/wiki), a short guide to playing a match,
+subs, strikes, ratings and commands. Bugs and ideas go in
+[issues](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/issues); the wiki's
+[Giving Feedback](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/wiki#giving-feedback) says what
+to include.
 
 ## Run it
 
@@ -40,7 +44,8 @@ match flow, draft modes, subs, ratings, commands, architecture, operations and d
    ```
    To use the published image instead of building, run `docker compose pull` and then
    `docker compose up -d`. The image is `ghcr.io/varsitylunchbug/dl-mm-discord`, listed under the
-   repo's Packages, and is built without score OCR.
+   repo's Packages. It's built from `main` without score OCR: `latest` and `main` follow `main`,
+   and `sha-<commit>` pins one build.
 5. In Discord, run `/setup` as the server owner or an Administrator. It creates the queue,
    Waiting Room, results, archive and staff-alerts channels, and it is safe to run again. Then
    give your staff roles their areas with `/permissions grant` (see [Permissions](#permissions)).
@@ -54,7 +59,8 @@ The admin binds to localhost. Put a TLS reverse proxy in front of it before expo
 
 **Upgrading an older install.** The migrations were squashed into one `0001_initial` when scrims,
 staff areas and the staff channel came in. A database created before that can't be migrated
-forward: back it up, start a fresh one, and run `/setup` and `/permissions grant` again.
+forward: back it up, start a fresh one, and run `/setup` and `/permissions grant` again. Databases
+created since migrate normally; the migrate step runs on every `docker compose up`.
 
 ## How a match runs
 
@@ -106,9 +112,12 @@ While any request is pending, the timer is parked and the board hides the phase'
 the result buttons once the game is on). The sub takes the leaving player's team, captaincy,
 lobby-host role and result. The timer resumes where it stopped, with at least 15 s. Nobody in
 3 minutes means the match is cancelled with no rating change, and everyone except the leaving
-player goes back into the queue (or, once captains are set and before the game, a restart). Subbing yourself out after the ready check is a dodge, and once the
-game is on it's a leaver; cancelling the request costs nothing. See Captains and dodge strikes. At most 4 requests can be pending at once. All of these timers
-live in the draft mode's `subs` section.
+player goes back into the queue. Once captains are set and before the game, it restarts instead
+(see below). At most 4 requests can be pending at once.
+
+Subbing yourself out after the ready check is a dodge, and once the game is on it's a leaver;
+cancelling the request costs nothing. See [Captains and dodge strikes](#captains-and-dodge-strikes).
+All of these timers live in the draft mode's `subs` section.
 
 ### Filling an opening
 
@@ -174,7 +183,7 @@ them (`/ocr mode`, `/deadlock settings`) change the same row.
 | Auto lobby, lobby region | Off, automatic | deadlock-api creates each custom lobby |
 | API results | On | Check reported results against Deadlock's match history |
 
-A database from before this change is migrated with each server's existing values.
+These used to be fields on the server's row. Migration `0003` moves each server's values across.
 
 ## Adding things without code
 
@@ -218,8 +227,9 @@ Awards are zero-sum within each team: the MVP and key players take a bigger shar
 update, and their teammates a smaller one, so a team's total change is what it would have been
 without them. The shown rating is the conservative `max(0, mu − 3 × sigma) × 40`. A new player
 shows 0 and climbs as the system becomes sure of them, and a high seed (`/rating seed band:high`,
-mu 35) also starts low on purpose. Player lists show only the rating; `/stats` shows how many placement matches you've played. Tiers are
-Bronze, Silver from 10, Gold 18, Platinum 25 and Diamond 30, on `mu − 3 × sigma`.
+mu 35) also starts low on purpose. Player lists show only the rating; `/stats` shows how many
+placement matches a player has played. Tiers are Bronze, Silver from 10, Gold 18, Platinum 25 and
+Diamond 30, on `mu − 3 × sigma` (shown ratings 400, 720, 1000 and 1200).
 
 Captain tie-breaks, the first player pick and auto-picks compare mu, not the shown rating, so a
 strong player still in placement isn't treated as weak. After the player draft, each team heading
@@ -390,7 +400,7 @@ Every 3 clean completed matches removes a strike, and so does each 14 days witho
 player is told when a strike comes off, and the queue's refusal and `/stats` say how far they are
 from the next. Subbing yourself out after the ready check but before the game starts is a dodge;
 during the ready check, or when your captain asks for it, it isn't, and cancelling the request
-before it's filled costs nothing. Once the game is on it's a leaver, as before.
+before it's filled costs nothing. Once the game is on it's a leaver.
 
 **Early leaves.** While the game is on, a captain can press **Someone left in the first 5 min**
 and pick who. If the other captain agrees, the match is voided with no rating change: the leaver
@@ -530,7 +540,7 @@ Anything that rewrites past ratings shows a preview and needs Confirm.
 | Group | Tables |
 |---|---|
 | Players and ratings | `players`, `seasons`, `player_ratings`, `rating_runs`, `rating_events` |
-| Champions and config | `champions`, `draft_mode_versions`, `communities`, `community_role_grants` |
+| Champions and config | `champions`, `draft_mode_versions`, `communities`, `runtime_settings`, `community_role_grants` |
 | Queue | `queue_entries` |
 | Matches | `matches`, `match_participants`, `match_resources`, `match_transitions`, `draft_actions`, `captain_votes`, `sub_requests`, `sub_offers`, `early_leaves` |
 | Results | `result_submissions`, `match_results`, `match_awards`, `scoreboard_reads`, `player_match_stats`, `player_aliases`, `api_match_checks` |
@@ -540,8 +550,8 @@ Anything that rewrites past ratings shows a preview and needs Confirm.
 For analytics, start at `result_submissions`. Screenshots are in the archive channel: use
 `archive_message_id` and `attachment_id` with the Discord API, because CDN URLs expire. Join
 `draft_actions` for picks and bans, `rating_events` for ratings and `player_match_stats` for
-scoreboard stats. `deadlock_match_id`, when given,
-works with `GET https://api.deadlock-api.com/v1/matches/{id}/metadata`.
+scoreboard stats. `deadlock_match_id`, when given, works with
+`GET https://api.deadlock-api.com/v1/matches/{id}/metadata`.
 
 ## Code layout
 
@@ -552,7 +562,8 @@ league/domain/    Pure rules, no Django or Discord: ratings (openskill_v1), stri
 league/models/    The tables
 league/services/  Transactions: queue, lobby, draft, results, ratings, corrections, awards,
                   standing, penalties, ocr, steam, api_results, calibration, deadlines,
-                  permissions, alerts (the staff channel), and Bebot's tools: scrims, prio, pings
+                  permissions, alerts (the staff channel), runtime (each server's settings),
+                  and Bebot's tools: scrims, prio, pings
 league/integrations/  The deadlock-api client. Network only, no database
 league/web/       The staff calibration dashboard
 league/admin/     Django admin
@@ -560,7 +571,8 @@ bot/handlers/     Clicks and modals: validate, call a service, acknowledge. perm
                   the staff area checks every command and button uses
 bot/commands/     Slash commands
 bot/renderers/    State to Discord components, with no I/O. style.py is the one look (Bebot's
-                  colours, titles and turn strip); board.py renders ranked matches and scrims
+                  colours, titles and turn strip); board.py renders ranked matches and scrims;
+                  names.py names the channels the bot creates
 bot/effects/      Runs Discord side effects from the outbox, with retries
 bot/error_log.py  Posts ERROR logs to each server's /seterrorchannel channel
 scoreocr/         Scoreboard screenshot reader, used through league/services/ocr.py when installed
@@ -574,9 +586,9 @@ The rules that keep it reliable:
 - **Timers are rows.** A poller applies timeouts through the same path as a click. After downtime,
   past-due deadlines get 60 s of grace.
 - **Discord calls happen after commit.** State changes write `outbox_effects` in the same transaction,
-  and a worker runs them in order per lane, retrying on server errors. Each match (or scrim) is a lane,
-  and other work gets one lane per kind and server, so one that keeps
-  failing never holds up another.
+  and a worker runs them in order per lane, retrying on server errors. Each match (or scrim) is a
+  lane, and other work gets one lane per kind and server, so one that keeps failing never holds up
+  another.
 
 ## Operations
 
