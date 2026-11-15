@@ -26,3 +26,7 @@ scoreocr_out/
 scoreocr_out/
 
 backups/
+
+# Local tooling and reference checkouts.
+.claude/
+Bebot-simpleDraft/

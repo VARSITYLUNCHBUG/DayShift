@@ -6,7 +6,8 @@ x-app: &app
     args:
       # true to read report screenshots with score OCR. Then run /ocr mode in Discord.
       INSTALL_OCR: ${INSTALL_OCR:-false}
-  image: dl-mm-discord:latest
+  # Published to the repo's packages. `docker compose pull` fetches it; `--build` builds it here.
+  image: ghcr.io/varsitylunchbug/dl-mm-discord:latest
   env_file: .env
   environment:
     DATABASE_URL: postgres://draftbot:${POSTGRES_PASSWORD:-change-me}@db:5432/draftbot
