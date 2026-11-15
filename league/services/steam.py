@@ -69,4 +69,4 @@ def describe(player: Player) -> str:
         return "No Steam account linked. Use /link to add one (optional)."
     name = f"**{player.steam_name}**" if player.steam_name else "an account"
     status = "verified in a match" if player.steam_verified_at else "not yet seen in a match"
-    return f"Steam: {name} (account {player.steam_account_id}), {status}."
+    return f"Steam: {name}, {status}."

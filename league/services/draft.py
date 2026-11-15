@@ -10,10 +10,10 @@ from django.db import IntegrityError, transaction
 from league.domain import copy
 from league.domain.draft_plan import PlanStep, build_plan, player_draft_length, team_for_role
 from league.domain.engine import (
-    COINFLIP_LABELS,
     DraftablePlayer,
     Status,
     apply_coinflip,
+    apply_ranked_coinflip,
     auto_champion,
     auto_coinflip_choice,
     auto_player_pick,
@@ -25,6 +25,7 @@ from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import DraftMode
 from league.models import Champion, DraftAction, Match, Player
 from league.models.matches import MatchKind, Source
+from league.services import runtime
 from league.services.common import (
     active_participants,
     add_effect,
@@ -192,7 +193,7 @@ def on_player_draft_timeout(match: Match) -> None:
 
 def begin_coinflip(match: Match, mode: DraftMode) -> None:
     """The player draft is over: make team voice channels and flip a coin between the captains.
-    The winner chooses First Pick, Last Pick or a side; the loser chooses from the other kind."""
+    The winner chooses a side and Pick 1 or Pick 2 in one press, which settles both."""
     match.coinflip_winner = coin_flip_team(match.rng_seed, "coinflip")
     match.coinflip_winner_choice = ""
     match.coinflip_loser_choice = ""
@@ -214,8 +215,8 @@ def begin_coinflip(match: Match, mode: DraftMode) -> None:
         "ping",
         {
             "user_ids": [winner.discord_user_id],
-            "text": "teams are set and you won the coinflip! Choose First Pick, Last Pick or a "
-            "side.",
+            "text": "teams are set and you won the coinflip! Choose your side and Pick 1 or "
+            "Pick 2 on the board. Pick 1 bans and picks first.",
         },
         match=match,
     )
@@ -238,60 +239,51 @@ def choose_coinflip(match_id: int, captain: Player, choice: str) -> None:
     team, who = coinflip_turn(match)
     if captain_of(match, team).player_id != captain.pk:
         raise NotAllowed(copy.coinflip_only(who))
-    if choice not in coinflip_options(match.coinflip_winner_choice):
+    ranked = match.kind != MatchKind.SCRIM
+    if choice not in coinflip_options(match.coinflip_winner_choice, ranked=ranked):
         raise InvalidAction("That choice isn't available.")
     _record_coinflip(match, choice, source=Source.USER, actor=captain)
 
 
 def on_coinflip_timeout(match: Match) -> None:
     """Whoever's turn it is gets a random choice, as a timed-out ban or pick does."""
-    choice = auto_coinflip_choice(match.rng_seed, match.coinflip_winner_choice)
+    ranked = match.kind != MatchKind.SCRIM
+    choice = auto_coinflip_choice(match.rng_seed, match.coinflip_winner_choice, ranked=ranked)
     _record_coinflip(match, choice, source=Source.TIMEOUT, actor=None)
 
 
 def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | None) -> None:
     mode = mode_of(match)
-    scrim = match.kind == MatchKind.SCRIM
-    if not match.coinflip_winner_choice:
+    if match.kind != MatchKind.SCRIM:
+        # Ranked: the winner's one choice sets the sides and who bans and picks first.
         match.coinflip_winner_choice = choice
-        if scrim:  # As in Bebot: no turn timer, only the scrim's idle one.
-            bump(match, "coinflip_winner_choice")
-            render_board(match)
-            return
-        match.deadline_at = seconds_from_now(mode.champion_draft.coinflip_seconds)
-        bump(match, "coinflip_winner_choice", "deadline_at")
-        loser = captain_of(match, coinflip_turn(match)[0]).player
-        add_effect(
-            match.community,
-            "ping",
-            {
-                "user_ids": [loser.discord_user_id],
-                "text": f"the coinflip winner chose {COINFLIP_LABELS[choice]}. Your turn to "
-                "choose.",
-            },
-            match=match,
+        match.hidden_king_team, match.champion_first_pick = apply_ranked_coinflip(
+            match.coinflip_winner, choice
         )
+        begin_champion_draft(match, mode, source=source, actor=actor)
+        return
+    if not match.coinflip_winner_choice:
+        # As in Bebot: no turn timer, only the scrim's idle one.
+        match.coinflip_winner_choice = choice
+        bump(match, "coinflip_winner_choice")
         render_board(match)
         return
     match.coinflip_loser_choice = choice
     match.hidden_king_team, match.champion_first_pick = apply_coinflip(
         match.coinflip_winner, match.coinflip_winner_choice, choice
     )
-    if scrim:
-        # Bebot's "Ready to start the draft!": a captain presses Start Draft.
-        from league.services.scrims import IDLE_SECONDS
+    # Bebot's "Ready to start the draft!": a captain presses Start Draft.
+    from league.services.scrims import IDLE_SECONDS
 
-        transition(
-            match,
-            Status.READY_TO_DRAFT,
-            source=source,
-            actor=actor,
-            deadline_at=seconds_from_now(IDLE_SECONDS),
-        )
-        save_transition(match, "champion_first_pick", "hidden_king_team", "coinflip_loser_choice")
-        render_board(match)
-        return
-    begin_champion_draft(match, mode, source=source, actor=actor)
+    transition(
+        match,
+        Status.READY_TO_DRAFT,
+        source=source,
+        actor=actor,
+        deadline_at=seconds_from_now(IDLE_SECONDS),
+    )
+    save_transition(match, "champion_first_pick", "hidden_king_team", "coinflip_loser_choice")
+    render_board(match)
 
 
 def begin_champion_draft(
@@ -307,7 +299,12 @@ def begin_champion_draft(
         deadline_at=seconds_from_now(step.seconds),
     )
     save_transition(
-        match, "champion_first_pick", "hidden_king_team", "coinflip_loser_choice", "step_index"
+        match,
+        "champion_first_pick",
+        "hidden_king_team",
+        "coinflip_winner_choice",
+        "coinflip_loser_choice",
+        "step_index",
     )
     if match.kind == MatchKind.RANKED:  # A scrim's channel is public: no notices there.
         first = captain_of(match, match.champion_first_pick).player
@@ -316,7 +313,7 @@ def begin_champion_draft(
             "ping",
             {
                 "user_ids": [first.discord_user_id],
-                "text": "you ban first. The champion draft is on.",
+                "text": "you ban first.",
             },
             match=match,
         )
@@ -438,7 +435,7 @@ def begin_lobby_code(match: Match, mode: DraftMode) -> None:
         deadline_at=seconds_from_now(mode.lobby_code.seconds),
     )
     save_transition(match, "lobby_code_host", "lobby_code_attempts", "step_index")
-    if match.community.auto_lobby:
+    if runtime.of(match.community_id).auto_lobby:
         # The host can still enter a code by hand while the bot asks deadlock-api for one.
         add_effect(
             match.community,

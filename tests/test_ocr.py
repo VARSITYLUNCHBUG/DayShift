@@ -28,7 +28,7 @@ from league.models import (
 )
 from league.models.ratings import RunKind
 from league.models.scoreboards import AwardSource, ReadStatus
-from league.services import awards, integrity, ocr, queue, ratings, results
+from league.services import awards, integrity, ocr, queue, ratings, results, runtime
 from league.services.common import captain_of
 from league.services.community import start_season
 from tests.helpers import fresh, image, to_in_progress
@@ -78,7 +78,7 @@ def test_parse_value_matches_the_reader() -> None:
 
 @pytest.fixture
 def season(league: Community) -> Season:
-    Community.objects.filter(pk=league.pk).update(score_ocr="on")
+    runtime.update(league, score_ocr="on")
     return start_season(league, {"placement_games": 0})
 
 
@@ -170,7 +170,7 @@ def test_a_read_after_the_result_corrects_the_ledger(
 def test_shadow_mode_stores_stats_and_changes_nothing(
     season: Season, league: Community, players: list[Player]
 ) -> None:
-    Community.objects.filter(pk=league.pk).update(score_ocr="shadow")
+    runtime.update(league, score_ocr="shadow")
     match = _live_match(league, players)
     loser = "B" if match.hidden_king_team == "A" else "A"
     submission = _report(match, loser)

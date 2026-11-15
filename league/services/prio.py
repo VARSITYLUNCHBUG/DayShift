@@ -1,43 +1,36 @@
-"""Bebot's voice priority list (/priolist): who has waited longest in the Waiting Room.
+"""The priority list: who in the live queue has waited longest.
 
-It's a display for running inhouses by hand, alongside the match queue, and follows the match
-lifecycle rather than every voice move:
+Only people in the match queue are on it. The Waiting Room is a public voice channel, and sitting
+in it doesn't mean someone wants to play, so voice has nothing to do with the list:
 
-- Joining the Waiting Room puts you on the list. Leaving starts a 5 minute grace period; come
-  back in time and you keep your place.
-- Being put in a match (as it pops, as a ready-check replacement, or subbing in) takes you off.
-  While the match is live, your voice moves don't count.
-- When the match ends, cleanup moves players still in its voice back to the Waiting Room, and
-  the list is then caught up with everyone there, so they all go on the back. That's what Bebot's
-  "recently played" timer did. A no-fault void counts the same way.
+- Joining the queue puts you on the back of the list.
+- Leaving the queue holds your place for 3 minutes. Join again in time and you get your place
+  back, on the list and in the queue.
+- Being put in a match (as it pops, as a ready-check replacement, or subbing in) takes you off,
+  as do staff removing you from the queue and a queue clear. After the match you queue again,
+  so you go on the back.
+- A cancelled lobby puts its ready players back in the queue at their old place, and back on the
+  list at the same place.
 
-The Waiting Room is the one set up for the match queue (/setup), so there's nothing extra to
-configure. Waits show as Discord timestamps, which count up on their own, so the list is only
-re-rendered when it changes.
+The list decides who is offered an opening first (see `league.services.subs`). It isn't posted
+anywhere: /prio shows each member their own place, privately.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Collection, Mapping
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from django.db import transaction
 
-from league.models import Community, MatchParticipant, Player, PrioEntry
-from league.services.common import add_effect, now, request_render
+from league.models import MatchParticipant, Player, PrioEntry
+from league.services.common import now
 
 logger = logging.getLogger(__name__)
 
-GRACE_SECONDS = 300
-RENDER_KIND = "render_prio"
-DELETE_KIND = "delete_prio_message"
-RECONCILE_KIND = "reconcile_prio"
-
-
-def tracked_communities() -> list[Community]:
-    return list(Community.objects.filter(waiting_room_channel_id__isnull=False))
+GRACE_SECONDS = 180
 
 
 def _in_match(community_id: int, user_ids: Collection[int]) -> set[int]:
@@ -51,157 +44,83 @@ def _in_match(community_id: int, user_ids: Collection[int]) -> set[int]:
     return set(rows.values_list("player__discord_user_id", flat=True))
 
 
-def render(community_id: int) -> None:
-    """Re-render the list's message, if there is one. Pending renders coalesce."""
-    community = Community.objects.get(pk=community_id)
-    if community.prio_channel_id:
-        request_render(community, RENDER_KIND)
+# --- Changes, from the queue ------------------------------------------------------------------
+# Each runs inside the queue change that caused it, under the community lock.
 
 
-@transaction.atomic
-def set_display(community_id: int, channel_id: int) -> None:
-    """/priolist: post a fresh list in this channel, at the bottom. The old message goes."""
-    community = Community.objects.select_for_update().get(pk=community_id)
-    old_channel, old_message = community.prio_channel_id, community.prio_message_id
-    community.prio_channel_id, community.prio_message_id = channel_id, None
-    community.save(update_fields=["prio_channel_id", "prio_message_id"])
-    if old_channel and old_message:
-        add_effect(community, DELETE_KIND, {"channel_id": old_channel, "message_id": old_message})
-    render(community_id)
-
-
-def repost(community_id: int) -> bool:
-    """/refresh: post the list again below any chat. False if there's no list yet."""
-    channel_id = (
-        Community.objects.filter(pk=community_id).values_list("prio_channel_id", flat=True).first()
-    )
-    if not channel_id:
-        return False
-    set_display(community_id, channel_id)
-    return True
-
-
-def recheck(community: Community) -> None:
-    """Someone left a live match early (a missed ready check, subbed out). If they're already
-    in the Waiting Room they get no voice event, so read the room again."""
-    if community.waiting_room_channel_id:
-        request_render(community, RECONCILE_KIND)
-
-
-def save_display(community_id: int, channel_id: int, message_id: int) -> None:
-    """The list was posted. Ignored if /priolist moved it to another channel meanwhile."""
-    Community.objects.filter(pk=community_id, prio_channel_id=channel_id).update(
-        prio_message_id=message_id
-    )
-
-
-# --- Changes --------------------------------------------------------------------------------
-
-
-def _join(community_id: int, user_id: int, name: str, moment: datetime) -> None:
-    """In the Waiting Room: keep their place if they have one, else go on the back."""
-    entry, created = PrioEntry.objects.select_for_update().get_or_create(
-        community_id=community_id,
-        discord_user_id=user_id,
-        defaults={"display_name": name[:100] or str(user_id), "queued_at": moment},
-    )
-    if created:
-        return
-    entry.grace_until = None
-    if name:
-        entry.display_name = name[:100]
-    entry.save(update_fields=["grace_until", "display_name"])
-
-
-def _start_grace(community_id: int, user_ids: Collection[int], moment: datetime) -> int:
-    return PrioEntry.objects.filter(
-        community_id=community_id, discord_user_id__in=list(user_ids), grace_until__isnull=True
-    ).update(grace_until=moment + timedelta(seconds=GRACE_SECONDS))
-
-
-@transaction.atomic
-def on_voice_state(
-    community_id: int,
-    waiting_room_id: int,
-    user_id: int,
-    name: str,
-    before_id: int | None,
-    after_id: int | None,
-) -> None:
-    """Someone moved in voice. Only moves into or out of the Waiting Room matter."""
-    if waiting_room_id not in (before_id, after_id) or before_id == after_id:
-        return
-    if _in_match(community_id, [user_id]):
-        # Matched players are off the list wherever they go, until the match ends.
-        drop_players(community_id, [user_id])
-        return
+def joined_queue(community_id: int, player: Player) -> datetime:
+    """They joined the queue. Returns their place: the one held for them if they left less than
+    3 minutes ago, else now, the back of the list. The queue uses the same time."""
     moment = now()
-    if after_id == waiting_room_id:
-        _join(community_id, user_id, name, moment)
-    else:
-        _start_grace(community_id, [user_id], moment)
-    render(community_id)
+    entry = (
+        PrioEntry.objects.select_for_update()
+        .filter(community_id=community_id, discord_user_id=player.discord_user_id)
+        .first()
+    )
+    if entry is not None and (entry.grace_until is None or entry.grace_until > moment):
+        entry.grace_until = None
+        entry.display_name = player.display_name[:100] or entry.display_name
+        entry.save(update_fields=["grace_until", "display_name"])
+        return entry.queued_at
+    if entry is not None:
+        entry.delete()  # Held, but the hold ran out before the timer got to it.
+    PrioEntry.objects.create(
+        community_id=community_id,
+        discord_user_id=player.discord_user_id,
+        display_name=player.display_name[:100] or str(player.discord_user_id),
+        queued_at=moment,
+    )
+    return moment
+
+
+def left_queue(community_id: int, user_ids: Collection[int]) -> None:
+    """They left the queue themselves: hold their place for 3 minutes."""
+    PrioEntry.objects.filter(
+        community_id=community_id, discord_user_id__in=list(user_ids), grace_until__isnull=True
+    ).update(grace_until=now() + timedelta(seconds=GRACE_SECONDS))
+
+
+def requeued(community_id: int, places: Collection[tuple[Player, datetime]]) -> None:
+    """A cancelled lobby put these players back in the queue at their old place."""
+    for player, queued_at in places:
+        PrioEntry.objects.update_or_create(
+            community_id=community_id,
+            discord_user_id=player.discord_user_id,
+            defaults={
+                "display_name": player.display_name[:100] or str(player.discord_user_id),
+                "queued_at": queued_at,
+                "grace_until": None,
+            },
+        )
 
 
 def drop_players(community_id: int, user_ids: Collection[int]) -> None:
-    """They've been put in a match, so they're off the list. Runs inside the match change."""
-    deleted, _ = PrioEntry.objects.filter(
-        community_id=community_id, discord_user_id__in=list(user_ids)
-    ).delete()
-    if deleted:
-        render(community_id)
+    """Off the list now, with no place held: put in a match, or taken out of the queue by staff."""
+    PrioEntry.objects.filter(community_id=community_id, discord_user_id__in=list(user_ids)).delete()
+
+
+def drop_all(community_id: int) -> None:
+    """The queue was cleared."""
+    PrioEntry.objects.filter(community_id=community_id).delete()
 
 
 @transaction.atomic
 def remove(community_id: int, user_id: int) -> bool:
-    """/removeprio. False if they weren't on the list."""
+    """/removeprio. False if they weren't on the list. They stay in the queue, at the back of
+    the list's order for openings."""
     deleted, _ = PrioEntry.objects.filter(
         community_id=community_id, discord_user_id=user_id
     ).delete()
-    if deleted:
-        render(community_id)
     return bool(deleted)
-
-
-@transaction.atomic
-def reconcile(community_id: int, waiting: Mapping[int, str]) -> None:
-    """Match the list to who is in the Waiting Room now.
-
-    Runs at startup, for moves made while the bot was down, and after a match's cleanup: anyone
-    already sitting in the Waiting Room got no voice event to put them back on. `waiting` maps
-    the user IDs there to display names; a blank name is looked up from their player record.
-    """
-    moment = now()
-    busy = _in_match(community_id, waiting)
-    unnamed = [user_id for user_id, name in waiting.items() if not name]
-    known = dict(
-        Player.objects.filter(discord_user_id__in=unnamed).values_list(
-            "discord_user_id", "display_name"
-        )
-    )
-    for user_id, name in waiting.items():
-        if user_id not in busy:
-            _join(community_id, user_id, name or known.get(user_id, ""), moment)
-    away = PrioEntry.objects.filter(community_id=community_id).exclude(
-        discord_user_id__in=list(waiting)
-    )
-    _start_grace(community_id, list(away.values_list("discord_user_id", flat=True)), moment)
-    if busy:
-        drop_players(community_id, busy)
-    render(community_id)
 
 
 # --- Timers ---------------------------------------------------------------------------------
 
 
 def tick(moment: datetime) -> int:
-    """Take off anyone whose grace period has run out."""
-    expired = PrioEntry.objects.filter(grace_until__lte=moment)
-    changed = set(expired.values_list("community_id", flat=True))
-    expired.delete()
-    for community_id in changed:
-        render(community_id)
-    return len(changed)
+    """Take off anyone whose hold has run out."""
+    deleted, _ = PrioEntry.objects.filter(grace_until__lte=moment).delete()
+    return deleted
 
 
 # --- Read model -----------------------------------------------------------------------------
@@ -221,7 +140,7 @@ class PrioView:
 
 
 def prio_view(community_id: int) -> PrioView:
-    """Longest wait first. Anyone in a live match is left off, in case a move was missed."""
+    """Longest wait first. Anyone in a live match is left off, in case a change was missed."""
     entries = list(PrioEntry.objects.filter(community_id=community_id).order_by("queued_at", "id"))
     busy = _in_match(community_id, [entry.discord_user_id for entry in entries])
     return PrioView(
@@ -231,3 +150,22 @@ def prio_view(community_id: int) -> PrioView:
             if entry.discord_user_id not in busy
         ]
     )
+
+
+@dataclass(frozen=True, slots=True)
+class PrioPlace:
+    """One member's own place, for /prio."""
+
+    position: int  # 1 is next in line.
+    total: int
+    queued_at: datetime
+    held_until: datetime | None = None  # Set while their place is held after leaving.
+
+
+def place_of(community_id: int, user_id: int) -> PrioPlace | None:
+    """Where this member stands, or None if they aren't in the queue or holding a place."""
+    lines = prio_view(community_id).lines
+    for index, line in enumerate(lines, start=1):
+        if line.discord_user_id == user_id:
+            return PrioPlace(index, len(lines), line.queued_at, line.grace_until)
+    return None

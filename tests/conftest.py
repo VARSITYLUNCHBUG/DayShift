@@ -79,7 +79,6 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
         steam,
         subs,
     )
-    from league.services import queue as queue_service
     from league.services import ratings as ratings_service
 
     for module in (
@@ -96,7 +95,6 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
         penalties,
         pings,
         prio,
-        queue_service,
         ratings_service,
         results,
         scrims,

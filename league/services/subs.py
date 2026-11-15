@@ -5,9 +5,9 @@ can ask for a teammate, which needs the other captain to agree. From the request
 settled the match is on hold: its timer is parked and every action waits.
 
 Sub in fills the slot. Whoever opened it can name someone, who has to accept. If they don't name
-anyone in time, or the person they named says no, the slot is offered in order: first to whoever
-has been in the Waiting Room longest (the priority list, leaving out anyone who has stepped out),
-then down the queue. Unfilled by the deadline, the match is cancelled with no rating change.
+anyone in time, or the person they named says no, the slot is offered in order, by DM: first down
+the priority list (who in the queue has waited longest), then anyone else in the queue. Unfilled
+by the deadline, the match is cancelled with no rating change.
 
 A missed ready check opens spots the same way, with nobody to name a sub: they're offered
 straight away, and a lobby still short after `ready_check.refill_seconds` is cancelled.
@@ -379,8 +379,9 @@ def _make_offer(
 
 
 def _candidates(match: Match) -> Iterator[tuple[Player, str]]:
-    """Who to ask, in order: the priority list (longest in the Waiting Room first, leaving out
-    anyone who has stepped out), then the queue. Lazily, so only those needed get looked up."""
+    """Who to ask, in order: the priority list (in the queue now, longest wait first, leaving out
+    places held for someone who stepped out), then anyone else in the queue. Lazily, so only
+    those needed get looked up."""
     waiting = PrioEntry.objects.filter(community=match.community, grace_until__isnull=True)
     for entry in waiting.order_by("queued_at", "id"):
         yield get_or_create_player(entry.discord_user_id, entry.display_name), OfferSource.PRIO
@@ -427,13 +428,13 @@ def open_openings(
     names = ", ".join(f"**{player.display_name}**" for player in missing)
     why = "missed the ready check" if reason == SubReason.MISSED_READY else "left before the game"
     one = len(missing) == 1
-    spots = "Their spot is" if one else "Their spots are"
-    filled = "it isn't filled" if one else "they aren't all filled"
+    finding = "Finding new player" if one else "Finding new players"
+    found = "one isn't found" if one else "they aren't all found"
     _ping(
         match,
         [],
-        f"{names} {why}. {spots} offered to the priority list, then the queue. The lobby is "
-        f"cancelled <t:{int(deadline.timestamp())}:R> if {filled}.",
+        f"{names} {why}. {finding}. The lobby is cancelled "
+        f"<t:{int(deadline.timestamp())}:R> if {found}.",
     )
     render_board(match)
 
@@ -779,13 +780,6 @@ def offer_info(offer_id: int) -> OfferInfo:
         notice_channel_id=offer.notice_channel_id,
         notice_message_id=offer.notice_message_id,
     )
-
-
-def offer_notice_channel(offer_id: int) -> int | None:
-    """Where an offer's mention goes: the priority list's channel, else the queue's."""
-    offer = SubOffer.objects.select_related("request__match__community").get(pk=offer_id)
-    community = offer.request.match.community
-    return community.prio_channel_id or community.queue_channel_id
 
 
 def record_offer_notice(offer_id: int, channel_id: int | None, message_id: int | None) -> None:

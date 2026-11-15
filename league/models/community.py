@@ -24,7 +24,7 @@ DEFAULT_PENALTY_POLICY = {
 
 OCR_MODES = (
     ("off", "Off"),
-    ("shadow", "Shadow: read and store stats only"),
+    ("shadow", "Stats only"),
     ("on", "On: stats, MVP and key players, and cross-checks"),
 )
 
@@ -60,21 +60,11 @@ class Community(models.Model):
     results_channel_id = models.BigIntegerField(null=True, blank=True)
     archive_channel_id = models.BigIntegerField(null=True, blank=True)
     match_category_id = models.BigIntegerField(null=True, blank=True)
-    # The voice priority list's message (/priolist).
-    prio_channel_id = models.BigIntegerField(null=True, blank=True)
-    prio_message_id = models.BigIntegerField(null=True, blank=True)
     # Staff alert cards: disputes and everything else staff should look at (/setup).
     staff_channel_id = models.BigIntegerField(null=True, blank=True)
     # This server's error summaries are posted here (/seterrorchannel).
     error_channel_id = models.BigIntegerField(null=True, blank=True)
-    max_concurrent_matches = models.PositiveSmallIntegerField(default=12)
     penalty_policy = models.JSONField(default=default_penalty_policy)
-    # Reading report screenshots. Needs the `ocr` dependency group installed.
-    score_ocr = models.CharField(max_length=8, choices=OCR_MODES, default="off")
-    # deadlock-api: create the custom lobby for each match, and check results by match ID.
-    auto_lobby = models.BooleanField(default=False)
-    lobby_region = models.CharField(max_length=24, blank=True)  # Empty: the API's default.
-    api_results = models.BooleanField(default=True)
 
     class Meta:
         db_table = "communities"
@@ -82,3 +72,50 @@ class Community(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class RuntimeSettings(models.Model):
+    """One server's switches. They take effect at once, with no restart: change them in the
+    admin, or with the staff commands that set them (/ocr mode, /deadlock settings).
+
+    Read them through `league.services.runtime.of`, which creates the row on first use."""
+
+    community = models.OneToOneField(Community, on_delete=models.CASCADE, related_name="runtime")
+    max_concurrent_matches = models.PositiveSmallIntegerField(
+        default=12, help_text="Ranked matches that can run at once. The queue waits beyond this."
+    )
+    auto_captain = models.BooleanField(
+        default=False,
+        help_text="On: captains are picked automatically, by experience and then rating. "
+        "Off: players vote for captains. Scrims are unaffected.",
+    )
+    open_match_voice = models.BooleanField(
+        default=False,
+        help_text="Let anyone in the server join a match's voice channels, not only its players.",
+    )
+    match_channel_close_minutes = models.PositiveSmallIntegerField(
+        default=3, help_text="Minutes a match's text channel stays open after the match ends."
+    )
+    score_ocr = models.CharField(
+        max_length=8,
+        choices=OCR_MODES,
+        default="off",
+        help_text="Reading report screenshots. Needs the reader installed on the bot's host.",
+    )
+    auto_lobby = models.BooleanField(
+        default=False, help_text="Have deadlock-api's bot create each match's custom lobby."
+    )
+    lobby_region = models.CharField(
+        max_length=24, blank=True, help_text="Region for automatic lobbies. Empty: automatic."
+    )
+    api_results = models.BooleanField(
+        default=True, help_text="Check reported results against Deadlock's match history."
+    )
+
+    class Meta:
+        db_table = "runtime_settings"
+        verbose_name = "runtime settings"
+        verbose_name_plural = "runtime settings"
+
+    def __str__(self) -> str:
+        return f"Settings for {self.community}"

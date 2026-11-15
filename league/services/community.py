@@ -5,10 +5,10 @@ from __future__ import annotations
 from django.db import transaction
 
 from league.domain.errors import InvalidAction
-from league.models import Community, DraftModeVersion, Season
+from league.models import Community, DraftModeVersion, RuntimeSettings, Season
 from league.services.common import now
 
-DEFAULT_MODE_SLUG = "bebot_2ban"
+DEFAULT_MODE_SLUG = "draft_3ban"
 
 
 def get(guild_id: int) -> Community | None:
@@ -21,10 +21,13 @@ def ensure(guild_id: int, name: str) -> Community:
     if community is None:
         mode = DraftModeVersion.objects.filter(slug=DEFAULT_MODE_SLUG).order_by("-version").first()
         if mode is None:
-            raise InvalidAction("No draft modes are loaded. Run `manage.py load_presets` first.")
+            raise InvalidAction(
+                "The bot isn't ready yet: it has no draft modes. Ask whoever hosts it."
+            )
         community = Community.objects.create(
             discord_guild_id=guild_id, name=name[:100], active_mode=mode
         )
+        RuntimeSettings.objects.create(community=community)
     if not Season.objects.filter(community=community, ended_at__isnull=True).exists():
         number = Season.objects.filter(community=community).count() + 1
         Season.objects.create(

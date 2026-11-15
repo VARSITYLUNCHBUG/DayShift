@@ -31,8 +31,9 @@ from league.models import (
     RatingEvent,
     ScoreboardRead,
 )
+from league.models.api import CheckStatus
 from league.models.permissions import Area
-from league.models.scoreboards import AwardSource
+from league.models.scoreboards import AwardSource, ReadStatus
 from league.services import (
     api_results,
     awards,
@@ -49,6 +50,7 @@ from league.services import (
     queue,
     ratings,
     results,
+    runtime,
     standing,
     steam,
 )
@@ -107,7 +109,8 @@ def _preview_text(preview: Preview) -> str:
     rows = [f"{names[player_id][:16]:<16} {delta:+d}" for player_id, delta in ordered[:25]]
     extra = f"\n...and {len(ordered) - 25} more" if len(ordered) > 25 else ""
     return (
-        f"This writes {preview.events_to_write} ledger rows, because later matches shift too.\n"
+        f"This recalculates {preview.events_to_write} rating changes, including later matches "
+        "that this one affects.\n"
         "```\n" + "\n".join(rows) + extra + "\n```"
     )
 
@@ -123,20 +126,20 @@ async def _send_confirm(
 match_group = app_commands.Group(name="match", description="Staff: manage matches")
 
 
+def _status_text(community: Community, match_id: int) -> str:
+    match = _get_match(community, match_id)
+    deadline = (
+        f", next timeout <t:{int(match.deadline_at.timestamp())}:R>" if match.deadline_at else ""
+    )
+    winner = boards.outcome_label(match, match.winner) if match.winner else "-"
+    return f"Match #{match.pk}: **{match.get_status_display()}**{deadline}. Winner: {winner}."
+
+
 @match_group.command(name="status", description="Where a match is up to")
 async def match_status(interaction: Interaction[Any], match_id: int) -> None:
     async def run() -> None:
         community = await _staff_start(interaction, Area.MATCH_CONTROL)
-        match = await db(_get_match, community, match_id)
-        deadline = (
-            f", next timeout <t:{int(match.deadline_at.timestamp())}:R>"
-            if match.deadline_at
-            else ""
-        )
-        await reply(
-            interaction,
-            f"Match #{match.pk}: **{match.status}**{deadline}. Winner: {match.winner or '-'}.",
-        )
+        await reply(interaction, await db(_status_text, community, match_id))
 
     await guarded(interaction, run)
 
@@ -395,7 +398,7 @@ rating_group = app_commands.Group(name="rating", description="Staff: ratings")
 
 
 @rating_group.command(name="seed", description="Staff: set a player's starting skill band")
-@app_commands.describe(band="new is skill 15, mid 25 and high 35, with full uncertainty")
+@app_commands.describe(band="Where their rating starts, before their games settle it")
 @app_commands.choices(
     band=[
         app_commands.Choice(name="New", value="new"),
@@ -575,31 +578,35 @@ ocr_group = app_commands.Group(name="ocr", description="Staff: reading report sc
 
 def _set_ocr_mode(community: Community, mode: str) -> None:
     if mode not in ocr.MODES:
-        raise InvalidAction("The mode is off, shadow or on.")
+        raise InvalidAction("Choose off, stats only or on.")
     if mode != "off" and not ocr.available():
         raise InvalidAction(
-            "Score OCR isn't installed here. Build the image with INSTALL_OCR=true first."
+            "Reading screenshots isn't available on this bot yet. Ask whoever hosts it to "
+            "turn it on."
         )
-    Community.objects.filter(pk=community.pk).update(score_ocr=mode)
+    runtime.update(community, score_ocr=mode)
 
 
 def _ocr_status_text(community: Community) -> str:
-    community.refresh_from_db(fields=["score_ocr"])
+    settings_ = runtime.of(community)
     reads = ScoreboardRead.objects.filter(match__community=community)
     total = reads.count()
     by_status = dict(reads.values("status").annotate(n=Count("id")).values_list("status", "n"))
-    installed = "installed" if ocr.available() else "not installed"
-    lines = [f"Score OCR is **{community.score_ocr}** ({installed}). {total} reads so far."]
+    available = "" if ocr.available() else " (not available on this bot)"
+    lines = [
+        f"Reading screenshots: **{settings_.get_score_ocr_display()}**{available}. "
+        f"{total} read so far."
+    ]
     if total:
-        lines.append(", ".join(f"{status}: {n}" for status, n in sorted(by_status.items())))
+        lines.append(", ".join(f"{ReadStatus(s).label}: {n}" for s, n in sorted(by_status.items())))
     return "\n".join(lines)
 
 
-@ocr_group.command(name="mode", description="Turn reading report screenshots off, shadow or on")
+@ocr_group.command(name="mode", description="Turn reading report screenshots off or on")
 @app_commands.choices(
     mode=[
         app_commands.Choice(name="Off", value="off"),
-        app_commands.Choice(name="Shadow: store stats only", value="shadow"),
+        app_commands.Choice(name="Stats only", value="shadow"),
         app_commands.Choice(name="On: stats, MVP and key players, cross-checks", value="on"),
     ]
 )
@@ -607,12 +614,12 @@ async def ocr_mode(interaction: Interaction[Any], mode: app_commands.Choice[str]
     async def run() -> None:
         community = await _staff_start(interaction, Area.SETUP)
         await db(_set_ocr_mode, community, mode.value)
-        await reply(interaction, f"Score OCR is now {mode.value}. New reports use it.")
+        await reply(interaction, f"Reading screenshots: **{mode.name}**. New reports use it.")
 
     await guarded(interaction, run)
 
 
-@ocr_group.command(name="status", description="Whether score OCR runs, and how reads have gone")
+@ocr_group.command(name="status", description="Whether screenshots are read, and how it's gone")
 async def ocr_status(interaction: Interaction[Any]) -> None:
     async def run() -> None:
         community = await _staff_start(interaction, Area.SETUP)
@@ -628,7 +635,7 @@ def _modes_text(community: Community) -> str:
     lines = []
     for version in modes.latest_versions():
         active = " (active)" if version.pk == community.active_mode_id else ""
-        lines.append(f"`{version.slug}` v{version.version}: {version.name}{active}")
+        lines.append(f"**{version.name}**{active}: `/mode activate slug:{version.slug}`")
     return "\n".join(lines) or "No modes loaded."
 
 
@@ -648,7 +655,9 @@ def _activate_latest(community_id: int, slug: str) -> DraftModeVersion:
     try:
         return modes.activate(community_id, version.pk)
     except ModeValidationError as exc:
-        raise InvalidAction("That mode can't run: " + "; ".join(exc.problems)) from exc
+        raise InvalidAction(
+            "That mode has a setup problem and can't be used. Ask whoever hosts the bot."
+        ) from exc
 
 
 @mode_group.command(name="activate", description="Use this mode for new lobbies")
@@ -657,7 +666,9 @@ async def mode_activate(interaction: Interaction[Any], slug: str) -> None:
         community = await _staff_start(interaction, Area.SETUP)
         version = await db(_activate_latest, community.pk, slug)
         await db(common.render_queue, community)
-        await reply(interaction, f"New lobbies now use {version}. Live matches keep their own.")
+        await reply(
+            interaction, f"New lobbies now use **{version.name}**. Live matches keep their own."
+        )
 
     await guarded(interaction, run)
 
@@ -674,7 +685,7 @@ async def roster_sync(interaction: Interaction[Any]) -> None:
         if diff.is_empty:
             await reply(interaction, "The roster is up to date.")
             return
-        lines = [f"New: {hero.name} (id {hero.id})" for hero in diff.new]
+        lines = [f"New: {hero.name}" for hero in diff.new]
         lines += [f"Renamed: {old.name} -> {new}" for old, new in diff.renamed]
         lines += [f"Would be disabled: {champion.name}" for champion in diff.missing_upstream]
 
@@ -687,12 +698,12 @@ async def roster_sync(interaction: Interaction[Any]) -> None:
     await guarded(interaction, run)
 
 
-@app_commands.command(name="ledger_check", description="Staff: verify the rating ledger")
+@app_commands.command(name="ledger_check", description="Staff: check that ratings add up")
 async def ledger_check(interaction: Interaction[Any]) -> None:
     async def run() -> None:
         await _staff_start(interaction, Area.RATINGS)
         problems = await db(integrity.check_all)
-        await reply(interaction, "\n".join(problems)[:1900] if problems else "Ledger OK.")
+        await reply(interaction, "\n".join(problems)[:1900] if problems else "Ratings add up.")
 
     await guarded(interaction, run)
 
@@ -704,43 +715,40 @@ deadlock_group = app_commands.Group(
 
 def _save_deadlock_settings(
     community: Community, auto_lobby: bool | None, region: str | None, check_results: bool | None
-) -> Community:
-    fields = []
+) -> None:
+    values: dict[str, object] = {}
     if region is not None:
         cleaned = region.strip().lower()
         if cleaned and cleaned not in deadlock_api.SERVER_REGIONS:
             raise InvalidAction("Unknown region. Start typing to see the list.")
-        community.lobby_region = cleaned
-        fields.append("lobby_region")
+        values["lobby_region"] = cleaned
     if auto_lobby is not None:
-        community.auto_lobby = auto_lobby
-        fields.append("auto_lobby")
+        values["auto_lobby"] = auto_lobby
     if check_results is not None:
-        community.api_results = check_results
-        fields.append("api_results")
-    if fields:
-        community.save(update_fields=fields)
-    return community
+        values["api_results"] = check_results
+    if values:
+        runtime.update(community, **values)
 
 
 def _deadlock_status_text(community: Community) -> str:
-    community.refresh_from_db()
+    settings_ = runtime.of(community)
     checks = ApiMatchCheck.objects.filter(match__community=community)
     by_status = dict(checks.values("status").annotate(n=Count("id")).values_list("status", "n"))
     linked = Player.objects.filter(steam_account_id__isnull=False)
     lines = [
-        f"Automatic lobbies: **{'on' if community.auto_lobby else 'off'}**"
-        f" (region {community.lobby_region or 'API default'}).",
-        f"Result checks: **{'on' if community.api_results else 'off'}**.",
+        f"Automatic lobbies: **{'on' if settings_.auto_lobby else 'off'}**"
+        f" (region: {settings_.lobby_region or 'automatic'}).",
+        f"Result checks: **{'on' if settings_.api_results else 'off'}**.",
         f"Steam links: {linked.count()}, "
         f"{linked.exclude(steam_verified_at=None).count()} verified.",
     ]
     if by_status:
         lines.append(
-            "Checks so far: " + ", ".join(f"{s}: {n}" for s, n in sorted(by_status.items()))
+            "Checks so far: "
+            + ", ".join(f"{CheckStatus(s).label}: {n}" for s, n in sorted(by_status.items()))
         )
     if not settings.DEADLOCK_API_KEY:
-        lines.append("-# No API key: lobbies are limited to 10 an hour from this server's IP.")
+        lines.append("-# Automatic lobbies are limited to 10 an hour.")
     return "\n".join(lines)
 
 

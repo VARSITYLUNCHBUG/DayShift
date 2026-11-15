@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 from collections.abc import Iterable
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import discord
 
@@ -32,6 +32,8 @@ class Gateway(Protocol):
         name: str,
         member_ids: Iterable[int],
         staff_role_ids: Iterable[int],
+        *,
+        open_to_everyone: bool = False,
     ) -> int: ...
 
     def voice_member_ids(self, guild_id: int, channel_id: int | None) -> set[int]: ...
@@ -75,6 +77,10 @@ class Gateway(Protocol):
         role_ids: Iterable[int] = (),
     ) -> int: ...
 
+    async def edit_text(
+        self, channel_id: int, message_id: int, text: str, *, user_ids: Iterable[int] = ()
+    ) -> None: ...
+
     async def latest_message_id(self, channel_id: int) -> int | None: ...
 
     async def delete_message(self, channel_id: int, message_id: int) -> None: ...
@@ -106,6 +112,8 @@ VOICE_MEMBER = discord.PermissionOverwrite(
     use_voice_activation=True,
 )
 HIDDEN = discord.PermissionOverwrite(view_channel=False, connect=False)
+# The API's overwrite type for a member (0 is a role).
+MEMBER_OVERWRITE: Literal[1] = 1
 # From 16 November 2026, a bot without VIEW_CHANNEL has channels obfuscated or left out of
 # listings, so every channel the bot creates must grant the bot its own access.
 # Don't add manage_permissions here: Discord refuses (50013) an overwrite granting it unless the
@@ -186,14 +194,17 @@ class DiscordGateway:
         name: str,
         member_ids: Iterable[int],
         staff_role_ids: Iterable[int],
+        *,
+        open_to_everyone: bool = False,
     ) -> int:
+        """A match voice channel for its players and staff. With `open_to_everyone` (the server's
+        Open match voice setting) anyone in the server can see and join it too."""
         guild = self._guild(guild_id)
+        overwrites = self._overwrites(guild, member_ids, staff_role_ids, VOICE_MEMBER, SELF_VOICE)
+        if open_to_everyone:
+            overwrites[guild.default_role] = VOICE_MEMBER
         channel = await guild.create_voice_channel(
-            name,
-            category=self._category(guild, category_id),
-            overwrites=self._overwrites(
-                guild, member_ids, staff_role_ids, VOICE_MEMBER, SELF_VOICE
-            ),
+            name, category=self._category(guild, category_id), overwrites=overwrites
         )
         return channel.id
 
@@ -317,6 +328,20 @@ class DiscordGateway:
             raise ChannelGone(str(channel_id)) from exc
         return message.id
 
+    async def edit_text(
+        self, channel_id: int, message_id: int, text: str, *, user_ids: Iterable[int] = ()
+    ) -> None:
+        """Rewrite a text message. An edit never notifies anyone, whoever it mentions."""
+        channel = await self._messageable(channel_id)
+        prefix = " ".join(f"<@{uid}>" for uid in user_ids)
+        try:
+            await channel.get_partial_message(message_id).edit(
+                content=f"{prefix} {text}".strip()[:2000],
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.NotFound as exc:
+            raise ChannelGone(str(message_id)) from exc
+
     async def latest_message_id(self, channel_id: int) -> int | None:
         channel = await self._messageable(channel_id)
         try:
@@ -340,13 +365,19 @@ class DiscordGateway:
             return  # Already gone counts as deleted.
 
     async def grant_member(self, channel_id: int, user_id: int) -> None:
+        """Let one member into a match channel. By ID through the API: `set_permissions` only
+        takes a cached Member, and the bot doesn't keep the member list."""
         channel = await self._messageable(channel_id)
         perms = VOICE_MEMBER if isinstance(channel, discord.VoiceChannel) else TEXT_MEMBER
-        await channel.set_permissions(_member(user_id), overwrite=perms)
+        allow, deny = perms.pair()
+        await self.client.http.edit_channel_permissions(
+            channel_id, user_id, str(allow.value), str(deny.value), MEMBER_OVERWRITE
+        )
 
     async def revoke_member(self, channel_id: int, user_id: int) -> None:
-        channel = await self._messageable(channel_id)
-        await channel.set_permissions(_member(user_id), overwrite=None)
+        await self._messageable(channel_id)  # A channel that's gone raises ChannelGone first.
+        with contextlib.suppress(discord.NotFound):  # They had no overwrite there.
+            await self.client.http.delete_channel_permissions(channel_id, user_id)
 
     async def set_voice_status(self, channel_id: int, text: str) -> None:
         channel = await self._messageable(channel_id)

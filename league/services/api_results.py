@@ -28,7 +28,7 @@ from league.models.alerts import AlertKind
 from league.models.api import CheckStatus
 from league.models.permissions import Area
 from league.models.scoreboards import AwardSource
-from league.services import alerts, steam
+from league.services import alerts, runtime, steam
 from league.services.common import add_effect, lock_match, now, roster
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ HIDDEN_KING_TEAM = 0  # In match metadata, team 0 is Hidden King and team 1 the 
 
 def schedule(match: Match, attempt: int = 1) -> bool:
     """Queue a fetch, if the match has an ID, a result to check and the server wants checks."""
-    if not match.community.api_results or match.deadlock_match_id is None:
+    if not runtime.of(match.community_id).api_results or match.deadlock_match_id is None:
         return False
     if match.status not in CHECKABLE or attempt > len(BACKOFF_MINUTES):
         return False
@@ -210,7 +210,7 @@ def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any])
         and match.status == Status.AWAITING_CONFIRMATION
     ):
         results._dispute(
-            match, None, f"deadlock-api shows the other team won ({deadlock_match_id})."
+            match, None, f"Deadlock's match history shows the other team won ({deadlock_match_id})."
         )
     else:
         alerts.raise_alert(

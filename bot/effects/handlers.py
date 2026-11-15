@@ -11,16 +11,16 @@ from dataclasses import dataclass
 from bot.db import db
 from bot.effects import flow
 from bot.effects.gateway import ChannelGone, Gateway
+from bot.renderers import names
 from bot.renderers.alerts import match_notice, render_alert
 from bot.renderers.board import (
     render_board,
     render_pickers,
     render_ready_dm,
     render_sub_offer_dm,
-    render_sub_offer_notice,
+    render_text_dm,
     render_voice_dm,
 )
-from bot.renderers.prio import render_prio
 from bot.renderers.queue import render_queue
 from bot.renderers.results import (
     render_correction,
@@ -40,7 +40,7 @@ from league.services import (
     effects,
     ocr,
     permissions,
-    prio,
+    runtime,
     scrims,
     subs,
 )
@@ -118,7 +118,7 @@ def _reload(match_id: int) -> Match:
 
 async def _notice(
     env: Env, text: str, *, user_ids: Iterable[int] = (), role_ids: Iterable[int] = ()
-) -> None:
+) -> int:
     """Post a message about the flow. It stays until the match moves on, with the board below it.
 
     The board moves in its own effect, so a failed move can't retry this and ping people twice.
@@ -128,6 +128,14 @@ async def _notice(
     )
     await db(effects.record_notice, env.match_id, message_id)
     await db(_request_board, env.match_id)
+    return message_id
+
+
+READY_PING_TEXT = "your lobby is ready. Press **Ready** on the board below."
+
+
+def _open_voice(community_id: int) -> bool:
+    return runtime.of(community_id).open_match_voice
 
 
 def _match_staff_roles(community_id: int) -> list[int]:
@@ -151,7 +159,7 @@ async def create_lobby(env: Env) -> None:
         text_id = await env.gateway.create_text_channel(
             env.guild_id,
             community.match_category_id,
-            f"match-{env.match_id}",
+            names.match_text(env.match_id),
             members,
             await db(_match_staff_roles, community.pk),
         )
@@ -160,12 +168,28 @@ async def create_lobby(env: Env) -> None:
         voice_id = await env.gateway.create_voice_channel(
             env.guild_id,
             community.match_category_id,
-            f"Match {env.match_id} Lobby",
+            names.lobby_voice(env.match_id),
             members,
             await db(_match_staff_roles, community.pk),
+            open_to_everyone=await db(_open_voice, community.pk),
         )
         await db(effects.record_resource, env.match_id, ResourceKind.LOBBY_VOICE, voice_id)
-    await _notice(env, "your lobby is ready. Press **Ready** on the board below.", user_ids=members)
+    message_id = await _notice(env, READY_PING_TEXT, user_ids=members)
+    await db(effects.record_ready_ping, env.match_id, message_id)
+
+
+@effect(effects.READY_PING_KIND)
+async def refresh_ready_ping(env: Env) -> None:
+    """Someone pressed Ready: the ping now mentions only those who haven't. An edit pings nobody."""
+    channel_id, message_id, unready = await db(effects.ready_ping, env.match_id)
+    if channel_id is None or message_id is None:
+        raise Skip("The ready check is over.")
+    if not unready:  # Everyone still here is ready (the rest missed it): nobody left to call.
+        with contextlib.suppress(ChannelGone):
+            await env.gateway.delete_message(channel_id, message_id)
+        await db(effects.mark_notice_deleted, env.match_id, message_id)
+        return
+    await env.gateway.edit_text(channel_id, message_id, READY_PING_TEXT, user_ids=unready)
 
 
 def channel_url(guild_id: int, channel_id: int | None) -> str | None:
@@ -190,7 +214,7 @@ async def gather_player(env: Env) -> None:
     if user_id in waiting and await env.gateway.move_member(env.guild_id, user_id, lobby_voice):
         return
     invite = await env.gateway.create_invite(env.guild_id, lobby_voice, INVITE_MAX_AGE_SECONDS)
-    view = render_ready_dm(env.match_id, invite, heading="Your match is ready", channel_url=link)
+    view = render_ready_dm(env.match_id, invite, heading="Ready Up", channel_url=link)
     if not await env.gateway.send_dm(user_id, view):
         await _notice(
             env,
@@ -244,27 +268,14 @@ def _needs_ready(match_id: int, user_id: int) -> bool:
 
 @effect("sub_offer")
 async def sub_offer(env: Env) -> None:
-    """Offer an open spot: a DM, and a mention with the same buttons in the priority list's
-    channel (or the queue's). Only if neither reaches them is the next person asked."""
+    """Offer an open spot by DM, which is the only place it goes. If the DM can't reach them,
+    the next person is asked."""
     offer_id = int(env.effect.payload["offer_id"])
     info = await db(subs.offer_info, offer_id)
     if not info.pending:
         raise Skip("The offer has closed.")
     team = await db(_team_label, env.match_id, info.team)
-    reached = await env.gateway.send_dm(info.discord_user_id, render_sub_offer_dm(info, team))
-    channel_id = await db(subs.offer_notice_channel, offer_id)
-    if channel_id is not None and info.notice_message_id is None:
-        try:
-            message_id = await env.gateway.send_view(
-                channel_id,
-                render_sub_offer_notice(info, team),
-                ping_user_ids=[info.discord_user_id],
-            )
-            await db(subs.record_offer_notice, offer_id, channel_id, message_id)
-            reached = True
-        except ChannelGone:
-            logger.info("Offer channel is gone", extra={"offer": offer_id})
-    if not reached:
+    if not await env.gateway.send_dm(info.discord_user_id, render_sub_offer_dm(info, team)):
         await db(subs.fail_offer, offer_id)
 
 
@@ -441,28 +452,6 @@ async def render_queue_effect(env: Env) -> None:
     await db(community_service.save_wiring, community.pk, queue_message_id=message_id)
 
 
-@effect(prio.RENDER_KIND)
-async def render_prio_effect(env: Env) -> None:
-    """The /priolist message: edited in place, or posted again if someone deleted it."""
-    community = await db(_reload_community, env.community.pk)  # /priolist may have moved it.
-    channel_id = community.prio_channel_id
-    if not channel_id:
-        raise Skip("No priority list is set up.")
-    view = render_prio(await db(prio.prio_view, community.pk))
-    if community.prio_message_id:
-        try:
-            await env.gateway.edit_view(channel_id, community.prio_message_id, view)
-            return
-        except ChannelGone:
-            logger.warning("Priority list message is gone; posting a new one")
-    message_id = await env.gateway.send_view(channel_id, view)
-    await db(prio.save_display, community.pk, channel_id, message_id)
-
-
-def _reload_community(community_id: int) -> Community:
-    return Community.objects.get(pk=community_id)
-
-
 # --- Messages --------------------------------------------------------------------------------
 
 
@@ -473,6 +462,16 @@ async def ping(env: Env) -> None:
         str(env.effect.payload["text"]),
         user_ids=[int(uid) for uid in env.effect.payload["user_ids"]],
     )
+
+
+@effect("dm_player")
+async def dm_player(env: Env) -> None:
+    """A note for one player only. It never goes to a channel: if their DMs are closed, it's
+    dropped."""
+    payload = env.effect.payload
+    view = render_text_dm(env.match_id, str(payload["heading"]), str(payload["text"]))
+    if not await env.gateway.send_dm(int(payload["discord_user_id"]), view):
+        raise Skip("DMs are closed.")
 
 
 @effect("ping_lobby")
@@ -592,9 +591,10 @@ async def create_team_voice(env: Env) -> None:
         channel_id = await env.gateway.create_voice_channel(
             env.guild_id,
             community.match_category_id,
-            boards.team_name(captains.get(team, f"Match {env.match_id}"))[:100],
+            names.team_voice(env.match_id, captains.get(team, "")),
             members,
             await db(_match_staff_roles, community.pk),
+            open_to_everyone=await db(_open_voice, community.pk),
         )
         await db(effects.record_resource, env.match_id, kind, channel_id)
     await db(_enqueue_team_moves, env.match_id, assignments)
@@ -616,7 +616,8 @@ async def team_move_player(env: Env) -> None:
     view = render_voice_dm(
         env.match_id,
         invite,
-        heading="Teams are set: join your team's voice",
+        heading="Teams picked",
+        subtitle=False,
         channel_url=channel_url(env.guild_id, resources.get(ResourceKind.TEXT)),
     )
     if not await env.gateway.send_dm(user_id, view):
@@ -715,11 +716,9 @@ async def read_scoreboard(env: Env) -> None:
 @effect("create_api_lobby")
 async def create_api_lobby(env: Env) -> None:
     """Ask deadlock-api's bot to host the lobby. Any failure hands it back to the captain."""
-    community = env.community
+    region = (await db(runtime.of, env.community.pk)).lobby_region
     try:
-        lobby_ = await asyncio.to_thread(
-            deadlock_api.create_custom_match, community.lobby_region, "normal"
-        )
+        lobby_ = await asyncio.to_thread(deadlock_api.create_custom_match, region, "normal")
     except deadlock_api.ApiError as exc:
         await db(draft.api_lobby_failed, env.match_id, str(exc))
         return
@@ -801,9 +800,10 @@ async def restart_voice(env: Env) -> None:
         lobby_voice = await env.gateway.create_voice_channel(
             env.guild_id,
             community.match_category_id,
-            f"Match {env.match_id} Lobby",
+            names.lobby_voice(env.match_id),
             await db(_active_user_ids, env.required_match),
             await db(_match_staff_roles, community.pk),
+            open_to_everyone=await db(_open_voice, community.pk),
         )
         await db(effects.record_resource, env.match_id, ResourceKind.LOBBY_VOICE, lobby_voice)
     resources = await db(effects.resources, old_id)
@@ -830,35 +830,6 @@ async def cleanup_voice(env: Env) -> None:
                 await env.gateway.move_member(env.guild_id, user_id, waiting)
         await env.gateway.delete_channel(channel_id)
         await db(effects.mark_resource_deleted, env.match_id, kind)
-    if waiting:
-        # Everyone now in the Waiting Room goes on the back of the priority list, including
-        # anyone who was already there and so got no voice event for it.
-        await _reconcile_prio(env, waiting)
-
-
-async def _reconcile_prio(env: Env, waiting: int) -> None:
-    members = env.gateway.voice_members(env.guild_id, waiting)
-    if members is None:
-        # Discord hasn't sent the room. Treating that as empty would start everyone's grace.
-        logger.info("Waiting Room not loaded; priority list left as it is")
-        return
-    await db(prio.reconcile, env.community.pk, members)
-
-
-@effect(prio.RECONCILE_KIND)
-async def reconcile_prio_effect(env: Env) -> None:
-    """Someone left a live match while sitting in the Waiting Room: put them back on."""
-    community = await db(_reload_community, env.community.pk)
-    if not community.waiting_room_channel_id:
-        raise Skip("No Waiting Room.")
-    await _reconcile_prio(env, community.waiting_room_channel_id)
-
-
-@effect(prio.DELETE_KIND)
-async def delete_prio_message(env: Env) -> None:
-    """The list was posted afresh; the old message goes."""
-    payload = env.effect.payload
-    await env.gateway.delete_message(int(payload["channel_id"]), int(payload["message_id"]))
 
 
 @effect("delete_text_channel")

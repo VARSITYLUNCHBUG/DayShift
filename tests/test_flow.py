@@ -41,6 +41,7 @@ from league.services import (
     queue,
     ratings,
     results,
+    runtime,
     subs,
 )
 from league.services.common import captain_of, mode_of
@@ -126,7 +127,7 @@ def test_leave_removes_from_queue(league: Community, players: list[Player]) -> N
 
 
 def test_capacity_limit_holds_the_queue(league: Community) -> None:
-    Community.objects.filter(pk=league.pk).update(max_concurrent_matches=1)
+    runtime.update(league, max_concurrent_matches=1)
     for number in range(1, 25):
         queue.join(league.pk, make_player(number))
     assert Match.objects.count() == 1
@@ -314,12 +315,13 @@ def test_vote_timeout_counts_votes_and_elo_fills_the_gap(
     assert captain_of(match, "B").player_id == players[9].pk
 
 
-def test_vote_result_is_announced_after_the_transition(voting: Match) -> None:
+def test_the_player_draft_starts_without_a_message(voting: Match) -> None:
+    """The board shows the captains and whose pick it is; no ping repeats it."""
     match = vote_captains(voting)
-    kinds = list(OutboxEffect.objects.filter(match=match).values_list("kind", flat=True))
-    announce = max(i for i, kind in enumerate(kinds) if kind == "ping_lobby")
-    cleared = max(i for i, kind in enumerate(kinds) if kind == "clear_notices")
-    assert announce > cleared
+    assert match.status == Status.PLAYER_DRAFT
+    started = match.transitions.get(to_status=Status.PLAYER_DRAFT).created_at
+    after = OutboxEffect.objects.filter(match=match, created_at__gte=started)
+    assert not after.filter(kind__in=("ping", "ping_lobby")).exists()
 
 
 # --- Player draft --------------------------------------------------------------------------
@@ -420,48 +422,40 @@ def test_player_draft_ends_at_the_captain_coinflip(voting: Match) -> None:
     assert match.hidden_king_team == ""
 
 
-def test_the_winner_chooses_then_the_loser_from_the_other_kind(voting: Match) -> None:
+def test_the_winner_chooses_side_and_pick_order_in_one_press(voting: Match) -> None:
     match = at_coinflip(voting)
     winner, loser = _coin_captains(match)
     with pytest.raises(NotAllowed, match="coinflip winner"):
-        draft.choose_coinflip(match.pk, loser, engine.FIRST_PICK)
-    draft.choose_coinflip(match.pk, winner, engine.LAST_PICK)
-    with pytest.raises(NotAllowed, match="coinflip loser"):
-        draft.choose_coinflip(match.pk, winner, engine.HIDDEN_KING)
+        draft.choose_coinflip(match.pk, loser, engine.HK_PICK1)
     with pytest.raises(InvalidAction):
-        draft.choose_coinflip(match.pk, loser, engine.FIRST_PICK)  # Not the other kind.
-    draft.choose_coinflip(match.pk, loser, engine.ARCHMOTHER)
+        draft.choose_coinflip(match.pk, winner, engine.FIRST_PICK)  # Scrims only.
+    draft.choose_coinflip(match.pk, winner, engine.HK_PICK2)
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
     loser_team = "B" if match.coinflip_winner == "A" else "A"
-    # The loser took The Archmother, so the winner is Hidden King. The winner chose Last Pick,
-    # so the loser's team bans and picks first: Hidden King no longer means first.
+    # Hidden King and Pick 2: the winner is Hidden King, and the loser's team bans and picks first.
     assert match.hidden_king_team == match.coinflip_winner
     assert match.champion_first_pick == loser_team
+    assert match.coinflip_winner_choice == engine.HK_PICK2
     assert acting_captain(match) == loser
     with pytest.raises(StaleAction):
-        draft.choose_coinflip(match.pk, winner, engine.FIRST_PICK)
+        draft.choose_coinflip(match.pk, winner, engine.AM_PICK1)
 
 
 def test_only_a_captain_on_turn_can_choose(voting: Match) -> None:
     match = at_coinflip(voting)
     player = match.participants.filter(is_captain=False).first().player
     with pytest.raises(NotAllowed):
-        draft.choose_coinflip(match.pk, player, engine.FIRST_PICK)
+        draft.choose_coinflip(match.pk, player, engine.HK_PICK1)
 
 
-def test_a_coinflip_timeout_chooses_at_random_for_each_captain(voting: Match, clock: Clock) -> None:
+def test_a_coinflip_timeout_chooses_at_random_for_the_winner(voting: Match, clock: Clock) -> None:
     match = at_coinflip(voting)
     clock.advance(21)
     deadlines.tick()
     match = fresh(match)
-    assert match.status == Status.COINFLIP
-    assert match.coinflip_winner_choice in engine.coinflip_options("")
-    clock.advance(21)
-    deadlines.tick()
-    match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
-    assert match.coinflip_loser_choice in engine.coinflip_options(match.coinflip_winner_choice)
+    assert match.coinflip_winner_choice in engine.RANKED_COINFLIP_CHOICES
     assert match.hidden_king_team in {"A", "B"}
     assert match.champion_first_pick in {"A", "B"}
 
@@ -471,7 +465,7 @@ def test_a_coinflip_timeout_chooses_at_random_for_each_captain(voting: Match, cl
 
 @pytest.mark.parametrize(
     ("slug", "steps", "bans", "seconds"),
-    [("bebot_2ban", 16, 4, 40), ("threeban_1win_2026", 18, 6, 30)],
+    [("bebot_2ban", 16, 4, 40), ("draft_3ban", 18, 6, 40)],
 )
 def test_every_preset_runs_the_same_flow(
     league: Community, players: list[Player], slug: str, steps: int, bans: int, seconds: int
@@ -527,13 +521,13 @@ def test_disabled_champion_is_not_in_the_pool(league: Community, players: list[P
 
 def test_timeouts_take_a_random_champion_for_bans_and_picks(popped: Match, clock: Clock) -> None:
     match = to_champion_draft(popped)
-    for _ in range(16):
+    for _ in range(18):
         clock.advance(41)
         deadlines.tick()
     match = fresh(match)
     assert match.status == Status.LOBBY_CODE
     bans = DraftAction.objects.filter(match=match, action="ban")
-    assert bans.count() == 4
+    assert bans.count() == 6
     assert all(ban.target_champion_id is not None for ban in bans)
     assert all(ban.source == "timeout" for ban in bans)
     picks = DraftAction.objects.filter(match=match, action="pick")
@@ -770,7 +764,7 @@ def test_finish_writes_results_and_cleanup_effects(popped: Match) -> None:
 
 
 def test_finishing_a_match_pops_a_held_queue(league: Community) -> None:
-    Community.objects.filter(pk=league.pk).update(max_concurrent_matches=1)
+    runtime.update(league, max_concurrent_matches=1)
     for number in range(1, 25):
         queue.join(league.pk, make_player(number))
     first = Match.objects.get()

@@ -164,8 +164,8 @@ def coin_flip_team(seed: int, purpose: str) -> str:
 
 
 # --- Captain coinflip -------------------------------------------------------------------------
-# Bebot's: the winner chooses First Pick, Last Pick or a side; the loser chooses from the other
-# kind. Between them, both the sides and who bans and picks first are settled.
+# Scrims use Bebot's: the winner chooses First Pick, Last Pick or a side; the loser chooses from
+# the other kind. Between them, both the sides and who bans and picks first are settled.
 
 FIRST_PICK = "first_pick"
 LAST_PICK = "last_pick"
@@ -173,11 +173,22 @@ HIDDEN_KING = "hidden_king"
 ARCHMOTHER = "archmother"
 ORDER_CHOICES = (FIRST_PICK, LAST_PICK)
 SIDE_CHOICES = (HIDDEN_KING, ARCHMOTHER)
+# Ranked matches: the winner alone chooses both, a side and Pick 1 or Pick 2, in one press.
+# Pick 1 bans and picks first. Scrims keep Bebot's two-captain coinflip.
+HK_PICK1 = "hk_pick1"
+HK_PICK2 = "hk_pick2"
+AM_PICK1 = "am_pick1"
+AM_PICK2 = "am_pick2"
+RANKED_COINFLIP_CHOICES = (HK_PICK1, HK_PICK2, AM_PICK1, AM_PICK2)
 COINFLIP_LABELS = {
     FIRST_PICK: "First Pick",
     LAST_PICK: "Last Pick",
     HIDDEN_KING: "Hidden King",
     ARCHMOTHER: "Archmother",
+    HK_PICK1: "Hidden King · Pick 1",
+    HK_PICK2: "Hidden King · Pick 2",
+    AM_PICK1: "Archmother · Pick 1",
+    AM_PICK2: "Archmother · Pick 2",
 }
 _SIDE_OF = {HIDDEN_KING: "hk", ARCHMOTHER: "am"}
 
@@ -186,11 +197,25 @@ def other_side(side: str) -> str:
     return "am" if side == "hk" else "hk"
 
 
-def coinflip_options(winner_choice: str) -> tuple[str, ...]:
-    """What the chooser on turn can press: any of four for the winner, the other kind after."""
+def coinflip_options(winner_choice: str, *, ranked: bool = False) -> tuple[str, ...]:
+    """What the chooser on turn can press. Ranked: the winner's four side-and-order pairs.
+    Scrims: any of four for the winner, the other kind after."""
+    if ranked:
+        return () if winner_choice else RANKED_COINFLIP_CHOICES
     if not winner_choice:
         return (FIRST_PICK, LAST_PICK, HIDDEN_KING, ARCHMOTHER)
     return SIDE_CHOICES if winner_choice in ORDER_CHOICES else ORDER_CHOICES
+
+
+def apply_ranked_coinflip(winner_team: str, choice: str) -> tuple[str, str]:
+    """(Hidden King team, team that bans and picks first) from the ranked winner's one choice."""
+    if choice not in RANKED_COINFLIP_CHOICES:
+        raise ValueError(f"Not a ranked coinflip choice: {choice!r}")
+    loser_team = "B" if winner_team == "A" else "A"
+    side, order = choice.split("_")
+    hidden_king = winner_team if side == "hk" else loser_team
+    first_pick = winner_team if order == "pick1" else loser_team
+    return hidden_king, first_pick
 
 
 def settle_coinflip(winner_choice: str, loser_choice: str) -> tuple[str, str, str]:
@@ -210,10 +235,11 @@ def settle_coinflip(winner_choice: str, loser_choice: str) -> tuple[str, str, st
     return winner_side, loser_side, first
 
 
-def auto_coinflip_choice(seed: int, winner_choice: str) -> str:
+def auto_coinflip_choice(seed: int, winner_choice: str, *, ranked: bool = False) -> str:
     """A captain who runs out of time gets a random choice, seeded like every timeout."""
     turn = "loser" if winner_choice else "winner"
-    return seeded_rng(seed, f"coinflip:{turn}").choice(coinflip_options(winner_choice))
+    options = coinflip_options(winner_choice, ranked=ranked)
+    return seeded_rng(seed, f"coinflip:{turn}").choice(options)
 
 
 def apply_coinflip(winner_team: str, winner_choice: str, loser_choice: str) -> tuple[str, str]:

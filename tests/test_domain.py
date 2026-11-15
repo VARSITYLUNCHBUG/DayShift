@@ -24,7 +24,7 @@ from league.domain.engine import (
 from league.domain.mode_schema import DraftMode, ModeValidationError, parse_mode
 
 PRESETS = Path(__file__).resolve().parent.parent / "presets"
-THREE_BAN = yaml.safe_load((PRESETS / "threeban_1win_2026.yaml").read_text(encoding="utf-8"))
+THREE_BAN = yaml.safe_load((PRESETS / "draft_3ban.yaml").read_text(encoding="utf-8"))
 BEBOT = yaml.safe_load((PRESETS / "bebot_2ban.yaml").read_text(encoding="utf-8"))
 
 
@@ -249,6 +249,33 @@ def test_the_coinflip_sets_sides_and_first_pick_by_team() -> None:
     # whose side wasn't chosen to go last, bans and picks first.
     assert engine.apply_coinflip("B", engine.LAST_PICK, engine.ARCHMOTHER) == ("B", "A")
     assert engine.apply_coinflip("A", engine.HIDDEN_KING, engine.FIRST_PICK) == ("A", "B")
+
+
+@pytest.mark.parametrize(
+    ("winner", "choice", "expected"),
+    [
+        ("A", engine.HK_PICK1, ("A", "A")),
+        ("A", engine.HK_PICK2, ("A", "B")),
+        ("A", engine.AM_PICK1, ("B", "A")),
+        ("A", engine.AM_PICK2, ("B", "B")),
+        ("B", engine.HK_PICK1, ("B", "B")),
+        ("B", engine.AM_PICK2, ("A", "A")),
+    ],
+)
+def test_the_ranked_coinflip_winner_sets_both(
+    winner: str, choice: str, expected: tuple[str, str]
+) -> None:
+    """(Hidden King team, team that bans and picks first)."""
+    assert engine.apply_ranked_coinflip(winner, choice) == expected
+
+
+def test_the_ranked_coinflip_offers_four_pairs_once() -> None:
+    assert engine.coinflip_options("", ranked=True) == engine.RANKED_COINFLIP_CHOICES
+    assert engine.coinflip_options(engine.HK_PICK1, ranked=True) == ()
+    choice = engine.auto_coinflip_choice(7, "", ranked=True)
+    assert choice in engine.RANKED_COINFLIP_CHOICES
+    with pytest.raises(ValueError):
+        engine.apply_ranked_coinflip("A", engine.FIRST_PICK)
 
 
 def test_a_timed_out_coinflip_choice_is_one_on_offer_and_reproducible() -> None:

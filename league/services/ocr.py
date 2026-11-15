@@ -44,7 +44,7 @@ from league.models import (
 from league.models.alerts import AlertKind
 from league.models.permissions import Area
 from league.models.scoreboards import AwardSource, MapSource, ReadStatus
-from league.services import alerts
+from league.services import alerts, runtime
 from league.services.common import add_effect, lock_match, now, roster
 
 logger = logging.getLogger(__name__)
@@ -391,7 +391,7 @@ def act_on(read: ScoreboardRead) -> None:
     from league.services import corrections, results
 
     match = Match.objects.select_related("community", "season").get(pk=read.match_id)
-    if match.community.score_ocr != "on":
+    if runtime.of(match.community_id).score_ocr != "on":
         return
     claimed = _claimed_winner(match)
     if read.winner_clean and read.ocr_winner and claimed and read.ocr_winner != claimed:
@@ -490,12 +490,12 @@ def map_row(read_id: int, row: int, player_id: int, actor: Player, *, is_staff: 
     can_map(read_id, actor, is_staff)
     stat = read.stats.filter(row=row).first()
     if stat is None:
-        raise StaleAction("That row isn't on the scoreboard.")
+        raise StaleAction("That name isn't on the scoreboard.")
     on_team = roster(read.match).filter(player_id=player_id, team=stat.team).exists()
     if not on_team:
         raise InvalidAction("That player wasn't on that team.")
     if read.stats.filter(player_id=player_id).exclude(pk=stat.pk).exists():
-        raise InvalidAction("That player is already matched to another row.")
+        raise InvalidAction("That player is already matched to another name.")
     stat.player_id = player_id
     stat.map_source = MapSource.STAFF if is_staff else MapSource.CAPTAIN
     stat.map_score = 1.0

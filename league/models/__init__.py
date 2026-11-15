@@ -1,7 +1,7 @@
 from league.models.alerts import StaffAlert
 from league.models.api import ApiMatchCheck
 from league.models.champions import Champion
-from league.models.community import Community
+from league.models.community import Community, RuntimeSettings
 from league.models.matches import (
     CaptainVote,
     DraftAction,
@@ -53,6 +53,7 @@ __all__ = [
     "RatingEvent",
     "RatingRun",
     "ResultSubmission",
+    "RuntimeSettings",
     "ScoreboardRead",
     "Season",
     "StaffAlert",

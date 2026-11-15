@@ -279,7 +279,7 @@ def name_picker(match_id: int, read_id: int) -> discord.ui.LayoutView | None:
                     match_id,
                     f"{read_id}.{row.row}",
                     options=options[:25],
-                    placeholder=f"Who played {row.ocr_name or 'this row'}?"[:150],
+                    placeholder=f"Who played {row.ocr_name or 'this name'}?"[:150],
                 )
             )
         )

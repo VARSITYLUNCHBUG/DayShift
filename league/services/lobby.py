@@ -36,12 +36,13 @@ from league.models.matches import RemovedReason, ResourceKind, Source
 from league.models.moderation import PenaltyKind
 from league.models.permissions import Area
 from league.models.subs import SubReason
-from league.services import alerts, champions, penalties, prio, standing
+from league.services import alerts, champions, effects, penalties, prio, runtime, standing
 from league.services.common import (
     active_participants,
     add_effect,
     bump,
     captain_of,
+    clear_notices,
     close_subs,
     lock_community,
     lock_match,
@@ -61,9 +62,6 @@ from league.services.common import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Minutes the lobby text channel stays after the match ends, for last words and disputes.
-TEXT_CHANNEL_GRACE_MINUTES = 15
 
 
 def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match | None:
@@ -99,6 +97,9 @@ def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match |
     _matched(community, [entry.player for entry in entries])
 
     add_effect(community, "create_lobby", match=match, dedupe_key=f"create_lobby:{match.pk}")
+    # The board goes up straight after the channel and its ping, ahead of the twelve invites and
+    # DMs, so nobody sits looking at a ping with no Ready button under it.
+    render_board(match)
     for entry in entries:
         _gather(match, entry.player)
     render_queue(community)
@@ -107,13 +108,8 @@ def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match |
 
 
 def _matched(community: Community, players: Sequence[Player]) -> None:
-    """They're in a match now: off the voice priority list. Every way into a match calls this."""
+    """They're in a match now: off the priority list. Every way into a match calls this."""
     prio.drop_players(community.pk, [player.discord_user_id for player in players])
-
-
-def _unmatched(community: Community) -> None:
-    """Someone left a live match before it ended. Every early way out calls this."""
-    prio.recheck(community)
 
 
 def _gather(match: Match, player: Player, *, sub: bool = False) -> None:
@@ -143,6 +139,7 @@ def mark_ready(match_id: int, player: Player) -> None:
     participant.save(update_fields=["ready_at"])
     bump(match)
     if active_participants(match).filter(ready_at__isnull=True).exists():
+        effects.request_ready_ping(match)
         render_board(match)
     else:
         begin_captain_phase(match)
@@ -181,8 +178,8 @@ def on_ready_timeout(match: Match) -> None:
             {"discord_user_id": participant.player.discord_user_id},
             match=match,
         )
-    _unmatched(community)
     subs.open_openings(match, mode, [participant.player for participant in missed])
+    effects.request_ready_ping(match)
     render_queue(community)
 
 
@@ -199,7 +196,7 @@ def add_player(match: Match, player: Player) -> None:
     )
     QueueEntry.objects.filter(community=community, player=player).delete()
     add_effect(community, "grant_access", {"discord_user_id": player.discord_user_id}, match=match)
-    _gather(match, player)
+    _gather(match, player, sub=True)  # Accepting made them ready: a voice invite, no Ready.
     _matched(community, [player])
     render_queue(community)
 
@@ -214,8 +211,9 @@ def _eligibility(match: Match, player_ids: Collection[int]) -> dict[int, standin
 
 
 def begin_captain_phase(match: Match) -> None:
-    """Everyone is ready: open the captain vote. With two or fewer players able to captain, there
-    is nothing to vote on, so they are appointed straight away."""
+    """Everyone is ready: open the captain vote. With Auto Captain on (a runtime setting), or two
+    or fewer players able to captain, there is nothing to vote on, so captains are appointed
+    straight away: the eligible first, then by experience and rating."""
     mode = mode_of(match)
     transition(
         match,
@@ -226,7 +224,8 @@ def begin_captain_phase(match: Match) -> None:
     save_transition(match)
     active = list(active_participants(match))
     allowed = _eligibility(match, [p.player_id for p in active])
-    if sum(row.eligibility.ok for row in allowed.values()) <= 2:
+    auto = runtime.of(match.community_id).auto_captain
+    if auto or sum(row.eligibility.ok for row in allowed.values()) <= 2:
         _close_vote(match, Source.SYSTEM)
         return
     ids = [p.player.discord_user_id for p in active]
@@ -323,39 +322,13 @@ def _close_vote(match: Match, source: str) -> None:
         )
     counts = vote_counts(match)
     captain_a, captain_b = tally_captain_votes(counts, candidates, match.rng_seed)
-    eligible_count = sum(c.eligible for c in candidates)
-    names = {}
     for participant in participants:
         if participant.player_id in {captain_a, captain_b}:
             participant.is_captain = True
             participant.team = "A" if participant.player_id == captain_a else "B"
             participant.save(update_fields=["is_captain", "team"])
-            names[participant.player_id] = participant.player.display_name
-
-    def tally(player_id: int) -> str:
-        count = counts.get(player_id, 0)
-        return f"**{names[player_id]}** ({count} vote{'' if count == 1 else 's'})"
-
-    a, b = names[captain_a], names[captain_b]
-    if eligible_count >= 3:
-        text = f"Captains voted in: {tally(captain_a)} and {tally(captain_b)}."
-    elif eligible_count == 2:
-        text = f"Captains: **{a}** and **{b}**, the only two here who can captain."
-    elif eligible_count == 1:
-        text = (
-            f"Captains: **{a}**, the only one here who can captain, and **{b}**, "
-            "the most experienced of the rest."
-        )
-    else:
-        text = f"Nobody here can captain yet, so the most experienced do: **{a}** and **{b}**."
+    # No message of its own: the board shows the captains and whose pick it is.
     begin_player_draft(match, source=source)
-    # After the transition, which clears earlier notices, so this one stays up.
-    add_effect(match.community, "ping_lobby", {"text": text}, match=match)
-
-
-def _ping_captains(match: Match, text: str) -> None:
-    ids = [p.player.discord_user_id for p in active_participants(match).filter(is_captain=True)]
-    add_effect(match.community, "ping", {"user_ids": ids, "text": text}, match=match)
 
 
 def begin_player_draft(match: Match, source: str) -> None:
@@ -371,8 +344,6 @@ def begin_player_draft(match: Match, source: str) -> None:
         deadline_at=seconds_from_now(mode.player_draft.seconds),
     )
     save_transition(match, "player_first_pick", "step_index")
-    first = captain_of(match, match.player_first_pick).player.display_name
-    _ping_captains(match, f"the player draft is on. **{first}** picks first.")
     render_board(match)
 
 
@@ -413,14 +384,18 @@ def void_live(
     )
     active = list(active_participants(match))
     if requeue:
+        places = []
         for participant in active:
             if participant.ready_at is not None and participant.player_id not in skip_requeue:
                 # Keeping the original time puts them ahead of everyone who joined later.
-                QueueEntry.objects.get_or_create(
+                _entry, created = QueueEntry.objects.get_or_create(
                     community=community,
                     player=participant.player,
                     defaults={"joined_at": participant.queue_joined_at},
                 )
+                if created:
+                    places.append((participant.player, participant.queue_joined_at))
+        prio.requeued(community.pk, places)
     match.participants.filter(is_active=True).update(is_active=False)
     alerts.settle_for_match(
         match, (AlertKind.DISPUTE, AlertKind.EARLY_LEAVE), actor, f"Voided: {reason}"
@@ -479,6 +454,9 @@ def restart(match: Match, *, leaving: Collection[int]) -> Match:
     MatchResource.objects.filter(match=match, kind__in=HANDED_OVER, deleted_at__isnull=True).update(
         match=successor
     )
+    # The old match's pings (such as "the player draft is on") no longer apply: clear them
+    # before the successor posts its own.
+    clear_notices(successor)
     moment = now()
     for participant in stayed:
         MatchParticipant.objects.create(
@@ -502,7 +480,8 @@ def schedule_cleanup(match: Match) -> None:
         "delete_text_channel",
         match=match,
         dedupe_key=f"delete_text:{match.pk}",
-        run_after=seconds_from_now(TEXT_CHANNEL_GRACE_MINUTES * 60),
+        # The text channel stays a little while for last words and disputes.
+        run_after=seconds_from_now(runtime.of(match.community_id).match_channel_close_minutes * 60),
     )
 
 
@@ -510,7 +489,9 @@ def schedule_cleanup(match: Match) -> None:
 def staff_void(match_id: int, actor: Player | None, reason: str) -> None:
     match = lock_match(match_id)
     if match.status in TERMINAL:
-        raise InvalidAction("That match has finished. Use the correction flow.")
+        raise InvalidAction(
+            "That match has finished. Use /match void or /match rescore to change it."
+        )
     void_live(match, source=Source.STAFF, actor=actor, reason=reason)
 
 
@@ -556,7 +537,6 @@ def swap_player(match: Match, leaving: MatchParticipant, in_player: Player, *, r
     community = lock_community(match.community_id)
     QueueEntry.objects.filter(community=community, player=in_player).delete()
     _matched(community, [in_player])
-    _unmatched(community)  # The player subbed out.
     heir = _captaincy_heir(match, leaving, in_player) if leaving.is_captain else None
     MatchParticipant.objects.create(
         match=match,

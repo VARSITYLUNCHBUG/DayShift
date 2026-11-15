@@ -264,7 +264,7 @@ def test_only_the_leaver_or_their_captain_can_name_a_sub(popped: Match) -> None:
     assert offer.invited_by == captain_of(match, "A").player
 
 
-def test_decline_falls_back_to_the_queue(
+def test_decline_falls_back_to_the_priority_list(
     popped: Match, players: list[Player], league: Community
 ) -> None:
     waiting = queue_up(league, range(30, 33))
@@ -273,7 +273,7 @@ def test_decline_falls_back_to_the_queue(
     subs.answer_offer(invite(request, players[3], named).pk, named, False)
     pending = SubOffer.objects.get(request=request, status=OfferStatus.PENDING)
     assert pending.player == waiting[0]
-    assert pending.source == OfferSource.QUEUE
+    assert pending.source == OfferSource.PRIO  # The list is the queue, longest wait first.
 
 
 def test_queue_is_asked_when_nobody_is_named_in_time(
@@ -511,37 +511,23 @@ def test_downtime_extends_sub_deadlines(popped: Match, players: list[Player], cl
 # --- Openings go to the priority list first ------------------------------------------------------
 
 
-def _waiting_room(
-    community: Community, people: list[Player], *, grace: Player | None = None
+def test_an_opening_goes_down_the_priority_list_then_the_rest_of_the_queue(
+    popped: Match, players: list[Player], league: Community, clock: Clock
 ) -> None:
-    """Put them on the priority list in this order, as if they'd joined the Waiting Room."""
-    from datetime import timedelta
+    from league.services import prio
 
-    from league.models import PrioEntry
-    from league.services.common import now
-
-    start = now() - timedelta(minutes=30)
-    for index, player in enumerate(people):
-        PrioEntry.objects.create(
-            community=community,
-            discord_user_id=player.discord_user_id,
-            display_name=player.display_name,
-            queued_at=start + timedelta(minutes=index),
-            grace_until=now() + timedelta(minutes=5) if player == grace else None,
-        )
-
-
-def test_an_opening_goes_to_the_priority_list_before_the_queue(
-    popped: Match, players: list[Player], league: Community
-) -> None:
     stepped_out, longest, second = make_player(70), make_player(71), make_player(72)
-    _waiting_room(league, [stepped_out, players[0], longest, second], grace=stepped_out)
-    queued = queue_up(league, range(80, 81))[0]
+    queued = make_player(80)
+    for player in (stepped_out, longest, second, queued):
+        queue.join(league.pk, player)
+        clock.advance(5)
+    queue.leave(league.pk, stepped_out)  # Their place is held, but they aren't asked.
+    prio.remove(league.pk, queued.discord_user_id)  # Still queued, but off the list.
     match = in_draft(popped)
     leaving = non_captain(match)
     request = self_sub(match, leaving)
     subs.offer_to_queue(request.pk, leaving)
-    # Not the one who stepped out, nor someone already in this match: the longest wait.
+    # Not the one who stepped out: the longest wait still in the queue.
     offer = SubOffer.objects.get(request=request, status=OfferStatus.PENDING)
     assert offer.player == longest and offer.source == OfferSource.PRIO
     subs.answer_offer(offer.pk, longest, False)

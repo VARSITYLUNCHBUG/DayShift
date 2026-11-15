@@ -144,8 +144,7 @@ async def sub_accept(ctx: Context) -> None:
     await ctx.interaction.response.defer()
     await db(subs.answer_offer, int(ctx.arg), await actor(ctx.interaction), True)
     channel = await db(_channel_mention, ctx.match_id)
-    await _close_dm(ctx, f"✅ You're in. Head to {channel}.")
-    await reply(ctx.interaction, f"You're in. Head to {channel}: the bot is moving you to voice.")
+    await _close_dm(ctx, f"✅ You're in. Head to {channel}; your voice invite is on its way.")
 
 
 @handles("sub_decline")

@@ -261,7 +261,8 @@ def test_the_board_shows_win_chance_and_placement(
     match = run_player_draft(vote_captains(ready(season.matches.get())))
     state = boards.board_state(match.pk)
     assert state.win_chance_a == pytest.approx(0.5)
-    assert all(line.rating_label == "P 0/10" for line in state.players)
+    # Lists show the rating alone; placement progress is in /stats.
+    assert all(line.rating_label == str(line.rating) for line in state.players)
 
 
 def test_default_params_are_the_documented_starting_values() -> None:

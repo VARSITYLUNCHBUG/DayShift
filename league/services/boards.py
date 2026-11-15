@@ -26,10 +26,9 @@ from league.models import (
 from league.models.matches import MatchKind
 from league.models.subs import UNRESOLVED, OfferSource, OfferStatus, SubRequest, SubStatus
 from league.services import awards as award_service
-from league.services import ocr, ratings, standing
+from league.services import ocr, ratings, runtime, standing
 from league.services.common import mode_of, rating_of
 from league.services.gifs import draft_gifs
-from league.services.lobby import TEXT_CHANNEL_GRACE_MINUTES
 from league.services.ratings import match_deltas
 from league.services.subs import SUBBABLE
 
@@ -62,11 +61,11 @@ class PlayerLine:
     is_ready: bool = False
     captain_ok: bool = True  # Can be voted captain under the mode's rule.
     captain_note: str = ""  # Why not, such as "2/5 matches".
-    placement: str = ""  # "P 3/10" while an OpenSkill rating is still settling.
 
     @property
     def rating_label(self) -> str:
-        return self.placement or str(self.rating)
+        """Player lists show the rating alone; placement progress is in /stats."""
+        return str(self.rating)
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,7 +225,6 @@ def board_state(match_id: int) -> BoardState:
     mode = mode_of(match)
     participants = match.participants.filter(removed_reason="").select_related("player")
     players = []
-    labels = ratings.placement_labels(match.season, [p.player_id for p in participants])
     for participant in participants:
         rating, _games = rating_of(match.season, participant.player_id)
         players.append(
@@ -238,7 +236,6 @@ def board_state(match_id: int) -> BoardState:
                 team=participant.team,
                 is_captain=participant.is_captain,
                 is_ready=participant.ready_at is not None,
-                placement=labels.get(participant.player_id, ""),
             )
         )
     players.sort(key=lambda line: (-line.rating, line.name.lower()))
@@ -259,7 +256,7 @@ def board_state(match_id: int) -> BoardState:
         coinflip_winner_choice=match.coinflip_winner_choice,
         coinflip_loser_choice=match.coinflip_loser_choice,
         coinflip_options=(
-            coinflip_options(match.coinflip_winner_choice)
+            coinflip_options(match.coinflip_winner_choice, ranked=match.kind != MatchKind.SCRIM)
             if match.status == Status.COINFLIP
             else ()
         ),
@@ -273,7 +270,8 @@ def board_state(match_id: int) -> BoardState:
     if len(team_a) == len(team_b) == mode.team_size and match.status not in TERMINAL:
         state.win_chance_a = ratings.expected_win(match.season, team_a, team_b)
     if match.ended_at is not None:
-        state.closes_at = match.ended_at + timedelta(minutes=TEXT_CHANNEL_GRACE_MINUTES)
+        close_after = runtime.of(match.community_id).match_channel_close_minutes
+        state.closes_at = match.ended_at + timedelta(minutes=close_after)
     if match.lobby_code_host is not None:
         state.host_name = match.lobby_code_host.display_name
 
@@ -361,7 +359,7 @@ def board_state(match_id: int) -> BoardState:
             )
             for line in state.players
         ]
-    state.auto_lobby = match.community.auto_lobby
+    state.auto_lobby = runtime.of(match.community_id).auto_lobby
     state.api_lobby = bool(match.api_party_id)
     state.api_started = match.api_started_at is not None
     if match.api_lobby_created_at is not None:

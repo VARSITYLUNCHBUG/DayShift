@@ -38,6 +38,7 @@ from league.models import (
     RatingEvent,
     RatingRun,
     ResultSubmission,
+    RuntimeSettings,
     ScoreboardRead,
     Season,
     StaffAlert,
@@ -130,16 +131,37 @@ class RoleGrantInline(admin.TabularInline):
     readonly_fields = ("granted_by_discord_id", "created_at")
 
 
-@admin.register(Community)
-class CommunityAdmin(admin.ModelAdmin):
+class RuntimeSettingsInline(admin.StackedInline):
+    """The server's switches. Saving applies them at once."""
+
+    model = RuntimeSettings
+    can_delete = False
+    extra = 0
+    max_num = 1
+
+
+@admin.register(RuntimeSettings)
+class RuntimeSettingsAdmin(admin.ModelAdmin):
     list_display = (
-        "name",
-        "discord_guild_id",
-        "active_mode",
+        "community",
+        "auto_captain",
+        "open_match_voice",
+        "match_channel_close_minutes",
         "max_concurrent_matches",
         "score_ocr",
+        "auto_lobby",
+        "api_results",
     )
-    inlines = (RoleGrantInline,)
+    list_editable = ("auto_captain", "open_match_voice", "match_channel_close_minutes")
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+
+@admin.register(Community)
+class CommunityAdmin(admin.ModelAdmin):
+    list_display = ("name", "discord_guild_id", "active_mode")
+    inlines = (RuntimeSettingsInline, RoleGrantInline)
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
@@ -394,7 +416,7 @@ class EarlyLeaveAdmin(ReadOnlyAdmin):
 
 @admin.register(PrioEntry)
 class PrioEntryAdmin(ReadOnlyAdmin):
-    """The voice priority list. Read-only: it follows the Waiting Room; use /removeprio."""
+    """The priority list. Read-only: it follows the match queue; use /removeprio."""
 
     list_display = ("display_name", "community", "discord_user_id", "queued_at", "grace_until")
     list_filter = ("community",)

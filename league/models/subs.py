@@ -86,7 +86,7 @@ class SubRequest(models.Model):
 
 class OfferSource(models.TextChoices):
     INVITE = "invite", "Invited by name"
-    PRIO = "prio", "Longest in the Waiting Room"
+    PRIO = "prio", "Top of the priority list"
     QUEUE = "queue", "Next in the queue"
 
 

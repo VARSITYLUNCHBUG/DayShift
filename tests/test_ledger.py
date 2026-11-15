@@ -280,12 +280,12 @@ def test_live_match_keeps_pinned_mode_after_activation(popped: Match) -> None:
 
 
 def test_alternative_mode_runs_end_to_end(league: Community) -> None:
-    three_ban = DraftModeVersion.objects.get(slug="threeban_1win_2026")
-    modes.activate(league.pk, three_ban.pk)
+    two_ban = DraftModeVersion.objects.get(slug="bebot_2ban")
+    modes.activate(league.pk, two_ban.pk)
     pool = [make_player(n) for n in range(1, 13)]
     match = play_full_match(league, pool, "A", 1)
     assert match.status == Status.COMPLETED
-    assert DraftAction.objects.filter(match=match, action="ban").count() == 6
+    assert DraftAction.objects.filter(match=match, action="ban").count() == 4
     assert DraftAction.objects.filter(match=match, action="pick").count() == 12
 
 

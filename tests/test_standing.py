@@ -223,8 +223,11 @@ def test_clean_matches_play_strikes_off(
     for number in range(1, 4):
         play_full_match(league, players, "A", number)
     assert standing.standing(league, player).strikes == 1
-    pings = OutboxEffect.objects.filter(kind="ping", payload__text__icontains="one strike off")
-    assert pings.filter(payload__user_ids=[player.discord_user_id]).exists()
+    # A note for them alone: a DM, never a ping in the match channel.
+    dms = OutboxEffect.objects.filter(kind="dm_player", payload__heading="One strike off")
+    assert dms.filter(payload__discord_user_id=player.discord_user_id).exists()
+    pings = OutboxEffect.objects.filter(kind="ping", payload__text__icontains="strike off")
+    assert not pings.exists()
 
 
 # --- The captain rule ------------------------------------------------------------------------
@@ -242,8 +245,8 @@ def ruled_popped(captain_rule: Community, players: list[Player]) -> Match:
 def test_new_players_skip_the_vote_and_captains_come_by_experience(ruled_popped: Match) -> None:
     match = ready_all(ruled_popped)
     assert match.status == Status.PLAYER_DRAFT
-    ping = OutboxEffect.objects.filter(kind="ping_lobby").order_by("-id").first()
-    assert ping is not None and "Nobody here can captain yet" in ping.payload["text"]
+    assert match.participants.filter(is_captain=True).count() == 2
+    assert not OutboxEffect.objects.filter(kind="ping_lobby").exists()  # The board says it.
 
 
 def _allow(community: Community, *players: Player) -> None:

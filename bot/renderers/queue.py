@@ -21,21 +21,11 @@ def render_queue(view_model: QueueView) -> LayoutView:
     heading = f"## Queue: {view_model.size}/{view_model.capacity}"
     if 0 < needed < view_model.capacity:
         heading += f" · {needed} more to start"
-    live = view_model.live_matches
-    room = (
-        f"<#{view_model.waiting_room_channel_id}>"
-        if view_model.waiting_room_channel_id
-        else "the Waiting Room voice channel"
-    )
     box: Container[Any] = Container(
         TextDisplay(f"{heading}\n{listing}"),
         ActionRow(
             RouteButton("join", label="Join", style=ButtonStyle.success),
             RouteButton("leave", label="Leave", style=ButtonStyle.danger),
-        ),
-        TextDisplay(
-            f"-# {view_model.mode_name} · {live} match{'' if live == 1 else 'es'} in progress · "
-            f"Wait in {room} and you're moved in automatically."
         ),
         accent_colour=style.QUEUE_COLOUR,
     )

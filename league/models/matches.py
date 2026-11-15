@@ -174,6 +174,7 @@ class ResourceKind(models.TextChoices):
     PICKER_MESSAGE_2 = "picker_message_2", "Champion grid message, second half"
     RESULTS_MESSAGE = "results_message", "Results message"
     NOTICE = "notice", "Notice message"
+    READY_PING = "ready_ping", "Ready check ping"
 
 
 class MatchResource(models.Model):

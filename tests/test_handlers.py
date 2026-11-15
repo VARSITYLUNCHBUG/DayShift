@@ -224,8 +224,13 @@ def test_ready_button_works_in_guild_and_dm(wired: Community) -> None:
     assert match.participants.get(player=players[0]).ready_at is not None
 
     dm = fake_interaction(players[1], guild=False)
+    dm.edit_original_response = AsyncMock()
     click(dm, "ready", match.pk)
-    assert "You are now ready!" in replies(dm)[0]
+    assert match.participants.get(player=players[1]).ready_at is not None
+    assert replies(dm) == []  # The DM itself becomes the answer.
+    view = dm.edit_original_response.call_args.kwargs["view"]
+    payload = str(view.to_components())
+    assert "You're ready" in payload and ":ready:" not in payload
 
 
 def test_captain_vote_select(wired: Community) -> None:
@@ -249,13 +254,10 @@ def test_coinflip_buttons(wired: Community) -> None:
     winner = match.coinflip_winner
     loser = "B" if winner == "A" else "A"
     refused = fake_interaction(captain_of(match, loser).player)
-    click(refused, "coin_choice", match.pk, "first_pick")
+    click(refused, "coin_choice", match.pk, "hk_pick1")
     assert replies(refused)[0] == "Only the coinflip winner can make this choice!"
 
-    click(
-        fake_interaction(captain_of(match, winner).player), "coin_choice", match.pk, "hidden_king"
-    )
-    click(fake_interaction(captain_of(match, loser).player), "coin_choice", match.pk, "first_pick")
+    click(fake_interaction(captain_of(match, winner).player), "coin_choice", match.pk, "hk_pick2")
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
     assert match.hidden_king_team == winner
@@ -633,7 +635,7 @@ def test_rescore_finished_match_previews_then_corrects(wired: Community) -> None
         reason="Wrong report",
     )
     assert fresh(match).winner == "A"
-    assert "ledger rows" in interaction.followup.send.call_args.args[0]
+    assert "rating changes" in interaction.followup.send.call_args.args[0]
     view = interaction.followup.send.call_args.kwargs["view"]
     asyncio.run(view.confirm.callback(fake_interaction(admin, administrator=True)))
     assert fresh(match).winner == "B"
@@ -673,7 +675,7 @@ def test_match_explain_and_status(wired: Community) -> None:
     admin = make_player(50)
     interaction = fake_interaction(admin, administrator=True)
     run_command(subcommand(staff.match_group, "status"), interaction, match_id=match.pk)
-    assert "ready_check" in replies(interaction)[0]
+    assert "Ready check" in replies(interaction)[0]
     interaction = fake_interaction(admin, administrator=True)
     run_command(subcommand(staff.match_group, "explain"), interaction, match_id=match.pk)
     assert "new -> ready_check" in replies(interaction)[0]
@@ -693,9 +695,9 @@ def test_mode_commands(wired: Community) -> None:
     assert "(active)" in replies(interaction)[0]
 
     interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="threeban_1win_2026")
+    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="bebot_2ban")
     wired.refresh_from_db()
-    assert wired.active_mode == DraftModeVersion.objects.get(slug="threeban_1win_2026")
+    assert wired.active_mode == DraftModeVersion.objects.get(slug="bebot_2ban")
 
     interaction = fake_interaction(admin, administrator=True)
     run_command(subcommand(staff.mode_group, "activate"), interaction, slug="nope")
@@ -762,7 +764,7 @@ def test_ledger_check_command(wired: Community) -> None:
     ratings.seed_player(open_season(wired), make_player(1), "mid", actor=None)
     interaction = fake_interaction(make_player(50), administrator=True)
     run_command(staff.ledger_check, interaction)
-    assert replies(interaction) == ["Ledger OK."]
+    assert replies(interaction) == ["Ratings add up."]
 
 
 # --- Registration ----------------------------------------------------------------------------
@@ -780,7 +782,8 @@ def test_every_command_serialises_for_discord() -> None:
     assert {"link", "unlink", "captain", "ocr", "deadlock"} <= names
     assert {"startdraft", "stopdraft", "captains_coinflip", "randomdraft"} <= names
     assert "coinflip" not in names
-    assert {"priolist", "prio", "refresh", "removeprio"} <= names
+    assert {"prio", "removeprio"} <= names
+    assert not {"priolist", "refresh"} & names
     assert {"pingchannel", "removeping", "pings", "ping"} <= names
     assert {"seterrorchannel", "clearerrorchannel"} <= names
     rating = next(payload for payload in payloads if payload["name"] == "rating")
@@ -881,8 +884,10 @@ def test_sub_buttons_full_journey(wired: Community) -> None:
     answer = fake_interaction(sub, guild=False)
     answer.edit_original_response = AsyncMock()
     click(answer, "sub_accept", match.pk, str(offer.pk))
-    assert "You're in" in replies(answer)[0]
+    assert replies(answer) == []  # The offer DM itself turns into the answer.
     answer.edit_original_response.assert_awaited_once()
+    view = answer.edit_original_response.call_args.kwargs["view"]
+    assert "You're in" in str(view.to_components())
     assert fresh(match).participants.filter(player=sub, is_active=True).exists()
 
 

@@ -14,7 +14,7 @@ from league.models.matches import Source
 from league.models.permissions import Area
 from league.models.results import Verdict
 from league.models.scoreboards import AwardSource
-from league.services import alerts, api_results, ratings, standing
+from league.services import alerts, api_results, ratings, runtime, standing
 from league.services import awards as award_service
 from league.services.boards import outcome_label
 from league.services.common import (
@@ -117,7 +117,7 @@ def _after_submission(
 
 
 def _read_scoreboard(match: Match, submission: ResultSubmission) -> None:
-    if match.community.score_ocr != "off" and submission.archive_message_id:
+    if runtime.of(match.community_id).score_ocr != "off" and submission.archive_message_id:
         add_effect(
             match.community,
             "read_scoreboard",
@@ -276,7 +276,7 @@ def resolve_dispute(match_id: int, outcome: str, actor: Player | None, reason: s
 def on_confirm_timeout(match: Match) -> None:
     first = _first_report(match)
     if first is None:
-        _dispute(match, None, "A confirmation window closed with no report on file.")
+        _dispute(match, None, "The result wasn't confirmed in time.")
         return
     _finalise(match, first.claimed_winner, source=Source.TIMEOUT, actor=None)
 
@@ -340,10 +340,11 @@ def _announce_strikes(
     for player_id in dropped:
         add_effect(
             match.community,
-            "ping",
+            "dm_player",
             {
-                "user_ids": [users[player_id]],
-                "text": "clean match: one strike off. "
+                "discord_user_id": users[player_id],
+                "heading": "One strike off",
+                "text": "A clean match took one strike off. "
                 + standing.describe(after[player_id], policy),
             },
             match=match,

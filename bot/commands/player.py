@@ -34,16 +34,13 @@ def _stats_text(community: Community, player: Player) -> str:
     stats = boards.player_stats(common.open_season(community), player)
     rank = f"#{stats.rank}" if stats.rank else "unranked"
     tier = f" · {stats.tier}" if stats.tier else ""
-    placement = f" · placement {stats.placement.removeprefix('P ')}" if stats.placement else ""
     lines = [
-        f"**{stats.name}**: {stats.rating} ({rank}){tier}{placement}",
+        f"**{stats.name}**: {stats.rating} ({rank}){tier}",
         f"{stats.games} games, {stats.wins} wins, {stats.losses} losses",
     ]
-    if stats.mu is not None and stats.sigma is not None:
-        lines.append(
-            f"-# Skill {stats.mu:.1f}, uncertainty {stats.sigma:.1f}. "
-            "The rating is skill minus 3 uncertainties, times 40."
-        )
+    if stats.placement:
+        done = stats.placement.removeprefix("placing ")
+        lines.append(f"Placement: {done} matches played. Your rating settles as you play.")
     if stats.mvps or stats.keys:
         lines.append(f"🏅 {stats.mvps} MVP · ⭐ {stats.keys} key player")
     if stats.avg_kda is not None:
@@ -216,11 +213,8 @@ async def link_command(interaction: Interaction[Any], account: str) -> None:
         except deadlock_api.ApiError:
             names = {}
         name = names.get(account_id, "")
-        shown = f"**{name}**" if name else "an account deadlock-api doesn't know yet"
-        text = (
-            f"Link {shown} (account {account_id}) to you? It's checked against your matches "
-            "once deadlock-api has one of them."
-        )
+        shown = f"**{name}**" if name else "an account Deadlock hasn't seen in a match yet"
+        text = f"Link {shown} to you? It's confirmed from your next match."
         await interaction.followup.send(
             text, view=LinkConfirm(player, account_id, name), ephemeral=True
         )

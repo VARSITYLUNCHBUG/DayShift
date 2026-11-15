@@ -5,10 +5,10 @@ from django.db.models import Q
 
 
 class PrioEntry(models.Model):
-    """One member's place on the voice priority list (see `league.services.prio`).
+    """One member's place on the priority list (see `league.services.prio`).
 
-    `queued_at` is when they joined the Waiting Room. Leaving sets `grace_until`; coming back
-    before then clears it and keeps their place.
+    `queued_at` is when they joined the queue. Leaving the queue sets `grace_until`; joining
+    again before then clears it and keeps their place.
     """
 
     community = models.ForeignKey("league.Community", on_delete=models.PROTECT, related_name="+")
