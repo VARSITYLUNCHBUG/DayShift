@@ -38,6 +38,9 @@ match flow, draft modes, subs, ratings, commands, architecture, operations and d
    ```bash
    docker compose up -d --build
    ```
+   To use the published image instead of building, run `docker compose pull` and then
+   `docker compose up -d`. The image is `ghcr.io/varsitylunchbug/dl-mm-discord`, listed under the
+   repo's Packages, and is built without score OCR.
 5. In Discord, run `/setup` as the server owner or an Administrator. It creates the queue,
    Waiting Room, results, archive and staff-alerts channels, and it is safe to run again. Then
    give your staff roles their areas with `/permissions grant` (see [Permissions](#permissions)).

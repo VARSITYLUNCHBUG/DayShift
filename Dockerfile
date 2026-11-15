@@ -1,10 +1,10 @@
-FROM python:3.13-slim
+# Build stage: uv resolves the locked dependencies into /opt/venv.
+FROM python:3.13-slim AS build
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    UV_LINK_MODE=copy \
+ENV UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
-    PATH="/opt/venv/bin:$PATH"
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never
 
 RUN pip install --no-cache-dir "uv>=0.5,<1"
 
@@ -19,10 +19,32 @@ RUN if [ "$INSTALL_OCR" = "true" ]; then \
         uv sync --frozen --no-dev --no-install-project; \
     fi
 
-COPY . .
-RUN DEBUG=true python manage.py collectstatic --noinput
 
-RUN useradd --create-home --uid 1000 app && chown -R app:app /app
+# Runtime stage: the app and its virtualenv, without uv or pip caches.
+FROM python:3.13-slim
+
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG CREATED=unknown
+LABEL org.opencontainers.image.title="dl-mm-discord" \
+      org.opencontainers.image.description="Discord bot that runs queue, captain draft, champion pick/ban and Elo for 6v6 Deadlock." \
+      org.opencontainers.image.source="https://github.com/VARSITYLUNCHBUG/dl-mm-discord" \
+      org.opencontainers.image.url="https://github.com/VARSITYLUNCHBUG/dl-mm-discord" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.revision="$REVISION" \
+      org.opencontainers.image.created="$CREATED"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+RUN useradd --create-home --uid 1000 app
+
+COPY --from=build /opt/venv /opt/venv
+WORKDIR /app
+COPY --chown=app:app . .
+RUN DEBUG=true python manage.py collectstatic --noinput && chown -R app:app /app/staticfiles
+
 USER app
 
 EXPOSE 8000
