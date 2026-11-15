@@ -13,8 +13,8 @@ from league.domain.errors import InvalidAction
 from league.domain.mode_schema import parse_mode
 from league.models import Community, Match, MatchParticipant, Player, QueueEntry
 from league.models.matches import MatchKind
-from league.services import lobby, penalties
-from league.services.common import lock_community, now, render_queue
+from league.services import lobby, penalties, prio, runtime
+from league.services.common import lock_community, render_queue
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +42,11 @@ def join(community_id: int, player: Player) -> QueueStatus:
     penalty = penalties.active_penalty(community, player)
     if penalty is not None:
         raise InvalidAction(penalties.refusal_text(community, player, penalty))
-    _entry, created = QueueEntry.objects.get_or_create(
-        community=community, player=player, defaults={"joined_at": now()}
-    )
-    if not created:
+    if QueueEntry.objects.filter(community=community, player=player).exists():
         raise InvalidAction(copy.ALREADY_QUEUED)
+    # A place held from leaving in the last few minutes puts them back where they were.
+    joined_at = prio.joined_queue(community.pk, player)
+    QueueEntry.objects.create(community=community, player=player, joined_at=joined_at)
     render_queue(community)
     match = try_pop(community)
     if match is not None and match.participants.filter(player=player).exists():
@@ -60,6 +60,7 @@ def leave(community_id: int, player: Player) -> None:
     deleted, _ = QueueEntry.objects.filter(community=community, player=player).delete()
     if not deleted:
         raise InvalidAction(copy.NOT_QUEUED)
+    prio.left_queue(community.pk, [player.discord_user_id])
     render_queue(community)
 
 
@@ -68,6 +69,7 @@ def kick(community_id: int, player: Player) -> bool:
     community = lock_community(community_id)
     deleted, _ = QueueEntry.objects.filter(community=community, player=player).delete()
     if deleted:
+        prio.drop_players(community.pk, [player.discord_user_id])
         render_queue(community)
     return bool(deleted)
 
@@ -76,6 +78,7 @@ def kick(community_id: int, player: Player) -> bool:
 def clear(community_id: int) -> int:
     community = lock_community(community_id)
     deleted, _ = QueueEntry.objects.filter(community=community).delete()
+    prio.drop_all(community.pk)
     render_queue(community)
     return deleted
 
@@ -93,7 +96,7 @@ def try_pop(community: Community) -> Match | None:
     """Start a lobby if the queue is full and capacity allows. Requires the community lock."""
     mode = parse_mode(community.active_mode.body)
     live = Match.objects.filter(community=community, kind=MatchKind.RANKED, status__in=LIVE).count()
-    if live >= community.max_concurrent_matches:
+    if live >= runtime.of(community).max_concurrent_matches:
         return None
     entries = list(
         QueueEntry.objects.filter(community=community).select_related("player")[: mode.lobby_size]
