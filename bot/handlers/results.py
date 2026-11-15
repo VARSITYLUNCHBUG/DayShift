@@ -10,9 +10,9 @@ from discord import Interaction, SelectOption
 from bot.db import db
 from bot.handlers.common import actor
 from bot.handlers.permissions import community_of_match, has_area, require_area_for_match
-from bot.images import MAX_IMAGE_BYTES, detect_image, sha256
 from bot.routing import Context, RouteSelect, guarded, handles, reply
 from league.domain.errors import InvalidAction, NotAllowed
+from league.domain.images import MAX_IMAGE_BYTES, detect_image, sha256
 from league.models import Match, Player
 from league.models.permissions import Area
 from league.services import awards, early_leave, ocr, results

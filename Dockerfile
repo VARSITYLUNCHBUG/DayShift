@@ -48,4 +48,6 @@ RUN DEBUG=true python manage.py collectstatic --noinput && chown -R app:app /app
 USER app
 
 EXPOSE 8000
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--access-logfile", "-"]
+# One worker: it holds every player's websocket, and fans live updates out from one LISTEN
+# connection. Lifespan is off because Channels' router doesn't speak it.
+CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--lifespan", "off"]

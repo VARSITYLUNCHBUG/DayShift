@@ -22,7 +22,6 @@ from bot.handlers import lobby as _lobby  # noqa: F401
 from bot.handlers import queue as _queue  # noqa: F401
 from bot.handlers import results as _results  # noqa: F401
 from bot.handlers.results import parse_deadlock_match_id
-from bot.images import detect_image
 from bot.renderers.board import render_board, render_pickers, render_ready_dm
 from bot.renderers.queue import render_queue
 from bot.renderers.results import render_results, team_table
@@ -37,6 +36,7 @@ from bot.routing import (
 from league.domain.draft_plan import build_plan, team_for_role
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
+from league.domain.images import detect_image
 from league.models import Community, Match, OutboxEffect, Player
 from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus

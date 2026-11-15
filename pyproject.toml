@@ -7,17 +7,19 @@ dependencies = [
     "dj-database-url>=2.3,<4",
     "discord.py>=2.7,<2.8",
     "django>=5.2,<5.3",
-    "gunicorn>=23",
     "httpx>=0.28",
-    "psycopg[binary]>=3.2,<4",
+    "psycopg[binary,pool]>=3.2,<4",
     "pydantic>=2.10,<3",
     "pyyaml>=6",
     "whitenoise>=6.9",
     "openskill>=6.2,<7",
+    "channels>=4.2,<5",
+    "uvicorn[standard]>=0.30,<1",
 ]
 
 [dependency-groups]
 dev = [
+    "daphne>=4.1,<5",
     "django-stubs>=5.2",
     "hypothesis>=2.0",
     "mypy>=1.15",
@@ -59,6 +61,12 @@ plugins = ["mypy_django_plugin.main"]
 ignore_missing_imports = true
 check_untyped_defs = true
 exclude = ["league/migrations/"]
+
+# scoreocr is the optional score-OCR engine, typed loosely against numpy and pillow. Follow it so
+# its signatures still check league/services/ocr.py, but don't report its own errors.
+[[tool.mypy.overrides]]
+module = ["scoreocr", "scoreocr.*"]
+follow_imports = "silent"
 
 [tool.django-stubs]
 django_settings_module = "config.settings"

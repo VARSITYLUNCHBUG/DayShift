@@ -42,6 +42,12 @@ services:
 
   web:
     <<: *app
+    # A merge key doesn't merge nested maps, so this repeats the shared environment.
+    environment:
+      DATABASE_URL: postgres://draftbot:${POSTGRES_PASSWORD:-change-me}@db:5432/draftbot
+      BOT_HEARTBEAT_FILE: /tmp/bot-heartbeat
+      # Pool the web process's connections. The bot keeps one long-lived connection.
+      DB_POOL: "true"
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "channels",
     "league",
 ]
 
@@ -67,6 +68,7 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 TEMPLATES = [
     {
@@ -90,6 +92,21 @@ DATABASES = {
     )
 }
 
+# How many threads the web process runs database work on (see league.asyncdb).
+WEB_DB_THREADS = int(os.environ.get("WEB_DB_THREADS") or 8)
+
+# The web process opts in to psycopg's connection pool. Django refuses a pool alongside persistent
+# connections, and the pool checks its own connections. The bot keeps one long-lived connection.
+if env_bool("DB_POOL"):
+    DATABASES["default"]["CONN_MAX_AGE"] = 0
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = False
+    DATABASES["default"].setdefault("OPTIONS", {})["pool"] = {
+        "min_size": 1,
+        # One per database thread, plus Django's own thread for sync views.
+        "max_size": WEB_DB_THREADS + 2,
+        "timeout": 10,
+    }
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LANGUAGE_CODE = "en-gb"
 TIME_ZONE = "UTC"
@@ -98,6 +115,11 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Compressed but not renamed: the player frontend's build already puts a hash in its file names.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -139,4 +161,15 @@ ERROR_LOG_CHANNEL_ID = int(os.environ.get("ERROR_LOG_CHANNEL_ID") or 0)
 # Optional. Only needed to link Steam accounts by a custom profile URL (/id/name).
 STEAM_WEB_API_KEY = os.environ.get("STEAM_WEB_API_KEY", "")
 
-# Fake players exist only for local smoke tests and are refused outside DEBUG.
+# --- Player web UI ----------------------------------------------------------------------------
+# The Discord server the web UI plays in. One server per deployment.
+WEB_GUILD_ID = int(os.environ.get("WEB_GUILD_ID") or DISCORD_GUILD_ID)
+# Where players reach the web UI. Sign-in redirects are built from this, never from the Host header.
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://localhost:8000").rstrip("/")
+# The Discord application's OAuth2 client, for "Sign in with Discord".
+DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
+DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
+# Sign in as any player without Discord, for local testing only.
+WEB_DEV_LOGIN = env_bool("WEB_DEV_LOGIN")
+if WEB_DEV_LOGIN and not DEBUG:
+    raise RuntimeError("WEB_DEV_LOGIN only works with DEBUG on.")

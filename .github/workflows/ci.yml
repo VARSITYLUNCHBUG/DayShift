@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: draftbot
+          POSTGRES_PASSWORD: draftbot
+          POSTGRES_DB: draftbot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U draftbot -d draftbot"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://draftbot:draftbot@localhost:5432/draftbot
+      DJANGO_SECRET_KEY: ci-only-not-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      # The OCR group is optional and large; its tests skip without it.
+      - run: uv sync --frozen
+      - run: uv run --frozen ruff check .
+      - run: uv run --frozen ruff format --check .
+      - run: uv run --frozen mypy bot league config
+      - run: uv run --frozen pytest
