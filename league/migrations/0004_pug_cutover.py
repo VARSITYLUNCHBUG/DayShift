@@ -61,7 +61,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='runtimesettings',
             name='interim_points',
-            field=models.BooleanField(default=False, help_text='NeatQueue interim: show NeatQueue-style points, carried over from the import (/rating import), instead of the OpenSkill rating. OpenSkill keeps running underneath; turn this off to cut over to it.'),
+            field=models.BooleanField(default=False, help_text='NeatQueue interim: show NeatQueue-style points, carried over from the import (Interim ratings, Import NeatQueue CSV), instead of the OpenSkill rating. OpenSkill keeps running underneath; turn this off to cut over to it.'),
         ),
         migrations.AddField(
             model_name='runtimesettings',

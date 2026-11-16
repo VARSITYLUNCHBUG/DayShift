@@ -1,11 +1,11 @@
 """The NeatQueue interim: NeatQueue's points carried over at the cutover, kept moving here.
 
-Staff import each player's NeatQueue points, wins and losses from a CSV (`/rating import`).
-While the interim is on (a runtime setting), every completed match moves the points Elo-style
-on the two teams' average points, and the leaderboards, /stats, boards and results show the
-points instead of the OpenSkill rating. OpenSkill keeps rating every match underneath, and still
-drives captain tie-breaks, the first pick and auto-picks, so turning the interim off is the whole
-cutover.
+The host imports each player's NeatQueue points, wins and losses from a CSV, on the admin's
+Interim ratings page. While the interim is on (a runtime setting), every completed match moves
+the points Elo-style on the two teams' average points, and the leaderboards, /stats, boards and
+results show the points instead of the OpenSkill rating. OpenSkill keeps rating every match
+underneath, and still drives captain tie-breaks, the first pick and auto-picks, so turning the
+interim off is the whole cutover.
 
 The points are a projection, rebuilt in full from the imported values and the season's completed
 matches in the order they ended. So a rescore, a void or a late sub corrects them by itself.
@@ -252,6 +252,40 @@ def parse_csv(text: str) -> ParsedImport:
             problems.append(f"Line {number}: {discord_id} is listed twice; the later line counts.")
         rows[discord_id] = ImportRow(discord_id, points, wins, losses, cell("name").strip()[:100])
     return ParsedImport(list(rows.values()), problems)
+
+
+def preview_lines(community: Community, parsed: ParsedImport) -> list[str]:
+    """What an import would do, for the host to confirm."""
+    known = set(
+        Player.objects.filter(
+            discord_user_id__in=[row.discord_user_id for row in parsed.rows]
+        ).values_list("discord_user_id", flat=True)
+    )
+    lines = [
+        f"Import NeatQueue points for {len(parsed.rows)} players "
+        f"({len(known)} have used this bot already).",
+        "This replaces any earlier import for this season, turns the interim on, and rebuilds "
+        "everyone's points from these plus the matches played here. Players not listed start "
+        f"at {runtime.of(community).interim_start_points}.",
+    ]
+    top = sorted(parsed.rows, key=lambda row: -row.points)[:5]
+    if top:
+        lines.append(
+            "Highest: "
+            + ", ".join(f"{row.name or row.discord_user_id} {row.points}" for row in top)
+        )
+    return lines
+
+
+def encode_rows(rows: list[ImportRow]) -> list[list[object]]:
+    return [[r.discord_user_id, r.points, r.wins, r.losses, r.name] for r in rows]
+
+
+def decode_rows(data: list[list[object]]) -> list[ImportRow]:
+    return [
+        ImportRow(int(str(i)), int(str(p)), int(str(w)), int(str(lo)), str(n))
+        for i, p, w, lo, n in data
+    ]
 
 
 @transaction.atomic

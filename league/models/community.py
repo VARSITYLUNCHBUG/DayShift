@@ -82,8 +82,8 @@ class Community(models.Model):
 
 
 class RuntimeSettings(models.Model):
-    """One server's switches. They take effect at once, with no restart: change them in the
-    admin, or with the staff commands that set them (/ocr mode, /deadlock settings).
+    """One server's switches. They take effect at once, with no restart. They're changed only in
+    the admin, whose save runs `league.services.runtime.after_change`.
 
     Read them through `league.services.runtime.of`, which creates the row on first use."""
 
@@ -118,8 +118,8 @@ class RuntimeSettings(models.Model):
     interim_points = models.BooleanField(
         default=False,
         help_text="NeatQueue interim: show NeatQueue-style points, carried over from the import "
-        "(/rating import), instead of the OpenSkill rating. OpenSkill keeps running underneath; "
-        "turn this off to cut over to it.",
+        "(Interim ratings, Import NeatQueue CSV), instead of the OpenSkill rating. OpenSkill keeps "
+        "running underneath; turn this off to cut over to it.",
     )
     interim_start_points = models.IntegerField(
         default=1000, help_text="Points for a player who wasn't in the NeatQueue import."
