@@ -26,9 +26,9 @@ from bot.handlers.results import DisputeModal, ReportModal, process_report
 from bot.routing import Context, _dispatch
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
-from league.models import Community, DraftModeVersion, Match, Player, QueueEntry, ResultSubmission
+from league.models import Community, Match, Player, QueueEntry, ResultSubmission
 from league.models.permissions import Area
-from league.services import community, integrity, permissions, queue, ratings
+from league.services import community, integrity, permissions, queue
 from league.services.common import captain_of, open_season
 from tests.conftest import make_player, publish_presets
 from tests.helpers import (
@@ -690,23 +690,6 @@ def test_unknown_match_is_a_clear_refusal(wired: Community) -> None:
     assert "no match #999999" in replies(interaction)[0]
 
 
-def test_mode_commands(wired: Community) -> None:
-    admin = make_player(50)
-    interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.mode_group, "list"), interaction)
-    assert "bebot_2ban" in replies(interaction)[0]
-    assert "(active)" in replies(interaction)[0]
-
-    interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="bebot_2ban")
-    wired.refresh_from_db()
-    assert wired.active_mode == DraftModeVersion.objects.get(slug="bebot_2ban")
-
-    interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="nope")
-    assert "no mode called" in replies(interaction)[0]
-
-
 def test_queue_kick_and_clear_commands(wired: Community) -> None:
     admin = make_player(50)
     target = make_player(1)
@@ -739,37 +722,6 @@ def test_penalty_commands(wired: Community) -> None:
     queue.join(wired.pk, target)
 
 
-def test_roster_sync_command_previews_then_applies(
-    wired: Community, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from league.models import Champion
-    from league.services import champions
-
-    current = [
-        champions.RemoteChampion(id=c.pk, name=c.name, icon_url="") for c in Champion.objects.all()
-    ]
-    monkeypatch.setattr(
-        champions,
-        "fetch_remote",
-        lambda: [*current, champions.RemoteChampion(id=200, name="Newcomer", icon_url="")],
-    )
-    admin = make_player(50)
-    interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.roster_group, "sync"), interaction)
-    assert "New: Newcomer" in interaction.followup.send.call_args.args[0]
-    assert not Champion.objects.filter(pk=200).exists()
-    view = interaction.followup.send.call_args.kwargs["view"]
-    asyncio.run(view.confirm.callback(fake_interaction(admin, administrator=True)))
-    assert Champion.objects.get(pk=200).is_enabled
-
-
-def test_ledger_check_command(wired: Community) -> None:
-    ratings.seed_player(open_season(wired), make_player(1), "mid", actor=None)
-    interaction = fake_interaction(make_player(50), administrator=True)
-    run_command(staff.ledger_check, interaction)
-    assert replies(interaction) == ["Ratings add up."]
-
-
 # --- Registration ----------------------------------------------------------------------------
 
 
@@ -780,9 +732,11 @@ def test_every_command_serialises_for_discord() -> None:
         tree.add_command(command)
     payloads = [command.to_dict(tree) for command in tree.get_commands()]
     names = {payload["name"] for payload in payloads}
-    assert {"queue", "queue_admin", "rating", "match", "ban", "mode", "roster"} <= names
+    assert {"queue", "queue_admin", "rating", "match", "ban"} <= names
     assert {"setup", "submit", "permissions"} <= names
-    assert {"link", "unlink", "captain", "ocr", "deadlock"} <= names
+    assert {"link", "unlink", "captain", "deadlock"} <= names
+    # Server configuration lives in the Django admin, not in Discord.
+    assert not {"mode", "roster", "ocr", "ledger_check"} & names
     assert {"startdraft", "stopdraft", "captains_coinflip", "randomdraft"} <= names
     assert "coinflip" not in names
     assert {"prio", "removeprio"} <= names
@@ -790,12 +744,9 @@ def test_every_command_serialises_for_discord() -> None:
     assert {"pingchannel", "removeping", "pings", "ping"} <= names
     assert {"seterrorchannel", "clearerrorchannel"} <= names
     rating = next(payload for payload in payloads if payload["name"] == "rating")
-    assert {option["name"] for option in rating["options"]} == {
-        "seed",
-        "adjust",
-        "import",
-        "interim",
-    }
+    assert {option["name"] for option in rating["options"]} == {"seed", "adjust"}
+    deadlock = next(payload for payload in payloads if payload["name"] == "deadlock")
+    assert {option["name"] for option in deadlock["options"]} == {"check", "unlink"}
     queue_payload = next(payload for payload in payloads if payload["name"] == "queue")
     assert {option["name"] for option in queue_payload["options"]} == {"status"}
     queue_admin = next(payload for payload in payloads if payload["name"] == "queue_admin")
