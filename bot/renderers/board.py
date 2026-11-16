@@ -16,19 +16,22 @@ from bot.renderers.grid import fits as grid_fits
 from bot.renderers.grid import messages as grid_messages
 from bot.routing import RouteButton, RouteSelect
 from league.domain.engine import (
-    AM_PICK1,
-    AM_PICK2,
     ARCHMOTHER,
     COINFLIP_LABELS,
     FIRST_PICK,
     HIDDEN_KING,
-    HK_PICK1,
-    HK_PICK2,
     LAST_PICK,
     Status,
 )
 from league.models.subs import SubStatus
-from league.services.boards import BoardState, ChampionOption, DraftLine, PlayerLine, SubLine
+from league.services.boards import (
+    BoardState,
+    ChampionOption,
+    DraftLine,
+    PlayerLine,
+    SubLine,
+    SwapLine,
+)
 from league.services.subs import OfferInfo
 
 ACCENT_LIVE = style.LOBBY_COLOUR
@@ -39,6 +42,7 @@ ACCENT_VOID = style.VOID_COLOUR
 STATUS_TITLES = {
     Status.READY_CHECK: "Ready check",
     Status.CAPTAIN_PHASE: "Captain vote",
+    Status.CAPTAIN_CHECKIN: "Captains check in",
     Status.PLAYER_DRAFT: "Player draft",
     Status.COINFLIP: "Captain coinflip",
     Status.CHAMPION_DRAFT: "Champion draft",
@@ -64,6 +68,7 @@ def player_mention(discord_user_id: int) -> str:
 TIMER_LABELS = {
     Status.READY_CHECK: "Ready check closes",
     Status.CAPTAIN_PHASE: "Vote closes",
+    Status.CAPTAIN_CHECKIN: "Missing captains are replaced",
     Status.PLAYER_DRAFT: "Auto-pick",
     Status.COINFLIP: "Random choice",
     Status.CHAMPION_DRAFT: "Auto-pick",
@@ -200,6 +205,28 @@ def _captain_vote(state: BoardState, box: Container[Any]) -> None:
     )
 
 
+def _captain_checkin(state: BoardState, box: Container[Any]) -> None:
+    """Both captains confirm they're here before anyone is drafted."""
+    rows = []
+    for team in ("A", "B"):
+        captain = _captain_line(state, team)
+        if captain is None:
+            continue
+        mark = "✅" if captain.player_id in state.checked_in_ids else "⏳"
+        rows.append(f"{mark} 👑 {player_mention(captain.discord_user_id)} ({captain.rating_label})")
+    box.add_item(
+        TextDisplay(
+            "Captains: press **I'm here** to start the player draft. A captain who doesn't is "
+            "replaced by the next player in line.\n" + "\n".join(rows)
+        )
+    )
+    box.add_item(
+        ActionRow(
+            RouteButton("checkin", state.match_id, label="I'm here", style=ButtonStyle.success)
+        )
+    )
+
+
 def _player_draft(state: BoardState, box: Container[Any]) -> None:
     box.add_item(TextDisplay(_team_block(state, "A") + "\n\n" + _team_block(state, "B")))
     box.add_item(Separator())
@@ -220,23 +247,15 @@ _COIN_STYLE = {
     LAST_PICK: ButtonStyle.primary,
     HIDDEN_KING: ButtonStyle.danger,
     ARCHMOTHER: ButtonStyle.primary,
-    HK_PICK1: ButtonStyle.danger,
-    HK_PICK2: ButtonStyle.danger,
-    AM_PICK1: ButtonStyle.primary,
-    AM_PICK2: ButtonStyle.primary,
 }
 _COIN_EMOJI = {
     HIDDEN_KING: style.HK_EMOJI,
     ARCHMOTHER: style.AM_EMOJI,
-    HK_PICK1: style.HK_EMOJI,
-    HK_PICK2: style.HK_EMOJI,
-    AM_PICK1: style.AM_EMOJI,
-    AM_PICK2: style.AM_EMOJI,
 }
 
 
 def coin_buttons(action: str, target_id: int, options: tuple[str, ...]) -> ActionRow[Any]:
-    """The coinflip buttons: a side with Pick 1 or Pick 2 for ranked, Bebot's four for scrims."""
+    """The coinflip buttons: the two sides for ranked, Bebot's four for scrims."""
     return ActionRow(
         *(
             RouteButton(
@@ -266,8 +285,8 @@ def _coinflip(state: BoardState, box: Container[Any]) -> None:
     lines = [f"### {style.COIN_EMOJI} Captain Coinflip", f"**{who}** wins the flip!"]
     if not state.is_scrim:
         lines.append(
-            f"{state.captains.get(winner, 'Their captain')}, choose your side and pick order. "
-            "Pick 1 bans and picks first."
+            f"{state.captains.get(winner, 'Their captain')}, choose your side. "
+            "The Hidden King bans and picks first."
         )
     elif not state.coinflip_winner_choice:
         lines.append(f"{state.captains.get(winner, 'Their captain')}, choose your preference:")
@@ -447,17 +466,20 @@ def _lobby_code(state: BoardState, box: Container[Any]) -> None:
         box.add_item(MediaGallery(discord.MediaGalleryItem(state.gif_url)))
     box.add_item(TextDisplay("# GLHF"))
     box.add_item(Separator())
-    if state.auto_lobby:
+    if not state.api_lobby_failed:
         box.add_item(
             TextDisplay(
-                "The bot is creating the lobby. If it can't, "
-                f"**{state.host_name}** hosts: create it yourself.\n{CHECKLIST}"
+                "The bot is creating the lobby. Its code shows here when it's ready. If it can't, "
+                f"**{state.host_name}** is asked to create one."
             )
         )
-    else:
-        box.add_item(
-            TextDisplay(f"**{state.host_name}** hosts: create the custom lobby.\n{CHECKLIST}")
+        return
+    box.add_item(
+        TextDisplay(
+            f"The bot couldn't create the lobby. **{state.host_name}** hosts: create the custom "
+            f"lobby, then enter its code.\n{CHECKLIST}"
         )
+    )
     box.add_item(
         ActionRow(
             RouteButton(
@@ -672,6 +694,7 @@ def _stopped(state: BoardState, box: Container[Any]) -> None:
 _SECTIONS = {
     Status.READY_CHECK: _ready,
     Status.CAPTAIN_PHASE: _captain_vote,
+    Status.CAPTAIN_CHECKIN: _captain_checkin,
     Status.PLAYER_DRAFT: _player_draft,
     Status.COINFLIP: _coinflip,
     Status.CHAMPION_DRAFT: _champion_draft,
@@ -773,6 +796,23 @@ def _subs(state: BoardState, box: Container[Any]) -> None:
         box.add_item(ActionRow(*_sub_buttons(state, line)))
 
 
+def _swap(state: BoardState, box: Container[Any], line: SwapLine) -> None:
+    box.add_item(
+        TextDisplay(
+            f"🔄 **{line.requested_by_name}** offers **{line.give_name}** for "
+            f"**{line.take_name}**. The other captain can accept {_stamp(line.deadline_at)}."
+        )
+    )
+    box.add_item(
+        ActionRow(
+            RouteButton(
+                "swap_yes", state.match_id, line.id, label="Accept swap", style=ButtonStyle.success
+            ),
+            RouteButton("swap_no", state.match_id, line.id, label="Decline"),
+        )
+    )
+
+
 def _strip_buttons(box: Container[Any], start: int) -> None:
     """While paused, the phase's own buttons would only be refused, so the board leaves them out."""
     for item in list(box.children)[start:]:
@@ -796,8 +836,16 @@ def render_board(state: BoardState) -> LayoutView:
     if state.subs:
         box.add_item(Separator())
         _subs(state, box)
+    if state.swap is not None and not state.on_hold:
+        box.add_item(Separator())
+        _swap(state, box, state.swap)
+    footer: list[RouteButton] = []
     if state.can_request_sub:
-        box.add_item(ActionRow(RouteButton("sub_open", state.match_id, label="Request a sub")))
+        footer.append(RouteButton("sub_open", state.match_id, label="Request a sub"))
+    if state.can_swap and state.swap is None and not state.on_hold:
+        footer.append(RouteButton("swap_open", state.match_id, label="Swap players"))
+    if footer:
+        box.add_item(ActionRow(*footer))
     view = LayoutView(timeout=None)
     view.add_item(box)
     return view
@@ -809,12 +857,12 @@ def render_ready_dm(
     """The DM sent to players who weren't in the Waiting Room when their lobby popped."""
     buttons: list[discord.ui.Item[Any]] = []
     if invite_url:
-        buttons.append(discord.ui.Button(label="Join voice", url=invite_url))
+        buttons.append(discord.ui.Button(label="Join the Waiting Room", url=invite_url))
     buttons.append(RouteButton("ready", match_id, label="Ready", style=ButtonStyle.success))
     if channel_url:
         buttons.append(discord.ui.Button(label="Open match channel", url=channel_url))
     box: Container[Any] = Container(
-        TextDisplay(f"## {heading}\nMatch #{match_id}. Join voice, then press Ready."),
+        TextDisplay(f"## {heading}\nMatch #{match_id}. Join the Waiting Room, then press Ready."),
         ActionRow(*buttons),
         accent_colour=ACCENT_LIVE,
     )

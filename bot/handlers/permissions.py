@@ -64,6 +64,22 @@ async def require_area_for_match(
     return community
 
 
+def has_pug_role(interaction: Interaction[Any], community: Community) -> bool:
+    """Whether the member may use the PUG: they hold its role, or none is set. The owner and
+    Administrators always may."""
+    if community.pug_role_id is None or is_manager(interaction):
+        return True
+    user = interaction.user
+    return isinstance(user, discord.Member) and any(
+        role.id == community.pug_role_id for role in user.roles
+    )
+
+
+def require_pug_role(interaction: Interaction[Any], community: Community) -> None:
+    if not has_pug_role(interaction, community):
+        raise NotAllowed(f"You need the <@&{community.pug_role_id}> role for that.")
+
+
 def require_manager(interaction: Interaction[Any]) -> None:
     if not is_manager(interaction):
         raise NotAllowed("Only the server owner and Administrators can do that.")

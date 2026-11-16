@@ -43,6 +43,7 @@ from league.services import (
     corrections,
     early_leave,
     integrity,
+    interim,
     lobby,
     modes,
     ocr,
@@ -439,6 +440,89 @@ async def rating_adjust(
     await guarded(interaction, run)
 
 
+IMPORT_MAX_BYTES = 2_000_000
+
+
+def _import_preview(community: Community, parsed: interim.ParsedImport) -> str:
+    known = set(
+        Player.objects.filter(
+            discord_user_id__in=[row.discord_user_id for row in parsed.rows]
+        ).values_list("discord_user_id", flat=True)
+    )
+    top = sorted(parsed.rows, key=lambda row: -row.points)[:5]
+    lines = [
+        f"Import NeatQueue points for **{len(parsed.rows)}** players "
+        f"({len(known)} have used this bot already)?",
+        "This replaces any earlier import for this season, turns the interim on, and rebuilds "
+        "everyone's points from these plus the matches played here. Players not listed start "
+        f"at {runtime.of(community).interim_start_points}.",
+    ]
+    if top:
+        lines.append(
+            "Highest: "
+            + ", ".join(f"{row.name or row.discord_user_id} {row.points}" for row in top)
+        )
+    if parsed.problems:
+        shown = "\n".join(f"- {problem}" for problem in parsed.problems[:10])
+        more = len(parsed.problems) - 10
+        lines.append(f"Skipped:\n{shown}" + (f"\n- and {more} more" if more > 0 else ""))
+    return "\n".join(lines)[:1900]
+
+
+@rating_group.command(name="import", description="Staff: carry NeatQueue points over from a CSV")
+@app_commands.describe(
+    file="CSV of discord_id, rating, wins, losses (a header row may name them; name is optional)"
+)
+async def rating_import(interaction: Interaction[Any], file: discord.Attachment) -> None:
+    async def run() -> None:
+        community = await _staff_start(interaction, Area.RATINGS)
+        if file.size > IMPORT_MAX_BYTES:
+            raise InvalidAction("That file is too big. Split it, or trim columns you don't need.")
+        try:
+            text = (await file.read()).decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise InvalidAction(
+                "That file isn't UTF-8 text. Save it as CSV and try again."
+            ) from exc
+        parsed = interim.parse_csv(text)
+        if not parsed.rows:
+            raise InvalidAction("No players could be read from that file.")
+
+        async def confirm(confirm_interaction: Interaction[Any]) -> None:
+            count = await db(interim.apply_import, community, parsed.rows)
+            await reply(
+                confirm_interaction,
+                f"Imported {count} players. The interim is on: players see NeatQueue points until "
+                "you turn it off with `/rating interim enabled:False`.",
+            )
+
+        await interaction.followup.send(
+            await db(_import_preview, community, parsed),
+            view=ConfirmView(confirm),
+            ephemeral=True,
+        )
+
+    await guarded(interaction, run)
+
+
+@rating_group.command(
+    name="interim", description="Staff: show NeatQueue points (on) or the OpenSkill rating (off)"
+)
+@app_commands.describe(enabled="On: players see NeatQueue points. Off: the cutover to OpenSkill")
+async def rating_interim(interaction: Interaction[Any], enabled: bool) -> None:
+    async def run() -> None:
+        community = await _staff_start(interaction, Area.RATINGS)
+        await db(interim.set_enabled, community, enabled)
+        text = (
+            "The interim is on: players see NeatQueue points, carried over from the import."
+            if enabled
+            else "The interim is off: players now see the OpenSkill rating."
+        )
+        await reply(interaction, text)
+
+    await guarded(interaction, run)
+
+
 queue_admin_group = app_commands.Group(name="queue_admin", description="Staff: the match queue")
 
 
@@ -463,10 +547,10 @@ async def queue_clear(interaction: Interaction[Any]) -> None:
     await guarded(interaction, run)
 
 
-penalty_group = app_commands.Group(name="penalty", description="Staff: queue cooldowns")
+ban_group = app_commands.Group(name="ban", description="Staff: queue bans (cooldowns) and strikes")
 
 
-@penalty_group.command(name="add", description="Put a player on a queue cooldown")
+@ban_group.command(name="add", description="Ban a player from the queue for a while")
 @app_commands.choices(
     kind=[
         app_commands.Choice(name="Dodge", value="dodge"),
@@ -476,7 +560,7 @@ penalty_group = app_commands.Group(name="penalty", description="Staff: queue coo
     ]
 )
 @app_commands.describe(minutes="Leave empty to use the escalating ladder for this kind")
-async def penalty_add(
+async def ban_add(
     interaction: Interaction[Any],
     player: discord.Member,
     kind: app_commands.Choice[str],
@@ -504,9 +588,9 @@ async def penalty_add(
     await guarded(interaction, run)
 
 
-@penalty_group.command(name="revoke", description="Lift a player's active cooldown")
+@ban_group.command(name="revoke", description="Lift a player's active queue ban")
 @app_commands.describe(keep_strikes="Keep the strikes it added. By default they go too")
-async def penalty_revoke(
+async def ban_revoke(
     interaction: Interaction[Any], player: discord.Member, keep_strikes: bool = False
 ) -> None:
     async def run() -> None:
@@ -519,9 +603,9 @@ async def penalty_revoke(
     await guarded(interaction, run)
 
 
-@penalty_group.command(name="strikes", description="Add or remove dodge strikes by hand")
+@ban_group.command(name="strikes", description="Add or remove dodge strikes by hand")
 @app_commands.describe(delta="Positive adds strikes, negative removes them")
-async def penalty_strikes(
+async def ban_strikes(
     interaction: Interaction[Any],
     player: discord.Member,
     delta: app_commands.Range[int, -20, 20],
@@ -714,7 +798,7 @@ deadlock_group = app_commands.Group(
 
 
 def _save_deadlock_settings(
-    community: Community, auto_lobby: bool | None, region: str | None, check_results: bool | None
+    community: Community, region: str | None, check_results: bool | None
 ) -> None:
     values: dict[str, object] = {}
     if region is not None:
@@ -722,8 +806,6 @@ def _save_deadlock_settings(
         if cleaned and cleaned not in deadlock_api.SERVER_REGIONS:
             raise InvalidAction("Unknown region. Start typing to see the list.")
         values["lobby_region"] = cleaned
-    if auto_lobby is not None:
-        values["auto_lobby"] = auto_lobby
     if check_results is not None:
         values["api_results"] = check_results
     if values:
@@ -736,7 +818,7 @@ def _deadlock_status_text(community: Community) -> str:
     by_status = dict(checks.values("status").annotate(n=Count("id")).values_list("status", "n"))
     linked = Player.objects.filter(steam_account_id__isnull=False)
     lines = [
-        f"Automatic lobbies: **{'on' if settings_.auto_lobby else 'off'}**"
+        "Lobbies: deadlock-api's bot creates each one; the host enters a code if it can't"
         f" (region: {settings_.lobby_region or 'automatic'}).",
         f"Result checks: **{'on' if settings_.api_results else 'off'}**.",
         f"Steam links: {linked.count()}, "
@@ -748,7 +830,7 @@ def _deadlock_status_text(community: Community) -> str:
             + ", ".join(f"{CheckStatus(s).label}: {n}" for s, n in sorted(by_status.items()))
         )
     if not settings.DEADLOCK_API_KEY:
-        lines.append("-# Automatic lobbies are limited to 10 an hour.")
+        lines.append("-# Without an API key, lobbies are limited to 10 an hour.")
     return "\n".join(lines)
 
 
@@ -759,22 +841,20 @@ async def _region_autocomplete(
     return [app_commands.Choice(name=r, value=r) for r in matches[:25]]
 
 
-@deadlock_group.command(name="settings", description="Automatic lobbies, region, result checks")
+@deadlock_group.command(name="settings", description="Lobby region and result checks")
 @app_commands.describe(
-    auto_lobby="Have deadlock-api's bot create each match's lobby",
     region="Lobby server region. Leave empty for the API's default",
     check_results="Check reported results against deadlock-api by match ID",
 )
 @app_commands.autocomplete(region=_region_autocomplete)
 async def deadlock_settings(
     interaction: Interaction[Any],
-    auto_lobby: bool | None = None,
     region: str | None = None,
     check_results: bool | None = None,
 ) -> None:
     async def run() -> None:
         community = await _staff_start(interaction, Area.SETUP)
-        await db(_save_deadlock_settings, community, auto_lobby, region, check_results)
+        await db(_save_deadlock_settings, community, region, check_results)
         await reply(interaction, await db(_deadlock_status_text, community))
 
     await guarded(interaction, run)
@@ -829,7 +909,7 @@ GROUPS: tuple[app_commands.Group, ...] = (
     match_group,
     rating_group,
     queue_admin_group,
-    penalty_group,
+    ban_group,
     mode_group,
     roster_group,
     captain_group,
