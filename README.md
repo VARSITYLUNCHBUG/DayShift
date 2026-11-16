@@ -10,8 +10,9 @@ A big shout out to the ZA Deadlock community for playing in the inhouses, giving
 # dl-mm-discord
 
 A Discord bot that runs a 6v6 Deadlock inhouse from queue to results: FIFO queue, ready check,
-captains, player draft, champion pick/ban, lobby code, screenshot reporting, OpenSkill ratings
-with MVP and key-player awards, and optional score OCR.
+captains and their check-in, player draft and swaps, champion pick/ban, an automatic lobby,
+screenshot reporting, OpenSkill ratings with MVP and key-player awards (with NeatQueue's points
+carried over while the server cuts over), a leaderboard channel, and optional score OCR.
 
 Python, Django and Postgres. One codebase and one image, running as two processes: `bot`
 (discord.py) and `web` (the Django admin and the staff calibration dashboard).
@@ -46,9 +47,11 @@ to include.
    `docker compose up -d`. The image is `ghcr.io/varsitylunchbug/dl-mm-discord`, listed under the
    repo's Packages. It's built from `main` without score OCR: `latest` and `main` follow `main`,
    and `sha-<commit>` pins one build.
-5. In Discord, run `/setup` as the server owner or an Administrator. It creates the queue,
-   Waiting Room, results, archive and staff-alerts channels, and it is safe to run again. Then
-   give your staff roles their areas with `/permissions grant` (see [Permissions](#permissions)).
+5. In Discord, run `/setup pug_role:@PUGS` as the server owner or an Administrator. It creates
+   the queue, Waiting Room, results, leaderboard, archive and staff-alerts channels, and it is
+   safe to run again. With a PUG role, only that role sees the queue, Waiting Room, results and
+   leaderboard, and only it can use `/leaderboard`; without one, everyone can. Then give your
+   staff roles their areas with `/permissions grant` (see [Permissions](#permissions)).
 6. Create an admin login for `http://127.0.0.1:8000/admin/`:
    ```bash
    docker compose exec web python manage.py createsuperuser
@@ -67,16 +70,18 @@ created since migrate normally; the migrate step runs on every `docker compose u
 | Step | What happens | Clock and fallback |
 |---|---|---|
 | Queue | Join and Leave buttons, FIFO. Voice isn't required | Blocked by a cooldown or a live match |
-| Pop at 12 | Creates a private text channel, `match-12`, and a voice channel, `Match 12 · Lobby` | Queue waits at `max_concurrent_matches` |
-| Gather | In the Waiting Room: moved. Anywhere else: DM with invite and Ready button. DMs closed: mention in the lobby channel | Joining the Waiting Room later moves them, until they've been in the match's voice once. After that, where they go is up to them |
+| Pop at 12 | Creates a private text channel, `match-12`. The Waiting Room is the lobby's voice: there's no lobby voice channel | Queue waits at `max_concurrent_matches` |
+| Gather | In the Waiting Room: nothing to do. Anywhere else: DM with a Waiting Room invite and Ready button. DMs closed: mention in the match channel | |
 | Ready | Ready button on the board and in the "Ready Up" DM. The board is posted right after the lobby ping, before the invites go out. As players ready, the ping is edited to mention only those still to ready (an edit pings nobody) | 180 s. A miss frees the spot, offered down the priority list (the queue, longest wait first). Unfilled in 2 min: cancel, and everyone left goes back to the front of the queue |
 | Captain vote | Everyone votes for up to two captains, themselves included, from players with 5 completed matches. Most votes wins; rating breaks ties and fills any gap. Two or fewer eligible, or the Auto Captain setting on: no vote, captains are appointed by experience and rating | 45 s, or closes early once everyone has voted |
+| Captain check-in | Each captain presses **I'm here** before anyone is drafted | 60 s (`captains.checkin_seconds`). A captain who misses it is replaced by the next eligible player in vote order, who gets the full time. With nobody eligible left, the draft starts with the captains it has |
 | Player draft | `FSSFFSSFFS`, lower-rated captain first. Last player is assigned. No message announces it: the board shows the captains and whose pick it is | 45 s, then highest rated |
-| Team voice | Creates `Match 12 · Kestrel's Team` and the other team's channel, and moves anyone in the lobby voice. Everyone else gets a "Teams picked" DM with the invite | Never blocks the draft |
-| Captain coinflip | The winner chooses their side and pick order in one press: 🔶 Hidden King · Pick 1, 🔶 Hidden King · Pick 2, 🔷 Archmother · Pick 1 or 🔷 Archmother · Pick 2. Pick 1 bans and picks first. (Scrims keep Bebot's two-captain coinflip.) | 20 s, then a random choice |
+| Team voice | Creates `Match 12 · Kestrel's Team` and the other team's channel, and moves anyone in the Waiting Room. Everyone else gets a "Teams picked" DM with the invite | Never blocks the draft |
+| Captain coinflip | The winner chooses a side: 🔶 Hidden King or 🔷 Archmother. The Hidden King is always Pick 1 (team 1) and bans and picks first. (Scrims keep Bebot's two-captain coinflip.) | 20 s, then a random side |
+| Player swap | From the coinflip until the game starts, a captain can press **Swap players** to offer one of their players for one of the other team's. Captains stay put. The other captain accepts and the two change teams and voice channels, or declines | 60 s to answer, then it lapses. One offer at a time |
 | Champion draft | The mode's ban and pick order, from the team the coinflip put first. 🎲 Random takes a champion on purpose | 40 s a turn. A timeout takes a random champion, for bans too |
 | Draft summary | Named like "Crimson Wolf", with a GIF from `presets/draft_gifs.json` and GLHF, above the lobby code prompt | |
-| Lobby code | A random captain enters it; it's posted with the settings checklist. With automatic lobbies, deadlock-api's bot creates it and a captain presses Start match | 3 min, then the other captain, then cancel |
+| Lobby | deadlock-api's bot always creates the custom lobby; its code is posted and a captain presses Start match. Only if that fails is a random captain asked to create one and enter its code, with the settings checklist | No lobby in 3 min counts as a failure. Then 3 min for the host, then the other captain, then cancel |
 | Report | Press the team that won, then add the screenshot, and optionally the Deadlock match ID, MVP and key players. With score OCR on, the screenshot is read | 3 h without a report goes to staff |
 | Confirm | The other captain confirms, disputes or adds a screenshot | 5 min. Silence confirms |
 | Results | First screenshot, the rating table, 🏅 MVP and ⭐ key players, and scoreboard stats go to the results channel. Every screenshot goes to the archive | Effects retry |
@@ -180,8 +185,9 @@ them (`/ocr mode`, `/deadlock settings`) change the same row.
 | Match channel close minutes | 3 | How long a finished match's text channel stays before it's deleted |
 | Max concurrent matches | 12 | Ranked matches at once; the queue waits beyond this |
 | Score OCR | Off | Reading report screenshots: off, stats only, or on |
-| Auto lobby, lobby region | Off, automatic | deadlock-api creates each custom lobby |
+| Lobby region | Automatic | Where deadlock-api creates each custom lobby |
 | API results | On | Check reported results against Deadlock's match history |
+| Interim points, start points, K-factor | Off, 1000, 32 | The NeatQueue interim (see [NeatQueue interim](#neatqueue-interim)) |
 
 These used to be fields on the server's row. Migration `0003` moves each server's values across.
 
@@ -271,6 +277,40 @@ including awards that arrive late, appends differences and never rewrites histor
 `/match explain` shows the trail. Migrations are generated by `makemigrations` and never edited:
 the triggers are installed after every `migrate` by `league/db_guards.py`.
 
+## NeatQueue interim
+
+The server cuts over from NeatQueue, so players' NeatQueue points keep counting until staff
+switch to OpenSkill. Export each player's NeatQueue rating, wins and losses to a CSV and import it:
+
+```
+discord_id,name,rating,wins,losses
+123456789012345678,Kestrel,1240,40,22
+```
+
+`/rating import file:` (Ratings area) reads it, shows a preview and asks to Confirm. The header
+may name the columns (`discord_id`/`id`, `rating`/`points`/`mmr`, `wins`, `losses`, and `name`
+optionally), or leave it out to read them in that order. Importing again replaces the earlier
+import. Confirming turns the interim on.
+
+While it's on, each completed match moves every player's points Elo-style on the two teams'
+average points: a win gains `K × (1 − expected)` and a loss costs `K × expected`, so an even match
+moves 16 with the default K of 32. Players who weren't in the import start at 1000. The
+leaderboard channel, `/leaderboard`, `/stats`, the board and the results post show the points and
+the NeatQueue record plus matches played here. OpenSkill keeps rating every match underneath and
+still drives captain tie-breaks, the first player pick and auto-picks.
+
+The points are rebuilt from the import and the season's completed matches on every result and
+correction, so a rescore or a void puts them right by itself. `/rating interim enabled:False` is
+the cutover: players see the OpenSkill rating from then on. The start points and K-factor are
+runtime settings; changing them rebuilds the points as if they had always applied.
+
+## Leaderboard
+
+`#leaderboard` lists every player with a record: rank, rating (points during the interim), wins
+and losses, and win rate. The bot keeps it up to date after every result, correction and rating
+change, over as many messages as it takes. `/leaderboard` shows a player their own line of it.
+With a PUG role set, only that role sees the channel and can use the command.
+
 ## deadlock-api: Steam links, result checks and lobbies
 
 [deadlock-api.com](https://deadlock-api.com) is a community-run API for Deadlock match data. It's
@@ -299,13 +339,14 @@ again at once, with `/deadlock check`. Awards from deadlock-api replace a captai
 scoreboard's, but never staff's. The results post shows each linked player's hero, K/D/A and
 damage from the API when there was no scoreboard read.
 
-**Automatic lobbies** (off by default; `/deadlock settings auto_lobby:true region:south_africa`).
-When the champion draft ends, deadlock-api's bot creates the custom lobby and the code is posted.
-Players join and sit on their side, then a captain presses **Start match** on the board. The bot
-leaves the lobby 15 minutes after creating it, whatever the lobby is doing, so start within that
-window. If the lobby can't be made, the host gets the usual prompt to create one and enter the
-code. Once the match starts, its Deadlock match ID is fetched, so the result can be checked without
-anyone typing it. Without an API key, deadlock-api allows 10 lobbies an hour from one IP.
+**Lobbies** (always; set the region with `/deadlock settings region:south_africa`). When the
+champion draft ends, deadlock-api's bot creates the custom lobby and the code is posted. Players
+join and sit on their side, then a captain presses **Start match** on the board. The bot leaves
+the lobby 15 minutes after creating it, whatever the lobby is doing, so start within that window.
+If the lobby can't be made, or isn't made within the lobby code time, the host is asked to create
+one and enter its code; the board has no code button until then. Once the match starts, its
+Deadlock match ID is fetched, so the result can be checked without anyone typing it. Without an
+API key, deadlock-api allows 10 lobbies an hour from one IP.
 
 ## Calibration dashboard
 
@@ -415,9 +456,9 @@ early as above, or show as abandoning in deadlock-api's match data. An abandon i
 minutes is put to staff.
 
 Strikes are worked out from the facts each time: penalties, completed matches and staff changes. So
-voiding a match also takes back the clean game it counted for. `/penalty revoke` removes the
-cooldown's strikes too, unless told to keep them, and `/penalty strikes` adds or removes them by
-hand. All the numbers are in each server's `penalty_policy`, editable in admin. They are starting
+voiding a match also takes back the clean game it counted for. `/ban add` puts a player on a queue
+cooldown by hand, `/ban revoke` lifts it and removes its strikes too, unless told to keep them,
+and `/ban strikes` adds or removes strikes by hand. All the numbers are in each server's `penalty_policy`, editable in admin. They are starting
 judgements.
 
 ## Scrims and Bebot's tools
@@ -516,18 +557,18 @@ channel isn't set up yet, cards go to the match channel instead.
 
 ## Commands
 
-**Everyone:** `/leaderboard`, `/stats`, `/queue status`, `/link`, `/unlink`, `/submit` (fallback
+**Everyone:** `/leaderboard` (needs the PUG role, if one is set), `/stats`, `/queue status`, `/link`, `/unlink`, `/submit` (fallback
 for when the report form's upload fails), `/randomdraft`, `/prio`, `/ping`, `/pings`.
 
 **Staff, by area:**
 
 | Area | Commands |
 |---|---|
-| Setup | `/setup`, `/seterrorchannel`, `/clearerrorchannel`, `/mode list\|activate`, `/ocr mode\|status`, `/roster sync`, `/deadlock settings\|status` |
+| Setup | `/setup [pug_role]`, `/seterrorchannel`, `/clearerrorchannel`, `/mode list\|activate`, `/ocr mode\|status`, `/roster sync`, `/deadlock settings\|status` |
 | Match control | `/match status`, `/match void\|sub` on a live match, `/match explain`, `/queue_admin kick\|clear` |
 | Disputes | Dispute buttons, `/match rescore\|names\|early_leave`, `/match void\|sub` on a finished match, `/match explain`, matching any scoreboard name, `/deadlock check` |
-| Ratings | `/rating seed\|adjust`, `/match awards`, `/ledger_check` |
-| Moderation | `/penalty add\|revoke\|strikes`, `/captain allow\|bar\|clear`, `/deadlock unlink` |
+| Ratings | `/rating seed\|adjust\|import\|interim`, `/match awards`, `/ledger_check` |
+| Moderation | `/ban add\|revoke\|strikes`, `/captain allow\|bar\|clear`, `/deadlock unlink` |
 | Community | `/removeprio`, `/pingchannel`, `/removeping` |
 | Scrims | `/startdraft`, `/captains_coinflip`, `/stopdraft` |
 
@@ -539,10 +580,10 @@ Anything that rewrites past ratings shows a preview and needs Confirm.
 
 | Group | Tables |
 |---|---|
-| Players and ratings | `players`, `seasons`, `player_ratings`, `rating_runs`, `rating_events` |
+| Players and ratings | `players`, `seasons`, `player_ratings`, `rating_runs`, `rating_events`, `interim_ratings` and `interim_points_changes` (the NeatQueue interim, rebuilt from the import) |
 | Champions and config | `champions`, `draft_mode_versions`, `communities`, `runtime_settings`, `community_role_grants` |
 | Queue | `queue_entries` |
-| Matches | `matches`, `match_participants`, `match_resources`, `match_transitions`, `draft_actions`, `captain_votes`, `sub_requests`, `sub_offers`, `early_leaves` |
+| Matches | `matches`, `match_participants`, `match_resources`, `match_transitions`, `draft_actions`, `captain_votes`, `sub_requests`, `sub_offers`, `early_leaves`, `player_swaps` |
 | Results | `result_submissions`, `match_results`, `match_awards`, `scoreboard_reads`, `player_match_stats`, `player_aliases`, `api_match_checks` |
 | Operations | `penalties`, `strike_adjustments`, `captain_overrides`, `staff_alerts`, `outbox_effects` |
 | Bebot's tools | `prio_entries`, `channel_pings` (scrims are `matches` with `kind = scrim`) |
