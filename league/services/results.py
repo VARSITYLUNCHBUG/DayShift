@@ -14,7 +14,7 @@ from league.models.matches import Source
 from league.models.permissions import Area
 from league.models.results import Verdict
 from league.models.scoreboards import AwardSource
-from league.services import alerts, api_results, ratings, runtime, standing
+from league.services import alerts, api_results, interim, leaderboards, ratings, runtime, standing
 from league.services import awards as award_service
 from league.services.boards import outcome_label
 from league.services.common import (
@@ -315,6 +315,8 @@ def _finalise(
     transition(match, Status.COMPLETED, source=source, actor=actor)
     save_transition(match, "winner", "ended_at")
     ratings.apply_live_result(match, outcome, revision)
+    interim.rebuild_if_enabled(match.season)
+    leaderboards.request(community)
     alerts.settle_for_match(
         match, (AlertKind.DISPUTE,), actor, f"{outcome_label(match, outcome)} won"
     )

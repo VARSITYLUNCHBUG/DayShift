@@ -66,6 +66,7 @@ SUBBABLE = frozenset(
     {
         Status.READY_CHECK,
         Status.CAPTAIN_PHASE,
+        Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
         Status.CHAMPION_DRAFT,
@@ -75,7 +76,13 @@ SUBBABLE = frozenset(
 )
 # A sub-out nobody fills in these restarts the lobby: captains are set, the game isn't on.
 RESTARTABLE = frozenset(
-    {Status.PLAYER_DRAFT, Status.COINFLIP, Status.CHAMPION_DRAFT, Status.LOBBY_CODE}
+    {
+        Status.CAPTAIN_CHECKIN,
+        Status.PLAYER_DRAFT,
+        Status.COINFLIP,
+        Status.CHAMPION_DRAFT,
+        Status.LOBBY_CODE,
+    }
 )
 # Once the sub is in, the paused timer resumes with at least this long left, so nobody is
 # auto-picked the moment the match starts moving again.
@@ -604,6 +611,9 @@ def _release_if_clear(match: Match) -> None:
             return
     elif match.status == Status.CAPTAIN_PHASE:
         lobby.advance_captain_phase(match)
+        return
+    elif match.status == Status.CAPTAIN_CHECKIN:
+        lobby.advance_checkin(match)
         return
     render_board(match)
 

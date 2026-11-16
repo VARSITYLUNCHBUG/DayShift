@@ -339,6 +339,10 @@ def _write_correction(
             )
         RatingEvent.objects.bulk_create(events)
     rebuild_projection(season, fold)
+    from league.services import interim, leaderboards
+
+    interim.rebuild_if_enabled(season)
+    leaderboards.request(match.community)
     return run
 
 

@@ -22,6 +22,7 @@ from league.services import (
     results,
     scrims,
     subs,
+    swaps,
 )
 from league.services.common import lock_match, now
 
@@ -32,6 +33,7 @@ STARTUP_GRACE_SECONDS = 60
 _HANDLERS = {
     Status.READY_CHECK: lobby.on_ready_timeout,
     Status.CAPTAIN_PHASE: lobby.on_captain_timeout,
+    Status.CAPTAIN_CHECKIN: lobby.on_checkin_timeout,
     Status.PLAYER_DRAFT: draft.on_player_draft_timeout,
     Status.COINFLIP: draft.on_coinflip_timeout,
     Status.CHAMPION_DRAFT: draft.on_champion_draft_timeout,
@@ -72,6 +74,7 @@ def tick() -> int:
 
     fired += subs.tick(moment)
     fired += early_leave.tick(moment)
+    fired += swaps.tick(moment)
     # Each of these can fail without stopping the others, or the queue pops below.
     fired += _side_tick("scrims", lambda _moment: scrims.tick(), moment)
     fired += _side_tick("priority list", prio.tick, moment)

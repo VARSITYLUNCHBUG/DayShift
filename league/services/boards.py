@@ -26,8 +26,8 @@ from league.models import (
 from league.models.matches import MatchKind
 from league.models.subs import UNRESOLVED, OfferSource, OfferStatus, SubRequest, SubStatus
 from league.services import awards as award_service
-from league.services import ocr, ratings, runtime, standing
-from league.services.common import mode_of, rating_of
+from league.services import interim, leaderboards, ocr, ratings, runtime, standing, swaps
+from league.services.common import mode_of
 from league.services.gifs import draft_gifs
 from league.services.ratings import match_deltas
 from league.services.subs import SUBBABLE
@@ -98,6 +98,17 @@ class SubLine:
 
 
 @dataclass(frozen=True, slots=True)
+class SwapLine:
+    """A captain's swap offer, waiting for the other captain."""
+
+    id: int
+    requested_by_name: str
+    give_name: str
+    take_name: str
+    deadline_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class ChampionOption:
     id: int
     name: str
@@ -142,17 +153,23 @@ class BoardState:
     subs: list[SubLine] = field(default_factory=list)
     on_hold: bool = False
     can_request_sub: bool = False
+    # Captains can swap two players between their teams, and one swap may be waiting.
+    can_swap: bool = False
+    swap: SwapLine | None = None
     # Who acts after this step, when it isn't more of the same.
     next_captain_name: str = ""
     next_action: str = ""
     # Who has voted in the captain vote so far.
     voted_ids: frozenset[int] = frozenset()
+    # Captains who have pressed I'm here.
+    checked_in_ids: frozenset[int] = frozenset()
     # Completed matches a player needs before they can captain. 0 means anyone can.
     captain_min_games: int = 0
     # Team A's chance of winning once both teams are drafted, from current ratings.
     win_chance_a: float | None = None
-    # deadlock-api lobbies: the server makes them, its bot hosts, and a captain presses Start.
-    auto_lobby: bool = False
+    # deadlock-api lobbies: its bot makes and hosts them, and a captain presses Start. If it
+    # can't, the host makes one and enters the code.
+    api_lobby_failed: bool = False
     api_lobby: bool = False
     api_started: bool = False
     api_leaves_at: datetime | None = None
@@ -225,8 +242,9 @@ def board_state(match_id: int) -> BoardState:
     mode = mode_of(match)
     participants = match.participants.filter(removed_reason="").select_related("player")
     players = []
+    ratings_shown = leaderboards.shown(match.season, [p.player_id for p in participants])
     for participant in participants:
-        rating, _games = rating_of(match.season, participant.player_id)
+        rating = ratings_shown[participant.player_id].rating
         players.append(
             PlayerLine(
                 player_id=participant.player_id,
@@ -343,7 +361,12 @@ def board_state(match_id: int) -> BoardState:
         state.reported_winner = report.claimed_winner
         state.reported_by = report.captain.display_name
     if match.status == Status.COMPLETED:
-        state.deltas = match_deltas(match)
+        if interim.enabled(match.community_id):
+            state.deltas = {
+                pid: after - before for pid, (before, after) in interim.match_changes(match).items()
+            }
+        else:
+            state.deltas = match_deltas(match)
     if match.status == Status.CAPTAIN_PHASE:
         active = {line.player_id for line in players}
         state.voted_ids = frozenset(
@@ -359,7 +382,13 @@ def board_state(match_id: int) -> BoardState:
             )
             for line in state.players
         ]
-    state.auto_lobby = runtime.of(match.community_id).auto_lobby
+    if match.status == Status.CAPTAIN_CHECKIN:
+        state.checked_in_ids = frozenset(
+            participants.filter(is_captain=True, checked_in_at__isnull=False).values_list(
+                "player_id", flat=True
+            )
+        )
+    state.api_lobby_failed = match.api_lobby_failed
     state.api_lobby = bool(match.api_party_id)
     state.api_started = match.api_started_at is not None
     if match.api_lobby_created_at is not None:
@@ -379,6 +408,17 @@ def board_state(match_id: int) -> BoardState:
     state.gif_url = pick_gif(match.rng_seed, draft_gifs())
     state.on_hold = match.held_seconds is not None
     state.can_request_sub = match.kind == MatchKind.RANKED and match.status in SUBBABLE
+    if match.kind == MatchKind.RANKED and match.status in swaps.SWAPPABLE:
+        state.can_swap = True
+        offer = swaps.pending(match)
+        if offer is not None:
+            state.swap = SwapLine(
+                offer.pk,
+                offer.requested_by.display_name,
+                offer.give.display_name,
+                offer.take.display_name,
+                offer.deadline_at,
+            )
     state.subs = _sub_lines(match)
     return state
 
@@ -539,11 +579,14 @@ def results_view(match_id: int) -> ResultsView:
     api_lines = api_results.api_stat_lines(match)
     api_check = api_results.latest_ok(match)
     participants = match.participants.filter(removed_reason="").select_related("player")
+    points = interim.match_changes(match) if interim.enabled(match.community_id) else None
     for participant in participants:
         event = events.get(participant.player_id)
         live_after = event.rating_after if event else match.season.start_rating
         before = live_after - event.delta if event else live_after
         after = before + net.get(participant.player_id, 0) if event else live_after
+        if points is not None:
+            before, after = points.get(participant.player_id, (before, after))
         stat = stats.get(participant.player_id)
         row = ResultRow(
             player_id=participant.player_id,
@@ -560,6 +603,16 @@ def results_view(match_id: int) -> ResultsView:
     team_b.sort(key=lambda r: -r.before)
 
     sample_a = next((events[r.player_id] for r in team_a if r.player_id in events), None)
+    delta_a = sample_a.delta if sample_a else 0
+    expected_a = sample_a.expected if sample_a and sample_a.expected else 0.5
+    avg_a = sample_a.team_avg if sample_a and sample_a.team_avg else 0.0
+    avg_b = sample_a.opp_avg if sample_a and sample_a.opp_avg else 0.0
+    if points is not None and team_a and team_b:
+        # The interim's own numbers: points before the match, and Elo's chance from them.
+        delta_a = team_a[0].delta
+        avg_a = sum(row.before for row in team_a) / len(team_a)
+        avg_b = sum(row.before for row in team_b) / len(team_b)
+        expected_a = interim.expected(avg_a, avg_b)
     names = dict(Champion.objects.values_list("pk", "name"))
     champions: dict[str, list[str]] = {"A": [], "B": []}
     bans: list[str] = []
@@ -577,10 +630,10 @@ def results_view(match_id: int) -> ResultsView:
         match_id=match.pk,
         winner=match.winner,
         hidden_king_team=match.hidden_king_team,
-        expected_a=sample_a.expected if sample_a and sample_a.expected else 0.5,
-        delta_a=sample_a.delta if sample_a else 0,
-        avg_a=sample_a.team_avg if sample_a and sample_a.team_avg else 0.0,
-        avg_b=sample_a.opp_avg if sample_a and sample_a.opp_avg else 0.0,
+        expected_a=expected_a,
+        delta_a=delta_a,
+        avg_a=avg_a,
+        avg_b=avg_b,
         team_a=team_a,
         team_b=team_b,
         champions_a=champions["A"],
@@ -649,27 +702,6 @@ def correction_view(
         lines = ordered[:limit]
         more = max(0, len(ordered) - limit)
     return CorrectionView(match_id, summary, reason, lines, more)
-
-
-@dataclass(frozen=True, slots=True)
-class LeaderboardRow:
-    rank: int
-    name: str
-    rating: int
-    wins: int
-    losses: int
-
-
-def leaderboard(season: Season, limit: int = 20) -> list[LeaderboardRow]:
-    rows = (
-        PlayerRating.objects.filter(season=season, games__gte=season.leaderboard_min_games)
-        .select_related("player")
-        .order_by("-rating", "player__display_name")[:limit]
-    )
-    return [
-        LeaderboardRow(index + 1, row.player.display_name, row.rating, row.wins, row.losses)
-        for index, row in enumerate(rows)
-    ]
 
 
 @dataclass(slots=True)
@@ -742,6 +774,17 @@ def player_stats(season: Season, player: Player, history: int = 10) -> PlayerSta
     stats.tier = tier(state.mu, state.sigma, ratings.params_for(season))
     stats.mu, stats.sigma = float(state.mu), float(state.sigma)
     stats.placement = ratings.placement_labels(season, [player.pk]).get(player.pk, "")
+    if interim.enabled(season.community_id):
+        # The interim shows NeatQueue's points and record: OpenSkill's tier and placement
+        # describe a rating players don't see yet.
+        line, _total = leaderboards.player_row(season, player)
+        record = leaderboards.shown(season, [player.pk])[player.pk]
+        stats.rating, stats.wins, stats.losses = record.rating, record.wins, record.losses
+        stats.games = record.games
+        stats.rank = line.rank if line else None
+        stats.recent = interim.recent(season, player, history)
+        stats.tier = ""
+        stats.placement = ""
     award_rows = MatchAward.objects.filter(player=player, match__season=season)
     current: dict[int, dict[int, str]] = {}
     for match_id, revision, kind in award_rows.values_list("match_id", "revision", "kind"):
