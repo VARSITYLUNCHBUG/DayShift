@@ -1,0 +1,38 @@
+{% extends "admin/base_site.html" %}
+{% load admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; Sync
+</div>
+{% endblock %}
+
+{% block content %}
+{% if diff.is_empty %}
+  <p>The roster matches the Deadlock API.</p>
+  <p><a href="{% url opts|admin_urlname:'changelist' %}">Back to champions</a></p>
+{% else %}
+  <p>Applying makes these changes. New lobbies use them; live matches keep their pool.</p>
+  {% if diff.new %}
+    <h2>New</h2>
+    <ul>{% for hero in diff.new %}<li>{{ hero.name }} (ID {{ hero.id }})</li>{% endfor %}</ul>
+  {% endif %}
+  {% if diff.renamed %}
+    <h2>Renamed</h2>
+    <ul>{% for pair in diff.renamed %}<li>{{ pair.0.name }} &rarr; {{ pair.1 }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if diff.missing_upstream %}
+    <h2>Disabled (no longer in the API)</h2>
+    <ul>{% for champion in diff.missing_upstream %}<li>{{ champion.name }}</li>{% endfor %}</ul>
+  {% endif %}
+  <form method="post">{% csrf_token %}
+    <div class="submit-row">
+      <input type="submit" class="default" value="Apply">
+      <a href="{% url opts|admin_urlname:'changelist' %}" class="button cancel-link">Cancel</a>
+    </div>
+  </form>
+{% endif %}
+{% endblock %}
