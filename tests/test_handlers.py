@@ -33,6 +33,7 @@ from league.services.common import captain_of, open_season
 from tests.conftest import make_player, publish_presets
 from tests.helpers import (
     acting_captain,
+    fail_api_lobby,
     fresh,
     ready_all,
     run_champion_draft,
@@ -254,13 +255,14 @@ def test_coinflip_buttons(wired: Community) -> None:
     winner = match.coinflip_winner
     loser = "B" if winner == "A" else "A"
     refused = fake_interaction(captain_of(match, loser).player)
-    click(refused, "coin_choice", match.pk, "hk_pick1")
+    click(refused, "coin_choice", match.pk, "hidden_king")
     assert replies(refused)[0] == "Only the coinflip winner can make this choice!"
 
-    click(fake_interaction(captain_of(match, winner).player), "coin_choice", match.pk, "hk_pick2")
+    click(fake_interaction(captain_of(match, winner).player), "coin_choice", match.pk, "archmother")
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
-    assert match.hidden_king_team == winner
+    # The winner took The Archmother: the other team is Hidden King, and goes first.
+    assert match.hidden_king_team == loser
     assert match.champion_first_pick == loser
 
 
@@ -330,6 +332,7 @@ def test_a_stale_click_gets_a_friendly_reply(wired: Community) -> None:
 def test_lobby_code_modal_journey(wired: Community) -> None:
     match, _players = lobby_of_twelve(wired)
     match = run_champion_draft(run_player_draft(vote_captains(ready_all(match))))
+    match = fail_api_lobby(match)  # The host only enters a code when the bot couldn't.
     opener = fake_interaction(match.lobby_code_host)
     click(opener, "code_open", match.pk)
     modal = opener.response.modal
@@ -346,7 +349,7 @@ def test_lobby_code_modal_journey(wired: Community) -> None:
 
 def test_wrong_person_cannot_open_lobby_code(wired: Community) -> None:
     match, _players = lobby_of_twelve(wired)
-    match = run_champion_draft(run_player_draft(vote_captains(ready_all(match))))
+    match = fail_api_lobby(run_champion_draft(run_player_draft(vote_captains(ready_all(match)))))
     other = match.participants.filter(is_captain=True).exclude(player=match.lobby_code_host).first()
     interaction = fake_interaction(other.player)
     click(interaction, "code_open", match.pk)
@@ -530,7 +533,7 @@ def test_stats_and_leaderboard_commands(wired: Community) -> None:
     assert "Bronze" in replies(interaction)[0]
     interaction = fake_interaction(player)
     run_command(player_commands.leaderboard_command, interaction)
-    assert "10 games" in replies(interaction)[0]
+    assert "not on the leaderboard yet" in replies(interaction)[0]
 
 
 def test_queue_status_command(wired: Community) -> None:
@@ -722,7 +725,7 @@ def test_penalty_commands(wired: Community) -> None:
     target = make_player(1)
     interaction = fake_interaction(admin, administrator=True)
     run_command(
-        subcommand(staff.penalty_group, "add"),
+        subcommand(staff.ban_group, "add"),
         interaction,
         player=member(target),
         kind=app_commands.Choice(name="Manual", value="manual"),
@@ -732,7 +735,7 @@ def test_penalty_commands(wired: Community) -> None:
     with pytest.raises(InvalidAction, match="cooldown"):
         queue.join(wired.pk, target)
     interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.penalty_group, "revoke"), interaction, player=member(target))
+    run_command(subcommand(staff.ban_group, "revoke"), interaction, player=member(target))
     queue.join(wired.pk, target)
 
 
@@ -777,7 +780,7 @@ def test_every_command_serialises_for_discord() -> None:
         tree.add_command(command)
     payloads = [command.to_dict(tree) for command in tree.get_commands()]
     names = {payload["name"] for payload in payloads}
-    assert {"queue", "queue_admin", "rating", "match", "penalty", "mode", "roster"} <= names
+    assert {"queue", "queue_admin", "rating", "match", "ban", "mode", "roster"} <= names
     assert {"setup", "submit", "permissions"} <= names
     assert {"link", "unlink", "captain", "ocr", "deadlock"} <= names
     assert {"startdraft", "stopdraft", "captains_coinflip", "randomdraft"} <= names
@@ -787,7 +790,12 @@ def test_every_command_serialises_for_discord() -> None:
     assert {"pingchannel", "removeping", "pings", "ping"} <= names
     assert {"seterrorchannel", "clearerrorchannel"} <= names
     rating = next(payload for payload in payloads if payload["name"] == "rating")
-    assert {option["name"] for option in rating["options"]} == {"seed", "adjust"}
+    assert {option["name"] for option in rating["options"]} == {
+        "seed",
+        "adjust",
+        "import",
+        "interim",
+    }
     queue_payload = next(payload for payload in payloads if payload["name"] == "queue")
     assert {option["name"] for option in queue_payload["options"]} == {"status"}
     queue_admin = next(payload for payload in payloads if payload["name"] == "queue_admin")

@@ -48,6 +48,7 @@ from league.services.common import captain_of, mode_of
 from tests.conftest import PRESETS, Clock, activate, make_player
 from tests.helpers import (
     acting_captain,
+    fail_api_lobby,
     finish,
     fresh,
     image,
@@ -275,13 +276,13 @@ def test_someone_outside_the_lobby_cannot_vote(voting: Match, players: list[Play
         lobby.cast_captain_votes(voting.pk, make_player(99), [players[0].pk])
 
 
-def test_last_vote_closes_the_vote_and_starts_the_player_draft(
+def test_last_vote_closes_the_vote_and_starts_the_check_in(
     voting: Match, players: list[Player]
 ) -> None:
     for voter in players:
         lobby.cast_captain_votes(voting.pk, voter, [players[4].pk, players[7].pk])
     match = fresh(voting)
-    assert match.status == Status.PLAYER_DRAFT
+    assert match.status == Status.CAPTAIN_CHECKIN
     captains = set(match.participants.filter(is_captain=True).values_list("player_id", flat=True))
     assert captains == {players[4].pk, players[7].pk}
     with pytest.raises(StaleAction):
@@ -296,7 +297,7 @@ def test_an_empty_vote_makes_the_highest_elo_captains(
     clock.advance(46)
     deadlines.tick()
     match = fresh(voting)
-    assert match.status == Status.PLAYER_DRAFT
+    assert match.status == Status.CAPTAIN_CHECKIN
     assert captain_of(match, "A").player == players[4]
     assert captain_of(match, "B").player == players[7]
 
@@ -310,7 +311,7 @@ def test_vote_timeout_counts_votes_and_elo_fills_the_gap(
     clock.advance(46)
     deadlines.tick()
     match = fresh(voting)
-    assert match.status == Status.PLAYER_DRAFT
+    assert match.status == Status.CAPTAIN_CHECKIN
     assert captain_of(match, "A").player_id == players[2].pk
     assert captain_of(match, "B").player_id == players[9].pk
 
@@ -422,31 +423,31 @@ def test_player_draft_ends_at_the_captain_coinflip(voting: Match) -> None:
     assert match.hidden_king_team == ""
 
 
-def test_the_winner_chooses_side_and_pick_order_in_one_press(voting: Match) -> None:
+def test_the_winner_chooses_a_side_and_hidden_king_bans_first(voting: Match) -> None:
     match = at_coinflip(voting)
     winner, loser = _coin_captains(match)
     with pytest.raises(NotAllowed, match="coinflip winner"):
-        draft.choose_coinflip(match.pk, loser, engine.HK_PICK1)
+        draft.choose_coinflip(match.pk, loser, engine.HIDDEN_KING)
     with pytest.raises(InvalidAction):
         draft.choose_coinflip(match.pk, winner, engine.FIRST_PICK)  # Scrims only.
-    draft.choose_coinflip(match.pk, winner, engine.HK_PICK2)
+    draft.choose_coinflip(match.pk, winner, engine.ARCHMOTHER)
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
     loser_team = "B" if match.coinflip_winner == "A" else "A"
-    # Hidden King and Pick 2: the winner is Hidden King, and the loser's team bans and picks first.
-    assert match.hidden_king_team == match.coinflip_winner
+    # The winner took The Archmother, so the loser's team is Hidden King and bans first.
+    assert match.hidden_king_team == loser_team
     assert match.champion_first_pick == loser_team
-    assert match.coinflip_winner_choice == engine.HK_PICK2
+    assert match.coinflip_winner_choice == engine.ARCHMOTHER
     assert acting_captain(match) == loser
     with pytest.raises(StaleAction):
-        draft.choose_coinflip(match.pk, winner, engine.AM_PICK1)
+        draft.choose_coinflip(match.pk, winner, engine.HIDDEN_KING)
 
 
 def test_only_a_captain_on_turn_can_choose(voting: Match) -> None:
     match = at_coinflip(voting)
     player = match.participants.filter(is_captain=False).first().player
     with pytest.raises(NotAllowed):
-        draft.choose_coinflip(match.pk, player, engine.HK_PICK1)
+        draft.choose_coinflip(match.pk, player, engine.HIDDEN_KING)
 
 
 def test_a_coinflip_timeout_chooses_at_random_for_the_winner(voting: Match, clock: Clock) -> None:
@@ -483,8 +484,9 @@ def test_every_preset_runs_the_same_flow(
     match = run_champion_draft(match)
     assert match.status == Status.LOBBY_CODE
     statuses = list(match.transitions.order_by("id").values_list("to_status", flat=True))
-    assert statuses[-5:] == [
+    assert statuses[-6:] == [
         Status.CAPTAIN_PHASE,
+        Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
         Status.CHAMPION_DRAFT,
@@ -613,20 +615,20 @@ def test_a_hero_without_a_custom_emoji_shows_its_plain_one(popped: Match) -> Non
 
 
 def test_only_host_can_submit_code(popped: Match) -> None:
-    match = run_champion_draft(to_champion_draft(popped))
+    match = fail_api_lobby(run_champion_draft(to_champion_draft(popped)))
     other = match.participants.filter(is_captain=True).exclude(player=match.lobby_code_host).first()
     with pytest.raises(NotAllowed):
         draft.submit_lobby_code(match.pk, other.player, "ABC123")
 
 
 def test_bad_code_rejected(popped: Match) -> None:
-    match = run_champion_draft(to_champion_draft(popped))
+    match = fail_api_lobby(run_champion_draft(to_champion_draft(popped)))
     with pytest.raises(InvalidAction):
         draft.submit_lobby_code(match.pk, match.lobby_code_host, "<@everyone>")
 
 
 def test_code_timeout_passes_to_other_captain_then_voids(popped: Match, clock: Clock) -> None:
-    match = run_champion_draft(to_champion_draft(popped))
+    match = fail_api_lobby(run_champion_draft(to_champion_draft(popped)))
     first_host = match.lobby_code_host_id
     clock.advance(181)
     deadlines.tick()

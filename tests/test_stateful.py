@@ -25,10 +25,21 @@ from league.domain.engine import (
 )
 from league.domain.errors import DomainError
 from league.models import DraftAction, Match, Player, QueueEntry
-from league.services import corrections, deadlines, draft, integrity, lobby, queue, results, subs
+from league.services import (
+    corrections,
+    deadlines,
+    draft,
+    integrity,
+    lobby,
+    queue,
+    results,
+    subs,
+    swaps,
+)
 from league.services.common import captain_of, mode_of
 from tests.conftest import Clock, make_player
 from tests.helpers import (
+    check_in_captains,
     image,
     run_champion_draft,
     run_player_draft,
@@ -87,10 +98,41 @@ class MatchMachine(RuleBasedStateMachine):
 
     @rule(
         index=integers(0, 14),
-        choice=sampled_from(["hk_pick1", "hk_pick2", "am_pick1", "am_pick2", "first_pick"]),
+        choice=sampled_from(["hidden_king", "archmother", "first_pick"]),
     )
     def coin_choice(self, index: int, choice: str) -> None:
         self._try(draft.choose_coinflip, self.match.pk, self.players[index], choice)
+
+    @rule(index=integers(0, 14))
+    def check_in(self, index: int) -> None:
+        self._try(lobby.check_in, self.match.pk, self.players[index])
+
+    @rule(give=integers(0, 11), take=integers(0, 11), accept=sampled_from([True, False]))
+    def swap(self, give: int, take: int, accept: bool) -> None:
+        match = self._fresh()
+        if match.status not in swaps.SWAPPABLE:
+            return
+        a = match.participants.filter(is_active=True, is_captain=True, team="A").first()
+        b = match.participants.filter(is_active=True, is_captain=True, team="B").first()
+        if a is None or b is None:
+            return
+        offer = (self.players[give].pk, self.players[take].pk)
+        try:
+            with transaction.atomic():
+                made = swaps.propose(match.pk, a.player, *offer)
+        except DomainError:
+            return
+        self._try(swaps.answer, match.pk, b.player, made.pk, accept)
+
+    @rule(works=sampled_from([True, False]))
+    def api_answers(self, works: bool) -> None:
+        match = self._fresh()
+        if match.status != Status.LOBBY_CODE:
+            return
+        if works:
+            self._try(draft.accept_api_lobby, match.pk, "party", "API123")
+        else:
+            self._try(draft.api_lobby_failed, match.pk, "down")
 
     def _acting(self, match: Match, status: str) -> Player | None:
         if match.status != status:
@@ -190,6 +232,13 @@ class MatchMachine(RuleBasedStateMachine):
         match = self._fresh()
         if match.status == Status.CAPTAIN_PHASE:
             self._try(vote_captains, match)
+        elif match.status == Status.CAPTAIN_CHECKIN:
+            # On through the player draft and coinflip too: check-in is one more phase to walk.
+            self._try(
+                lambda: settle_coinflip_for(
+                    run_player_draft(check_in_captains(match)), "A" if agree else "B"
+                )
+            )
         elif match.status == Status.PLAYER_DRAFT:
             # Straight on through the coinflip. The coin_choice rule covers it on its own.
             self._try(lambda: settle_coinflip_for(run_player_draft(match), "A" if agree else "B"))
@@ -197,8 +246,14 @@ class MatchMachine(RuleBasedStateMachine):
             self._try(settle_coinflip_for, match, "A" if agree else "B")
         elif match.status == Status.CHAMPION_DRAFT:
             self._try(run_champion_draft, match)
+            if agree:  # And the bot makes the lobby, as it usually does.
+                self._try(draft.accept_api_lobby, match.pk, "party", "API123")
         elif match.status == Status.LOBBY_CODE:
-            self._try(draft.submit_lobby_code, match.pk, match.lobby_code_host, "ABC123")
+            if agree:
+                self._try(draft.accept_api_lobby, match.pk, "party", "API123")
+            else:
+                self._try(draft.api_lobby_failed, match.pk, "down")
+                self._try(draft.submit_lobby_code, match.pk, match.lobby_code_host, "ABC123")
         elif match.status == Status.IN_PROGRESS:
             self.image_number += 1
             captain = captain_of(match, "A").player
@@ -328,6 +383,7 @@ def test_match_machine(league, clock: Clock) -> None:
     # Guards against the machine passing only because it never got anywhere interesting.
     assert {
         Status.CAPTAIN_PHASE,
+        Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
         Status.CHAMPION_DRAFT,

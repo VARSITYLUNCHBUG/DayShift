@@ -442,6 +442,7 @@ def test_lobby_host_subbing_out_makes_the_sub_host(popped: Match) -> None:
     subs.answer_offer(invite(request, host, sub).pk, sub, True)
     match = fresh(match)
     assert match.lobby_code_host == sub
+    draft.api_lobby_failed(match.pk, "test: no API")
     draft.submit_lobby_code(match.pk, sub, "ABC123")
     assert fresh(match).status == Status.IN_PROGRESS
 

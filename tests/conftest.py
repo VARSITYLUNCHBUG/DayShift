@@ -78,6 +78,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
         standing,
         steam,
         subs,
+        swaps,
     )
     from league.services import ratings as ratings_service
 
@@ -101,6 +102,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
         standing,
         steam,
         subs,
+        swaps,
     ):
         monkeypatch.setattr(module, "now", instance.now)
     return instance

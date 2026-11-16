@@ -244,7 +244,7 @@ def ruled_popped(captain_rule: Community, players: list[Player]) -> Match:
 
 def test_new_players_skip_the_vote_and_captains_come_by_experience(ruled_popped: Match) -> None:
     match = ready_all(ruled_popped)
-    assert match.status == Status.PLAYER_DRAFT
+    assert match.status == Status.CAPTAIN_CHECKIN
     assert match.participants.filter(is_captain=True).count() == 2
     assert not OutboxEffect.objects.filter(kind="ping_lobby").exists()  # The board says it.
 
@@ -259,7 +259,7 @@ def test_two_eligible_players_are_appointed_without_a_vote(
 ) -> None:
     _allow(captain_rule, players[4], players[9])
     match = ready_all(ruled_popped)
-    assert match.status == Status.PLAYER_DRAFT
+    assert match.status == Status.CAPTAIN_CHECKIN
     captains = {captain_of(match, team).player_id for team in ("A", "B")}
     assert captains == {players[4].pk, players[9].pk}
 
@@ -281,7 +281,7 @@ def test_a_barred_player_cannot_captain(
     _allow(captain_rule, *players[:3])
     standing.set_override(captain_rule, players[0], "bar", None, "troll picks")
     match = ready_all(ruled_popped)
-    assert match.status == Status.PLAYER_DRAFT  # Only two left eligible, so no vote.
+    assert match.status == Status.CAPTAIN_CHECKIN  # Only two left eligible, so no vote.
     captains = {captain_of(match, team).player_id for team in ("A", "B")}
     assert players[0].pk not in captains
 
