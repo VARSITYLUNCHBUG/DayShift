@@ -15,6 +15,7 @@ class Team(models.TextChoices):
 class MatchStatus(models.TextChoices):
     READY_CHECK = S.READY_CHECK, "Ready check"
     CAPTAIN_PHASE = S.CAPTAIN_PHASE, "Captain vote"
+    CAPTAIN_CHECKIN = S.CAPTAIN_CHECKIN, "Captain check-in"
     PLAYER_DRAFT = S.PLAYER_DRAFT, "Player draft"
     COINFLIP = S.COINFLIP, "Captain coinflip"
     CHAMPION_DRAFT = S.CHAMPION_DRAFT, "Champion draft"
@@ -83,6 +84,8 @@ class Match(models.Model):
     api_party_id = models.CharField(max_length=32, blank=True)
     api_lobby_created_at = models.DateTimeField(null=True, blank=True)
     api_started_at = models.DateTimeField(null=True, blank=True)
+    # deadlock-api couldn't make the lobby (or didn't in time), so the host enters a code.
+    api_lobby_failed = models.BooleanField(default=False)
     # Deadlock's own match ID, from the API lobby, a report or the scoreboard.
     deadlock_match_id = models.BigIntegerField(null=True, blank=True)
     winner = models.CharField(max_length=1, choices=Team.choices, blank=True)
@@ -133,6 +136,10 @@ class MatchParticipant(models.Model):
     ready_at = models.DateTimeField(null=True, blank=True)
     team = models.CharField(max_length=1, choices=Team.choices, blank=True)
     is_captain = models.BooleanField(default=False)
+    # A captain pressed I'm here before the player draft.
+    checked_in_at = models.DateTimeField(null=True, blank=True)
+    # Chosen as captain but didn't check in, so someone else took it. Never asked again.
+    missed_checkin = models.BooleanField(default=False)
     draft_pick_number = models.PositiveSmallIntegerField(null=True, blank=True)
     # True from joining until the match ends or the player is removed. Backs the hard guarantee
     # below that nobody can be in two live matches.

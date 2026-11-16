@@ -21,7 +21,7 @@ AREA_SCOPE: dict[str, str] = {
     Area.MATCH_CONTROL: "live matches: /match status, void and sub; /queue_admin",
     Area.DISPUTES: "dispute rulings, /match rescore, names and early_leave, finished matches",
     Area.RATINGS: "/rating seed and adjust, /match awards, /ledger_check",
-    Area.MODERATION: "/penalty, /captain, /deadlock unlink",
+    Area.MODERATION: "/ban, /captain, /deadlock unlink",
     Area.COMMUNITY: "/removeprio and ping setup",
     Area.SCRIMS: "/startdraft, /captains_coinflip, /stopdraft",
 }

@@ -21,6 +21,7 @@ from league.models import (
     DraftAction,
     DraftModeVersion,
     EarlyLeave,
+    InterimRating,
     Match,
     MatchAward,
     MatchParticipant,
@@ -33,6 +34,7 @@ from league.models import (
     PlayerAlias,
     PlayerMatchStat,
     PlayerRating,
+    PlayerSwap,
     PrioEntry,
     QueueEntry,
     RatingEvent,
@@ -149,8 +151,8 @@ class RuntimeSettingsAdmin(admin.ModelAdmin):
         "match_channel_close_minutes",
         "max_concurrent_matches",
         "score_ocr",
-        "auto_lobby",
         "api_results",
+        "interim_points",
     )
     list_editable = ("auto_captain", "open_match_voice", "match_channel_close_minutes")
 
@@ -205,6 +207,31 @@ class PlayerAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
+
+
+@admin.register(InterimRating)
+class InterimRatingAdmin(ReadOnlyAdmin):
+    """NeatQueue points: change them by importing again (/rating import), never by hand, or the
+    next rebuild would undo it."""
+
+    list_display = (
+        "player",
+        "season",
+        "points",
+        "wins",
+        "losses",
+        "games",
+        "imported_points",
+        "imported_at",
+    )
+    list_filter = ("season",)
+    search_fields = ("player__display_name", "player__discord_user_id")
+
+
+@admin.register(PlayerSwap)
+class PlayerSwapAdmin(ReadOnlyAdmin):
+    list_display = ("match", "requested_by", "give", "take", "status", "created_at")
+    list_filter = ("status",)
 
 
 @admin.register(StaffAlert)
