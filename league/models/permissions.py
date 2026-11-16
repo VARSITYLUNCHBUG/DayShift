@@ -17,10 +17,10 @@ class Area(models.TextChoices):
 
 # What each area covers, as /permissions list shows it.
 AREA_SCOPE: dict[str, str] = {
-    Area.SETUP: "/setup, error channel, /mode, /ocr, /roster, /deadlock settings and status",
+    Area.SETUP: "/setup and the error channel (server settings are in the admin)",
     Area.MATCH_CONTROL: "live matches: /match status, void and sub; /queue_admin",
     Area.DISPUTES: "dispute rulings, /match rescore, names and early_leave, finished matches",
-    Area.RATINGS: "/rating seed and adjust, /match awards, /ledger_check",
+    Area.RATINGS: "/rating seed and adjust, /match awards",
     Area.MODERATION: "/ban, /captain, /deadlock unlink",
     Area.COMMUNITY: "/removeprio and ping setup",
     Area.SCRIMS: "/startdraft, /captains_coinflip, /stopdraft",
