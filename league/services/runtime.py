@@ -12,6 +12,22 @@ def of(community: Community | int) -> RuntimeSettings:
     return settings
 
 
+INTERIM_FIELDS = frozenset({"interim_points", "interim_start_points", "interim_k_factor"})
+
+
+def after_change(settings: RuntimeSettings, changed: set[str] | frozenset[str]) -> None:
+    """Follow up a settings save made outside a service (the admin): rebuild the interim points
+    when they're affected, and redraw the queue panel, which shows capacity and the mode."""
+    from league.services import common, interim
+
+    if not changed:
+        return
+    community = Community.objects.get(pk=settings.community_id)
+    if changed & INTERIM_FIELDS:
+        interim.set_enabled(community, settings.interim_points)
+    common.render_queue(community)
+
+
 def update(community: Community | int, **values: object) -> RuntimeSettings:
     settings = of(community)
     for name, value in values.items():

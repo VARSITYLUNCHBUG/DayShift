@@ -1,0 +1,35 @@
+{% extends "admin/base_site.html" %}
+{% load admin_urls l10n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; Start the next season
+</div>
+{% endblock %}
+
+{% block content %}
+<p>
+  {% if open_season %}This closes <strong>{{ open_season.name }}</strong> and opens the next.{% else %}This opens the first season.{% endif %}
+  Everyone's rating starts fresh; past seasons stay as they were. NeatQueue interim points belong to a
+  season, so import them again if the interim is still on.
+</p>
+<form method="post">{% csrf_token %}
+  <input type="hidden" name="{{ action_checkbox_name }}" value="{{ community.pk|unlocalize }}">
+  <input type="hidden" name="action" value="start_next_season">
+  <input type="hidden" name="confirm" value="yes">
+  <fieldset class="module aligned">
+    <div class="form-row">
+      {{ form.params.errors }}
+      <div class="flex-container">{{ form.params.label_tag }} {{ form.params }}</div>
+      <div class="help">{{ form.params.help_text }}</div>
+    </div>
+  </fieldset>
+  <div class="submit-row">
+    <input type="submit" class="default" value="Start the next season">
+    <a href="{% url opts|admin_urlname:'changelist' %}" class="button cancel-link">Cancel</a>
+  </div>
+</form>
+{% endblock %}

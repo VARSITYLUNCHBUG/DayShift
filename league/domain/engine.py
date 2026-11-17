@@ -18,6 +18,8 @@ from league.domain.mode_schema import DraftMode, ModeValidationError
 class Status:
     READY_CHECK = "ready_check"
     CAPTAIN_PHASE = "captain_phase"
+    # The captains confirm they're here before the player draft starts.
+    CAPTAIN_CHECKIN = "captain_checkin"
     PLAYER_DRAFT = "player_draft"
     COINFLIP = "coinflip"
     CHAMPION_DRAFT = "champion_draft"
@@ -38,6 +40,7 @@ LIVE = frozenset(
     {
         Status.READY_CHECK,
         Status.CAPTAIN_PHASE,
+        Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
         Status.CHAMPION_DRAFT,
@@ -57,7 +60,8 @@ SIDE_LABELS = {"hk": "The Hidden King", "am": "The Archmother"}
 
 _TRANSITIONS: dict[str, frozenset[str]] = {
     Status.READY_CHECK: frozenset({Status.CAPTAIN_PHASE, Status.VOIDED}),
-    Status.CAPTAIN_PHASE: frozenset({Status.PLAYER_DRAFT, Status.VOIDED}),
+    Status.CAPTAIN_PHASE: frozenset({Status.CAPTAIN_CHECKIN, Status.VOIDED}),
+    Status.CAPTAIN_CHECKIN: frozenset({Status.PLAYER_DRAFT, Status.VOIDED}),
     Status.PLAYER_DRAFT: frozenset({Status.COINFLIP, Status.VOIDED}),
     Status.COINFLIP: frozenset({Status.CHAMPION_DRAFT, Status.VOIDED}),
     Status.CHAMPION_DRAFT: frozenset({Status.LOBBY_CODE, Status.VOIDED}),
@@ -100,17 +104,15 @@ class CaptainCandidate:
     experience: int = 0  # Completed matches in this server, across seasons.
 
 
-def tally_captain_votes(
+def rank_captains(
     votes: Mapping[int, int], candidates: Sequence[CaptainCandidate], seed: int
-) -> tuple[int, int]:
-    """Return (team A captain, team B captain) from a captain vote.
+) -> list[int]:
+    """Every candidate in captain order, best first.
 
     Eligible players come first. Among them, most votes first; ties go to higher rating, then
-    more games, then a seeded shuffle, so a short vote is filled by rating. If fewer than two are
-    eligible, the rest are filled by the most completed matches, then rating.
+    more games, then a seeded shuffle, so a short vote is filled by rating. The ineligible follow,
+    by the most completed matches, then rating.
     """
-    if len(candidates) < 2:
-        raise ValueError("Need at least two candidates.")
     rng = seeded_rng(seed, "captain-vote")
     ordered_input = sorted(candidates, key=lambda c: c.player_id)
     tiebreak = {c.player_id: rng.random() for c in ordered_input}
@@ -120,8 +122,19 @@ def tally_captain_votes(
         experience = 0 if c.eligible else c.experience
         return (not c.eligible, -votes_for, -experience, -c.rating, -c.games, tiebreak[c.player_id])
 
-    ranked = sorted(ordered_input, key=key)
-    return ranked[0].player_id, ranked[1].player_id
+    return [c.player_id for c in sorted(ordered_input, key=key)]
+
+
+def tally_captain_votes(
+    votes: Mapping[int, int], candidates: Sequence[CaptainCandidate], seed: int
+) -> tuple[int, int]:
+    """Return (team A captain, team B captain) from a captain vote: the top two of
+    `rank_captains`. If fewer than two are eligible, the rest are filled by the most completed
+    matches, then rating."""
+    if len(candidates) < 2:
+        raise ValueError("Need at least two candidates.")
+    ranked = rank_captains(votes, candidates, seed)
+    return ranked[0], ranked[1]
 
 
 DRAFT_NAME_ADJECTIVES = (
@@ -173,22 +186,14 @@ HIDDEN_KING = "hidden_king"
 ARCHMOTHER = "archmother"
 ORDER_CHOICES = (FIRST_PICK, LAST_PICK)
 SIDE_CHOICES = (HIDDEN_KING, ARCHMOTHER)
-# Ranked matches: the winner alone chooses both, a side and Pick 1 or Pick 2, in one press.
-# Pick 1 bans and picks first. Scrims keep Bebot's two-captain coinflip.
-HK_PICK1 = "hk_pick1"
-HK_PICK2 = "hk_pick2"
-AM_PICK1 = "am_pick1"
-AM_PICK2 = "am_pick2"
-RANKED_COINFLIP_CHOICES = (HK_PICK1, HK_PICK2, AM_PICK1, AM_PICK2)
+# Ranked matches: the winner only chooses a side. The Hidden King is always Pick 1, the team that
+# bans and picks first. Scrims keep Bebot's two-captain coinflip.
+RANKED_COINFLIP_CHOICES = (HIDDEN_KING, ARCHMOTHER)
 COINFLIP_LABELS = {
     FIRST_PICK: "First Pick",
     LAST_PICK: "Last Pick",
     HIDDEN_KING: "Hidden King",
     ARCHMOTHER: "Archmother",
-    HK_PICK1: "Hidden King · Pick 1",
-    HK_PICK2: "Hidden King · Pick 2",
-    AM_PICK1: "Archmother · Pick 1",
-    AM_PICK2: "Archmother · Pick 2",
 }
 _SIDE_OF = {HIDDEN_KING: "hk", ARCHMOTHER: "am"}
 
@@ -198,8 +203,8 @@ def other_side(side: str) -> str:
 
 
 def coinflip_options(winner_choice: str, *, ranked: bool = False) -> tuple[str, ...]:
-    """What the chooser on turn can press. Ranked: the winner's four side-and-order pairs.
-    Scrims: any of four for the winner, the other kind after."""
+    """What the chooser on turn can press. Ranked: the winner's two sides. Scrims: any of four
+    for the winner, the other kind after."""
     if ranked:
         return () if winner_choice else RANKED_COINFLIP_CHOICES
     if not winner_choice:
@@ -208,14 +213,13 @@ def coinflip_options(winner_choice: str, *, ranked: bool = False) -> tuple[str, 
 
 
 def apply_ranked_coinflip(winner_team: str, choice: str) -> tuple[str, str]:
-    """(Hidden King team, team that bans and picks first) from the ranked winner's one choice."""
+    """(Hidden King team, team that bans and picks first) from the ranked winner's side. The
+    Hidden King always bans and picks first."""
     if choice not in RANKED_COINFLIP_CHOICES:
         raise ValueError(f"Not a ranked coinflip choice: {choice!r}")
     loser_team = "B" if winner_team == "A" else "A"
-    side, order = choice.split("_")
-    hidden_king = winner_team if side == "hk" else loser_team
-    first_pick = winner_team if order == "pick1" else loser_team
-    return hidden_king, first_pick
+    hidden_king = winner_team if choice == HIDDEN_KING else loser_team
+    return hidden_king, hidden_king
 
 
 def settle_coinflip(winner_choice: str, loser_choice: str) -> tuple[str, str, str]:

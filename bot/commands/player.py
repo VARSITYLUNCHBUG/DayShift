@@ -8,14 +8,15 @@ from discord import Interaction, app_commands
 
 from bot.db import db
 from bot.handlers.common import actor, community_of
+from bot.handlers.permissions import require_pug_role
 from bot.handlers.results import process_report
-from bot.renderers.results import leaderboard_text
+from bot.renderers.leaderboard import own_text
 from bot.routing import guarded, reply
 from league.domain import steam as steam_ids
 from league.domain.errors import InvalidAction, NotAllowed
 from league.integrations import deadlock_api
 from league.models import Community, MatchParticipant, Player
-from league.services import boards, common, queue, steam
+from league.services import boards, common, leaderboards, queue, steam
 
 TeamChoice = app_commands.Choice[str]
 # Relative to the captain submitting, because a fixed list can't carry captains' names.
@@ -25,9 +26,12 @@ TEAM_CHOICES = [
 ]
 
 
-def _leaderboard(community: Community) -> str:
+def _leaderboard(community: Community, player: Player) -> str:
+    """Your own line of the leaderboard. Everyone's is in the leaderboard channel."""
     season = common.open_season(community)
-    return leaderboard_text(boards.leaderboard(season), season.leaderboard_min_games)
+    row, total = leaderboards.player_row(season, player)
+    label = leaderboards.label(community)
+    return own_text(row, total, label, community.leaderboard_channel_id)
 
 
 def _stats_text(community: Community, player: Player) -> str:
@@ -76,12 +80,15 @@ def _live_captain_match(player: Player) -> tuple[int, str]:
     return participant.match_id, participant.team
 
 
-@app_commands.command(name="leaderboard", description="Top players this season")
+@app_commands.command(
+    name="leaderboard", description="Your place on the leaderboard, rating and win rate"
+)
 async def leaderboard_command(interaction: Interaction[Any]) -> None:
     async def run() -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         community = await community_of(interaction)
-        await reply(interaction, await db(_leaderboard, community))
+        require_pug_role(interaction, community)
+        await reply(interaction, await db(_leaderboard, community, await actor(interaction)))
 
     await guarded(interaction, run)
 

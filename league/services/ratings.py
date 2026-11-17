@@ -287,6 +287,9 @@ def _adjust(
     after = adjustment.applied_to(state_of(season, row))
     _store(row, after)
     row.save(update_fields=["rating", "mu", "sigma"])
+    from league.services import leaderboards
+
+    leaderboards.request(season.community)
     return RatingEvent.objects.create(
         run=run,
         season=season,

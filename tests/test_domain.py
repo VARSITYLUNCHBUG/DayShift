@@ -254,24 +254,23 @@ def test_the_coinflip_sets_sides_and_first_pick_by_team() -> None:
 @pytest.mark.parametrize(
     ("winner", "choice", "expected"),
     [
-        ("A", engine.HK_PICK1, ("A", "A")),
-        ("A", engine.HK_PICK2, ("A", "B")),
-        ("A", engine.AM_PICK1, ("B", "A")),
-        ("A", engine.AM_PICK2, ("B", "B")),
-        ("B", engine.HK_PICK1, ("B", "B")),
-        ("B", engine.AM_PICK2, ("A", "A")),
+        ("A", engine.HIDDEN_KING, ("A", "A")),
+        ("A", engine.ARCHMOTHER, ("B", "B")),
+        ("B", engine.HIDDEN_KING, ("B", "B")),
+        ("B", engine.ARCHMOTHER, ("A", "A")),
     ],
 )
-def test_the_ranked_coinflip_winner_sets_both(
+def test_the_ranked_coinflip_winner_picks_a_side_and_hidden_king_goes_first(
     winner: str, choice: str, expected: tuple[str, str]
 ) -> None:
     """(Hidden King team, team that bans and picks first)."""
     assert engine.apply_ranked_coinflip(winner, choice) == expected
 
 
-def test_the_ranked_coinflip_offers_four_pairs_once() -> None:
+def test_the_ranked_coinflip_offers_the_two_sides_once() -> None:
+    assert engine.RANKED_COINFLIP_CHOICES == (engine.HIDDEN_KING, engine.ARCHMOTHER)
     assert engine.coinflip_options("", ranked=True) == engine.RANKED_COINFLIP_CHOICES
-    assert engine.coinflip_options(engine.HK_PICK1, ranked=True) == ()
+    assert engine.coinflip_options(engine.HIDDEN_KING, ranked=True) == ()
     choice = engine.auto_coinflip_choice(7, "", ranked=True)
     assert choice in engine.RANKED_COINFLIP_CHOICES
     with pytest.raises(ValueError):

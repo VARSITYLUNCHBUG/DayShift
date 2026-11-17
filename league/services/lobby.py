@@ -16,9 +16,10 @@ from league.domain.engine import (
     CaptainCandidate,
     Status,
     first_pick_team,
+    rank_captains,
     tally_captain_votes,
 )
-from league.domain.errors import InvalidAction, StaleAction
+from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import parse_mode
 from league.models import (
     CaptainVote,
@@ -304,8 +305,7 @@ def vote_counts(match: Match) -> dict[int, int]:
     return counts
 
 
-def _close_vote(match: Match, source: str) -> None:
-    participants = list(active_participants(match))
+def _candidates(match: Match, participants: Sequence[MatchParticipant]) -> list[CaptainCandidate]:
     allowed = _eligibility(match, [p.player_id for p in participants])
     candidates = []
     for participant in participants:
@@ -320,15 +320,118 @@ def _close_vote(match: Match, source: str) -> None:
                 experience=row.eligibility.games,
             )
         )
+    return candidates
+
+
+def _close_vote(match: Match, source: str) -> None:
+    participants = list(active_participants(match))
     counts = vote_counts(match)
-    captain_a, captain_b = tally_captain_votes(counts, candidates, match.rng_seed)
+    captain_a, captain_b = tally_captain_votes(
+        counts, _candidates(match, participants), match.rng_seed
+    )
     for participant in participants:
         if participant.player_id in {captain_a, captain_b}:
             participant.is_captain = True
             participant.team = "A" if participant.player_id == captain_a else "B"
             participant.save(update_fields=["is_captain", "team"])
-    # No message of its own: the board shows the captains and whose pick it is.
-    begin_player_draft(match, source=source)
+    begin_captain_checkin(match, source=source)
+
+
+# --- Captain check-in ------------------------------------------------------------------------
+
+
+def _captains(match: Match) -> list[MatchParticipant]:
+    return list(active_participants(match).filter(is_captain=True).order_by("team"))
+
+
+def _ping_captains(match: Match, captains: Sequence[MatchParticipant], text: str) -> None:
+    add_effect(
+        match.community,
+        "ping",
+        {"user_ids": [p.player.discord_user_id for p in captains], "text": text},
+        match=match,
+    )
+
+
+CHECKIN_PING = "you're captain. Press **I'm here** on the board to start the player draft."
+
+
+def begin_captain_checkin(match: Match, source: str) -> None:
+    """Captains are chosen: each confirms they're here before anyone is drafted."""
+    mode = mode_of(match)
+    transition(
+        match,
+        Status.CAPTAIN_CHECKIN,
+        source=source,
+        deadline_at=seconds_from_now(mode.captains.checkin_seconds),
+    )
+    save_transition(match)
+    _ping_captains(match, _captains(match), CHECKIN_PING)
+    render_board(match)
+
+
+@transaction.atomic
+def check_in(match_id: int, player: Player) -> None:
+    """A captain's I'm here."""
+    match = lock_match(match_id)
+    if match.status != Status.CAPTAIN_CHECKIN:
+        raise StaleAction("The captain check-in has finished.")
+    require_not_on_hold(match)
+    participant = require_participant(match, player)
+    if not participant.is_captain:
+        raise NotAllowed("Only the captains check in. The board shows who they are.")
+    if participant.checked_in_at is not None:
+        raise InvalidAction("You've already checked in. The draft starts once both captains have.")
+    participant.checked_in_at = now()
+    participant.save(update_fields=["checked_in_at"])
+    bump(match)
+    advance_checkin(match)
+
+
+def advance_checkin(match: Match) -> None:
+    """Start the player draft once every captain has checked in."""
+    if on_hold(match) or any(p.checked_in_at is None for p in _captains(match)):
+        render_board(match)
+        return
+    begin_player_draft(match, source=Source.USER)
+
+
+def on_checkin_timeout(match: Match) -> None:
+    """A captain who didn't check in is replaced by the next eligible player in captain order,
+    who gets the full time. With nobody left to ask, the draft starts with the captains it has."""
+    participants = list(active_participants(match))
+    absent = [p for p in participants if p.is_captain and p.checked_in_at is None]
+    taken = {p.player_id for p in participants if p.is_captain or p.missed_checkin}
+    pool = [p for p in participants if p.player_id not in taken]
+    candidates = [c for c in _candidates(match, pool) if c.eligible]
+    order = rank_captains(vote_counts(match), candidates, match.rng_seed)
+    by_id = {p.player_id: p for p in pool}
+    replaced = []
+    for missing in absent:
+        if not order:
+            break
+        heir = by_id[order.pop(0)]
+        heir.is_captain = True
+        heir.team = missing.team
+        heir.save(update_fields=["is_captain", "team"])
+        missing.is_captain = False
+        missing.team = ""
+        missing.missed_checkin = True
+        missing.save(update_fields=["is_captain", "team", "missed_checkin"])
+        replaced.append((missing, heir))
+    if not replaced:
+        begin_player_draft(match, source=Source.TIMEOUT)
+        return
+    match.deadline_at = seconds_from_now(mode_of(match).captains.checkin_seconds)
+    bump(match, "deadline_at")
+    clear_notices(match)  # The old captains' ping no longer applies.
+    for missing, heir in replaced:
+        _ping_captains(
+            match,
+            [heir],
+            f"**{missing.player.display_name}** didn't check in, so {CHECKIN_PING}",
+        )
+    render_board(match)
 
 
 def begin_player_draft(match: Match, source: str) -> None:

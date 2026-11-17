@@ -26,13 +26,14 @@ from bot.handlers.results import DisputeModal, ReportModal, process_report
 from bot.routing import Context, _dispatch
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
-from league.models import Community, DraftModeVersion, Match, Player, QueueEntry, ResultSubmission
+from league.models import Community, Match, Player, QueueEntry, ResultSubmission
 from league.models.permissions import Area
-from league.services import community, integrity, permissions, queue, ratings
+from league.services import community, integrity, permissions, queue
 from league.services.common import captain_of, open_season
 from tests.conftest import make_player, publish_presets
 from tests.helpers import (
     acting_captain,
+    fail_api_lobby,
     fresh,
     ready_all,
     run_champion_draft,
@@ -254,13 +255,14 @@ def test_coinflip_buttons(wired: Community) -> None:
     winner = match.coinflip_winner
     loser = "B" if winner == "A" else "A"
     refused = fake_interaction(captain_of(match, loser).player)
-    click(refused, "coin_choice", match.pk, "hk_pick1")
+    click(refused, "coin_choice", match.pk, "hidden_king")
     assert replies(refused)[0] == "Only the coinflip winner can make this choice!"
 
-    click(fake_interaction(captain_of(match, winner).player), "coin_choice", match.pk, "hk_pick2")
+    click(fake_interaction(captain_of(match, winner).player), "coin_choice", match.pk, "archmother")
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
-    assert match.hidden_king_team == winner
+    # The winner took The Archmother: the other team is Hidden King, and goes first.
+    assert match.hidden_king_team == loser
     assert match.champion_first_pick == loser
 
 
@@ -330,6 +332,7 @@ def test_a_stale_click_gets_a_friendly_reply(wired: Community) -> None:
 def test_lobby_code_modal_journey(wired: Community) -> None:
     match, _players = lobby_of_twelve(wired)
     match = run_champion_draft(run_player_draft(vote_captains(ready_all(match))))
+    match = fail_api_lobby(match)  # The host only enters a code when the bot couldn't.
     opener = fake_interaction(match.lobby_code_host)
     click(opener, "code_open", match.pk)
     modal = opener.response.modal
@@ -346,7 +349,7 @@ def test_lobby_code_modal_journey(wired: Community) -> None:
 
 def test_wrong_person_cannot_open_lobby_code(wired: Community) -> None:
     match, _players = lobby_of_twelve(wired)
-    match = run_champion_draft(run_player_draft(vote_captains(ready_all(match))))
+    match = fail_api_lobby(run_champion_draft(run_player_draft(vote_captains(ready_all(match)))))
     other = match.participants.filter(is_captain=True).exclude(player=match.lobby_code_host).first()
     interaction = fake_interaction(other.player)
     click(interaction, "code_open", match.pk)
@@ -530,7 +533,7 @@ def test_stats_and_leaderboard_commands(wired: Community) -> None:
     assert "Bronze" in replies(interaction)[0]
     interaction = fake_interaction(player)
     run_command(player_commands.leaderboard_command, interaction)
-    assert "10 games" in replies(interaction)[0]
+    assert "not on the leaderboard yet" in replies(interaction)[0]
 
 
 def test_queue_status_command(wired: Community) -> None:
@@ -687,23 +690,6 @@ def test_unknown_match_is_a_clear_refusal(wired: Community) -> None:
     assert "no match #999999" in replies(interaction)[0]
 
 
-def test_mode_commands(wired: Community) -> None:
-    admin = make_player(50)
-    interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.mode_group, "list"), interaction)
-    assert "bebot_2ban" in replies(interaction)[0]
-    assert "(active)" in replies(interaction)[0]
-
-    interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="bebot_2ban")
-    wired.refresh_from_db()
-    assert wired.active_mode == DraftModeVersion.objects.get(slug="bebot_2ban")
-
-    interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.mode_group, "activate"), interaction, slug="nope")
-    assert "no mode called" in replies(interaction)[0]
-
-
 def test_queue_kick_and_clear_commands(wired: Community) -> None:
     admin = make_player(50)
     target = make_player(1)
@@ -722,7 +708,7 @@ def test_penalty_commands(wired: Community) -> None:
     target = make_player(1)
     interaction = fake_interaction(admin, administrator=True)
     run_command(
-        subcommand(staff.penalty_group, "add"),
+        subcommand(staff.ban_group, "add"),
         interaction,
         player=member(target),
         kind=app_commands.Choice(name="Manual", value="manual"),
@@ -732,39 +718,8 @@ def test_penalty_commands(wired: Community) -> None:
     with pytest.raises(InvalidAction, match="cooldown"):
         queue.join(wired.pk, target)
     interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.penalty_group, "revoke"), interaction, player=member(target))
+    run_command(subcommand(staff.ban_group, "revoke"), interaction, player=member(target))
     queue.join(wired.pk, target)
-
-
-def test_roster_sync_command_previews_then_applies(
-    wired: Community, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from league.models import Champion
-    from league.services import champions
-
-    current = [
-        champions.RemoteChampion(id=c.pk, name=c.name, icon_url="") for c in Champion.objects.all()
-    ]
-    monkeypatch.setattr(
-        champions,
-        "fetch_remote",
-        lambda: [*current, champions.RemoteChampion(id=200, name="Newcomer", icon_url="")],
-    )
-    admin = make_player(50)
-    interaction = fake_interaction(admin, administrator=True)
-    run_command(subcommand(staff.roster_group, "sync"), interaction)
-    assert "New: Newcomer" in interaction.followup.send.call_args.args[0]
-    assert not Champion.objects.filter(pk=200).exists()
-    view = interaction.followup.send.call_args.kwargs["view"]
-    asyncio.run(view.confirm.callback(fake_interaction(admin, administrator=True)))
-    assert Champion.objects.get(pk=200).is_enabled
-
-
-def test_ledger_check_command(wired: Community) -> None:
-    ratings.seed_player(open_season(wired), make_player(1), "mid", actor=None)
-    interaction = fake_interaction(make_player(50), administrator=True)
-    run_command(staff.ledger_check, interaction)
-    assert replies(interaction) == ["Ratings add up."]
 
 
 # --- Registration ----------------------------------------------------------------------------
@@ -777,9 +732,11 @@ def test_every_command_serialises_for_discord() -> None:
         tree.add_command(command)
     payloads = [command.to_dict(tree) for command in tree.get_commands()]
     names = {payload["name"] for payload in payloads}
-    assert {"queue", "queue_admin", "rating", "match", "penalty", "mode", "roster"} <= names
+    assert {"queue", "queue_admin", "rating", "match", "ban"} <= names
     assert {"setup", "submit", "permissions"} <= names
-    assert {"link", "unlink", "captain", "ocr", "deadlock"} <= names
+    assert {"link", "unlink", "captain", "deadlock"} <= names
+    # Server configuration lives in the Django admin, not in Discord.
+    assert not {"mode", "roster", "ocr", "ledger_check"} & names
     assert {"startdraft", "stopdraft", "captains_coinflip", "randomdraft"} <= names
     assert "coinflip" not in names
     assert {"prio", "removeprio"} <= names
@@ -788,6 +745,8 @@ def test_every_command_serialises_for_discord() -> None:
     assert {"seterrorchannel", "clearerrorchannel"} <= names
     rating = next(payload for payload in payloads if payload["name"] == "rating")
     assert {option["name"] for option in rating["options"]} == {"seed", "adjust"}
+    deadlock = next(payload for payload in payloads if payload["name"] == "deadlock")
+    assert {option["name"] for option in deadlock["options"]} == {"check", "unlink"}
     queue_payload = next(payload for payload in payloads if payload["name"] == "queue")
     assert {option["name"] for option in queue_payload["options"]} == {"status"}
     queue_admin = next(payload for payload in payloads if payload["name"] == "queue_admin")

@@ -20,10 +20,12 @@ import logging
 from datetime import timedelta
 from typing import Any
 
+from django.conf import settings
 from django.db import transaction
+from django.db.models import Count
 
 from league.domain.engine import Status
-from league.models import ApiMatchCheck, Match, MatchParticipant, Player
+from league.models import ApiMatchCheck, Community, Match, MatchParticipant, Player
 from league.models.alerts import AlertKind
 from league.models.api import CheckStatus
 from league.models.permissions import Area
@@ -37,6 +39,29 @@ logger = logging.getLogger(__name__)
 BACKOFF_MINUTES = (0, 2, 5, 15, 30, 60, 60, 60)
 CHECKABLE = frozenset({Status.AWAITING_CONFIRMATION, Status.DISPUTED, Status.COMPLETED})
 HIDDEN_KING_TEAM = 0  # In match metadata, team 0 is Hidden King and team 1 the Archmother.
+
+
+def status_lines(community: Community) -> list[str]:
+    """Lobby and result-check settings, with counts, for the admin."""
+    settings_ = runtime.of(community)
+    checks = ApiMatchCheck.objects.filter(match__community=community)
+    by_status = dict(checks.values("status").annotate(n=Count("id")).values_list("status", "n"))
+    linked = Player.objects.filter(steam_account_id__isnull=False)
+    verified = linked.exclude(steam_verified_at=None).count()
+    lines = [
+        "Lobbies: deadlock-api's bot creates each one; the host enters a code if it can't "
+        f"(region: {settings_.lobby_region or 'automatic'}).",
+        f"Result checks: {'on' if settings_.api_results else 'off'}.",
+        f"Steam links: {linked.count()}, {verified} verified.",
+    ]
+    if by_status:
+        lines.append(
+            "Checks so far: "
+            + ", ".join(f"{CheckStatus(s).label}: {n}" for s, n in sorted(by_status.items()))
+        )
+    if not settings.DEADLOCK_API_KEY:
+        lines.append("Without an API key, lobbies are limited to 10 an hour.")
+    return lines
 
 
 def schedule(match: Match, attempt: int = 1) -> bool:

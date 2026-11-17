@@ -25,6 +25,7 @@ from bot.handlers import lobby as _lobby  # noqa: F401
 from bot.handlers import queue as _queue  # noqa: F401
 from bot.handlers import results as _results  # noqa: F401
 from bot.handlers import subs as _subs  # noqa: F401
+from bot.handlers import swaps as _swaps  # noqa: F401
 from bot.routing import RouteButton, RouteSelect, RouteUserSelect
 from league import log_context
 from league.services import community as community_service
