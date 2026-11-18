@@ -18,7 +18,7 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
 
-  # deploy/ansible's pinned ansible-core and ansible-lint.
+  # deploy/ansible's pinned ansible-core.
   - package-ecosystem: pip
     directory: "/deploy/ansible"
     schedule:
@@ -63,7 +63,6 @@ updates:
   - package-ecosystem: docker
     directories:
       - "/"
-      - "/scripts/docker"
       - "/services/control-panel"
       - "/services/discord-sim"
       - "/tests/e2e"
@@ -77,11 +76,10 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
 
-  # Service images in the compose files: Postgres, pgbouncer, nginx, the observability stack.
+  # Service images in the compose files: Postgres and Caddy.
   - package-ecosystem: docker-compose
     directories:
       - "/"
-      - "/deploy"
     schedule:
       interval: weekly
       day: monday

@@ -103,6 +103,14 @@ e2e: ## The browser suite against the whole stack and the simulator
 
 ci: check test ## What CI runs: the checks, then the unit suite
 
+.PHONY: sim-test panel-test
+sim-test: ## The Discord simulator's own suite and types
+	cd services/discord-sim && uv run --frozen pytest -q && uv run --frozen mypy
+
+panel-test: ## The control panel's types, lint, tests and build, in a Node container
+	docker run --rm -v "$(CURDIR)/services/control-panel:/src:ro" -w /work node:26.13.0-trixie-slim \
+		sh -c "cp -r /src/. . && npm ci --no-audit --no-fund && npm run typecheck && npm run lint && npm test && npm run build"
+
 .PHONY: compose-check
 compose-check: ## Check every way the compose files combine (a pre-commit hook)
 	@for files in "-f compose.yaml" "-f compose.yaml -f compose.dev.yaml" \

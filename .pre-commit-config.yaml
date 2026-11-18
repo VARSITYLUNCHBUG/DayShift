@@ -1,25 +1,19 @@
-# Fast checks before each commit. CI runs every one of them too (ci.yml's infra-lint and
-# python-lint), so a contributor without the hook still can't merge what it would catch. Set up
-# once with
-#   uvx pre-commit install
-# and run them over everything with `uvx pre-commit run --all-files`. mypy and the tests stay in
-# CI (ci.yml): they're too slow for a commit hook. The Docker hooks need Docker running.
+# The checks, on your machine before each commit. `make setup` installs the hook; `make check` runs
+# every hook over the whole tree (CI runs exactly that too, as its safety net). The slower ones
+# (mypy, the migration and fixture checks, compose, Ansible) run only when their files change.
 #
-# Hooks are pinned by commit, like the workflows' actions; `uvx pre-commit autoupdate --freeze`
-# moves them. Keep ruff's rev on the version uv.lock pins.
+# Hooks are pinned by commit, like the workflows' actions; `uv run pre-commit autoupdate --freeze`
+# moves them. Keep ruff's rev on the version uv.lock pins. The Docker hooks need Docker running.
 minimum_pre_commit_version: "4.0.0"
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
     hooks:
-      # Both keep a CRLF file's CRLF line endings. The one exception, a CRLF file with no final
-      # newline, gets an LF one, and mixed-line-ending below then flags it for you to fix.
+      # Both keep a CRLF file's CRLF line endings: .gitattributes owns line endings.
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
-      # Reports a file that mixes CRLF and LF but never rewrites one: .gitattributes owns line
-      # endings, and many files here are CRLF on purpose.
       - id: mixed-line-ending
         args: [--fix=no]
       - id: check-json
@@ -40,26 +34,84 @@ repos:
     hooks:
       - id: yamllint
         args: [-c, .github/linters/.yamllint.yaml]
-        # deploy-lint.yml lints the Ansible tree with its own config.
+        # The Ansible hook below lints that tree with its own config.
         exclude: ^deploy/ansible/
-
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: 745eface02aef23e168a8afb6b5737818efbea95 # frozen: v0.11.0.1
-    hooks:
-      - id: shellcheck
 
   - repo: https://github.com/rhysd/actionlint
     rev: 914e7df21a07ef503a81201c76d2b11c789d3fca # frozen: v1.7.12
     hooks:
       - id: actionlint-docker
 
-  # hadolint's own Docker hook runs an unpinned image, so this one pins it.
   - repo: local
     hooks:
+      # hadolint's own Docker hook runs an unpinned image, so this one pins it.
       - id: hadolint
         name: hadolint
         language: docker_image
         entry: >-
           hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
           hadolint --config .github/linters/.hadolint.yaml
-        files: (^|/)Dockerfile$|\.Dockerfile$
+        files: (^|/)Dockerfile$
+
+      # The project's own environment (uv.lock), so the types are checked against what runs.
+      - id: mypy
+        name: mypy
+        language: system
+        entry: env DEBUG=true DJANGO_DOTENV=off uv run --frozen mypy bot league config devtools
+        types: [python]
+        pass_filenames: false
+
+      # The browser suite runs in its own image, with its own Python and locked requirements.
+      - id: mypy-e2e
+        name: mypy --strict, tests/e2e
+        language: system
+        entry: >-
+          env MYPYPATH=tests/e2e uv run --no-project --python 3.12
+          --with-requirements tests/e2e/requirements.txt --with mypy==2.4.1
+          mypy --config-file= --strict --python-version 3.12 --explicit-package-bases tests/e2e
+        files: ^tests/e2e/.*\.py$
+        pass_filenames: false
+
+      - id: mypy-sim
+        name: mypy, the Discord simulator
+        language: system
+        entry: bash -c 'cd services/discord-sim && uv run --frozen mypy'
+        files: ^services/discord-sim/.*\.py$
+        pass_filenames: false
+
+      # A model change needs its migration. No server needed: an in-memory SQLite database
+      # stands in for the comparison. DEV_CONTROL loads devtools, so its models count too.
+      - id: migrations
+        name: migrations match the models
+        language: system
+        entry: >-
+          env DEBUG=true DEV_CONTROL=true DJANGO_DOTENV=off DATABASE_URL=sqlite:///:memory:
+          uv run --frozen python manage.py makemigrations --check --dry-run
+        files: ^(league|devtools)/(models|migrations)
+        pass_filenames: false
+
+      # Every model has seed data in fixtures/dev (tests/test_fixtures.py says how to add it).
+      - id: fixtures
+        name: every model has a fixture
+        language: system
+        entry: >-
+          env DEBUG=true DEV_CONTROL=true DJANGO_DOTENV=off DATABASE_URL=sqlite:///:memory:
+          uv run --frozen python manage.py check_fixtures
+        files: ^(league/models|devtools/models\.py|fixtures/dev/)
+        pass_filenames: false
+
+      # Every way the compose files are combined still makes a valid project.
+      - id: compose
+        name: compose files
+        language: system
+        entry: make compose-check
+        files: ^(compose.*\.yaml|deploy/compose\.prod\.yaml|\.env.*\.example)$
+        pass_filenames: false
+
+      - id: ansible-lint
+        name: ansible-lint
+        language: python
+        additional_dependencies: [ansible-core==2.22.0, ansible-lint==26.11.0]
+        entry: bash -c 'cd deploy/ansible && ansible-lint'
+        files: ^deploy/ansible/
+        pass_filenames: false
