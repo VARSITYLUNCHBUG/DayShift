@@ -21,6 +21,7 @@ dev = [
     "django-stubs>=5.2",
     "hypothesis>=2.0",
     "mypy>=1.15",
+    "pre-commit>=4.7",
     "pytest>=8",
     "pytest-django>=4.10",
     "pytest-xdist>=3.8",
