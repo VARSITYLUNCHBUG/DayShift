@@ -131,7 +131,9 @@ async def _notice(
     return message_id
 
 
-READY_PING_TEXT = "your lobby is ready. Press **Ready** on the board below."
+READY_PING_TEXT = (
+    "your lobby is ready. Press **Ready** on the board below, and wait in the Waiting Room."
+)
 
 
 def _open_voice(community_id: int) -> bool:
@@ -164,16 +166,7 @@ async def create_lobby(env: Env) -> None:
             await db(_match_staff_roles, community.pk),
         )
         await db(effects.record_resource, env.match_id, ResourceKind.TEXT, text_id)
-    if ResourceKind.LOBBY_VOICE not in existing:
-        voice_id = await env.gateway.create_voice_channel(
-            env.guild_id,
-            community.match_category_id,
-            names.lobby_voice(env.match_id),
-            members,
-            await db(_match_staff_roles, community.pk),
-            open_to_everyone=await db(_open_voice, community.pk),
-        )
-        await db(effects.record_resource, env.match_id, ResourceKind.LOBBY_VOICE, voice_id)
+    # No lobby voice of its own: the Waiting Room is the lobby until teams have their channels.
     message_id = await _notice(env, READY_PING_TEXT, user_ids=members)
     await db(effects.record_ready_ping, env.match_id, message_id)
 
@@ -199,7 +192,8 @@ def channel_url(guild_id: int, channel_id: int | None) -> str | None:
 
 @effect("gather_player")
 async def gather_player(env: Env) -> None:
-    """In the Waiting Room: move them. Anywhere else: DM an invite. They choose when to join."""
+    """The Waiting Room is the lobby. Already there: nothing to do, the board's ping calls them.
+    Anywhere else: DM an invite to it with a Ready button. They choose when to join."""
     user_id = int(env.effect.payload["discord_user_id"])
     is_sub = bool(env.effect.payload.get("sub"))
     resources = await db(effects.resources, env.match_id)
@@ -207,35 +201,36 @@ async def gather_player(env: Env) -> None:
     if is_sub:
         await _gather_sub(env, user_id, resources, link)
         return
-    lobby_voice = resources.get(ResourceKind.LOBBY_VOICE)
-    if lobby_voice is None:
-        raise RuntimeError("Lobby voice channel isn't recorded yet.")
-    waiting = env.gateway.voice_member_ids(env.guild_id, env.community.waiting_room_channel_id)
-    if user_id in waiting and await env.gateway.move_member(env.guild_id, user_id, lobby_voice):
+    waiting_room = env.community.waiting_room_channel_id
+    if waiting_room and user_id in env.gateway.voice_member_ids(env.guild_id, waiting_room):
         return
-    invite = await env.gateway.create_invite(env.guild_id, lobby_voice, INVITE_MAX_AGE_SECONDS)
+    invite = (
+        await env.gateway.create_invite(env.guild_id, waiting_room, INVITE_MAX_AGE_SECONDS)
+        if waiting_room
+        else None
+    )
     view = render_ready_dm(env.match_id, invite, heading="Ready Up", channel_url=link)
     if not await env.gateway.send_dm(user_id, view):
         await _notice(
             env,
-            "I couldn't DM you. Join the lobby voice channel and press Ready on the board.",
+            "I couldn't DM you. Join the Waiting Room and press Ready on the board.",
             user_ids=[user_id],
         )
 
 
 async def _gather_sub(env: Env, user_id: int, resources: dict[str, int], link: str | None) -> None:
-    """A sub joins wherever the match is now: their team's voice once teams are set."""
+    """A sub joins wherever the match is now: their team's voice once teams are set, the
+    Waiting Room before that."""
     team = await db(_team_of, env.match_id, user_id)
-    target = resources.get(_team_voice_kind(team)) or resources.get(ResourceKind.LOBBY_VOICE)
-    if target is not None:
-        nearby = (env.community.waiting_room_channel_id, resources.get(ResourceKind.LOBBY_VOICE))
-        here = any(
-            user_id in env.gateway.voice_member_ids(env.guild_id, channel)
-            for channel in nearby
-            if channel and channel != target
-        )
-        if here and await env.gateway.move_member(env.guild_id, user_id, target):
+    waiting_room = env.community.waiting_room_channel_id
+    team_voice = resources.get(_team_voice_kind(team))
+    target = team_voice or waiting_room
+    if team_voice is not None and waiting_room:
+        here = user_id in env.gateway.voice_member_ids(env.guild_id, waiting_room)
+        if here and await env.gateway.move_member(env.guild_id, user_id, team_voice):
             return
+    elif target is not None and user_id in env.gateway.voice_member_ids(env.guild_id, target):
+        target = None  # Already in the Waiting Room: no invite needed.
     invite = (
         await env.gateway.create_invite(env.guild_id, target, INVITE_MAX_AGE_SECONDS)
         if target is not None
@@ -299,7 +294,7 @@ async def grant_access(env: Env) -> None:
     user_id = int(env.effect.payload["discord_user_id"])
     resources = await db(effects.resources, env.match_id)
     team = await db(_team_of, env.match_id, user_id)
-    kinds = (ResourceKind.TEXT, ResourceKind.LOBBY_VOICE, _team_voice_kind(team))
+    kinds = (ResourceKind.TEXT, _team_voice_kind(team))
     for kind in kinds:
         channel_id = resources.get(kind)
         if channel_id:
@@ -452,6 +447,51 @@ async def render_queue_effect(env: Env) -> None:
     await db(community_service.save_wiring, community.pk, queue_message_id=message_id)
 
 
+def _leaderboard_pages(community_id: int) -> tuple[int | None, list[int], list[str]]:
+    from bot.renderers.leaderboard import pages
+    from league.services import common, leaderboards
+
+    community = Community.objects.get(pk=community_id)
+    season = common.open_season(community)
+    title = f"Leaderboard · {season.name}"
+    rows = leaderboards.table(season)
+    return (
+        community.leaderboard_channel_id,
+        list(community.leaderboard_message_ids),
+        pages(rows, leaderboards.label(community), title),
+    )
+
+
+@effect("render_leaderboard")
+async def render_leaderboard_effect(env: Env) -> None:
+    """Every player's rating and win rate, over as many messages as it takes. Edits the ones
+    already there, posts any more it needs and deletes any it no longer does."""
+    from league.services import leaderboards
+
+    channel_id, message_ids, texts = await db(_leaderboard_pages, env.community.pk)
+    if not channel_id:
+        raise Skip("Leaderboard channel isn't set up.")
+    kept: list[int] = []
+    for index, text in enumerate(texts):
+        if index < len(message_ids):
+            try:
+                await env.gateway.edit_text(channel_id, message_ids[index], text)
+                kept.append(message_ids[index])
+                continue
+            except ChannelGone:
+                # A message was deleted: start again from here, so the pages stay in order.
+                for stale in message_ids[index:]:
+                    with contextlib.suppress(ChannelGone):
+                        await env.gateway.delete_message(channel_id, stale)
+                message_ids = message_ids[:index]
+        kept.append(await env.gateway.send_text(channel_id, text))
+        await db(leaderboards.save_messages, env.community.pk, kept + message_ids[len(kept) :])
+    for stale in message_ids[len(texts) :]:
+        with contextlib.suppress(ChannelGone):
+            await env.gateway.delete_message(channel_id, stale)
+    await db(leaderboards.save_messages, env.community.pk, kept)
+
+
 # --- Messages --------------------------------------------------------------------------------
 
 
@@ -602,14 +642,19 @@ async def create_team_voice(env: Env) -> None:
 
 @effect("team_move_player")
 async def team_move_player(env: Env) -> None:
-    """In the lobby VC: move them. Anywhere else: DM an invite to their team's channel."""
+    """In the Waiting Room: move them. Anywhere else: DM an invite to their team's channel."""
     user_id = int(env.effect.payload["discord_user_id"])
     resources = await db(effects.resources, env.match_id)
     team_channel = resources.get(_team_voice_kind(str(env.effect.payload["team"])))
     if team_channel is None:
         raise Skip("Team channel is gone.")
-    lobby_voice = resources.get(ResourceKind.LOBBY_VOICE)
-    in_lobby = user_id in env.gateway.voice_member_ids(env.guild_id, lobby_voice)
+    # A lobby voice only exists for a match that popped before the Waiting Room became the lobby.
+    lobbies = (env.community.waiting_room_channel_id, resources.get(ResourceKind.LOBBY_VOICE))
+    in_lobby = any(
+        user_id in env.gateway.voice_member_ids(env.guild_id, channel)
+        for channel in lobbies
+        if channel
+    )
     if in_lobby and await env.gateway.move_member(env.guild_id, user_id, team_channel):
         return
     invite = await env.gateway.create_invite(env.guild_id, team_channel, INVITE_MAX_AGE_SECONDS)
@@ -622,6 +667,24 @@ async def team_move_player(env: Env) -> None:
     )
     if not await env.gateway.send_dm(user_id, view):
         await _notice(env, "teams are set. Join your team's voice channel.", user_ids=[user_id])
+
+
+@effect("swap_team_voice")
+async def swap_team_voice(env: Env) -> None:
+    """Two players changed teams: each gets their new team's voice and loses the old one, and
+    anyone in their old team's voice is moved across."""
+    resources = await db(effects.resources, env.match_id)
+    for move in env.effect.payload["moves"]:
+        user_id = int(move["discord_user_id"])
+        team = str(move["team"])
+        new_channel = resources.get(_team_voice_kind(team))
+        old_channel = resources.get(_team_voice_kind("B" if team == "A" else "A"))
+        if new_channel is None or old_channel is None:
+            continue  # Team voice isn't up: creating it reads the teams as they are now.
+        await env.gateway.grant_member(new_channel, user_id)
+        if user_id in env.gateway.voice_member_ids(env.guild_id, old_channel):
+            await env.gateway.move_member(env.guild_id, user_id, new_channel)
+        await env.gateway.revoke_member(old_channel, user_id)
 
 
 @effect("delete_lobby_voice")
@@ -790,29 +853,18 @@ async def post_correction(env: Env) -> None:
 
 @effect("restart_voice")
 async def restart_voice(env: Env) -> None:
-    """A restart: teams are gone, so everyone goes back to a lobby voice and the old match's team
-    channels are deleted. Runs in the successor's lane, before anyone new is gathered. Once teams
-    had formed the old lobby voice was gone, so the successor gets one of its own."""
+    """A restart: teams are gone, so everyone goes back to the Waiting Room and the old match's
+    team channels are deleted. Runs in the successor's lane, before anyone new is gathered."""
     old_id = int(env.effect.payload["old_id"])
-    lobby_voice = await db(effects.resource_id, env.match_id, ResourceKind.LOBBY_VOICE)
-    if lobby_voice is None:
-        community = env.community
-        lobby_voice = await env.gateway.create_voice_channel(
-            env.guild_id,
-            community.match_category_id,
-            names.lobby_voice(env.match_id),
-            await db(_active_user_ids, env.required_match),
-            await db(_match_staff_roles, community.pk),
-            open_to_everyone=await db(_open_voice, community.pk),
-        )
-        await db(effects.record_resource, env.match_id, ResourceKind.LOBBY_VOICE, lobby_voice)
+    waiting_room = env.community.waiting_room_channel_id
     resources = await db(effects.resources, old_id)
     for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
         channel_id = resources.get(kind)
         if channel_id is None:
             continue
-        for user_id in env.gateway.voice_member_ids(env.guild_id, channel_id):
-            await env.gateway.move_member(env.guild_id, user_id, lobby_voice)
+        if waiting_room:
+            for user_id in env.gateway.voice_member_ids(env.guild_id, channel_id):
+                await env.gateway.move_member(env.guild_id, user_id, waiting_room)
         await env.gateway.delete_channel(channel_id)
         await db(effects.mark_resource_deleted, old_id, kind)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 DEFAULT_PENALTY_POLICY = {
@@ -64,6 +65,12 @@ class Community(models.Model):
     staff_channel_id = models.BigIntegerField(null=True, blank=True)
     # This server's error summaries are posted here (/seterrorchannel).
     error_channel_id = models.BigIntegerField(null=True, blank=True)
+    # Members need this role to see the queue, Waiting Room, results and leaderboard, and to use
+    # /leaderboard. Empty: everyone can (/setup pug_role).
+    pug_role_id = models.BigIntegerField(null=True, blank=True)
+    # Every player's rating and win rate, kept up to date by the bot across these messages.
+    leaderboard_channel_id = models.BigIntegerField(null=True, blank=True)
+    leaderboard_message_ids = ArrayField(models.BigIntegerField(), default=list, blank=True)
     penalty_policy = models.JSONField(default=default_penalty_policy)
 
     class Meta:
@@ -75,8 +82,8 @@ class Community(models.Model):
 
 
 class RuntimeSettings(models.Model):
-    """One server's switches. They take effect at once, with no restart: change them in the
-    admin, or with the staff commands that set them (/ocr mode, /deadlock settings).
+    """One server's switches. They take effect at once, with no restart. They're changed only in
+    the admin, whose save runs `league.services.runtime.after_change`.
 
     Read them through `league.services.runtime.of`, which creates the row on first use."""
 
@@ -102,14 +109,24 @@ class RuntimeSettings(models.Model):
         default="off",
         help_text="Reading report screenshots. Needs the reader installed on the bot's host.",
     )
-    auto_lobby = models.BooleanField(
-        default=False, help_text="Have deadlock-api's bot create each match's custom lobby."
-    )
     lobby_region = models.CharField(
         max_length=24, blank=True, help_text="Region for automatic lobbies. Empty: automatic."
     )
     api_results = models.BooleanField(
         default=True, help_text="Check reported results against Deadlock's match history."
+    )
+    interim_points = models.BooleanField(
+        default=False,
+        help_text="NeatQueue interim: show NeatQueue-style points, carried over from the import "
+        "(Interim ratings, Import NeatQueue CSV), instead of the OpenSkill rating. OpenSkill keeps "
+        "running underneath; turn this off to cut over to it.",
+    )
+    interim_start_points = models.IntegerField(
+        default=1000, help_text="Points for a player who wasn't in the NeatQueue import."
+    )
+    interim_k_factor = models.PositiveSmallIntegerField(
+        default=32,
+        help_text="Most points a match can move: an even match moves half this, an upset more.",
     )
 
     class Meta:

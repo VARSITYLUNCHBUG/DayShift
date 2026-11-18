@@ -25,7 +25,6 @@ from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import DraftMode
 from league.models import Champion, DraftAction, Match, Player
 from league.models.matches import MatchKind, Source
-from league.services import runtime
 from league.services.common import (
     active_participants,
     add_effect,
@@ -193,7 +192,7 @@ def on_player_draft_timeout(match: Match) -> None:
 
 def begin_coinflip(match: Match, mode: DraftMode) -> None:
     """The player draft is over: make team voice channels and flip a coin between the captains.
-    The winner chooses a side and Pick 1 or Pick 2 in one press, which settles both."""
+    The winner chooses a side. The Hidden King always bans and picks first."""
     match.coinflip_winner = coin_flip_team(match.rng_seed, "coinflip")
     match.coinflip_winner_choice = ""
     match.coinflip_loser_choice = ""
@@ -215,8 +214,8 @@ def begin_coinflip(match: Match, mode: DraftMode) -> None:
         "ping",
         {
             "user_ids": [winner.discord_user_id],
-            "text": "teams are set and you won the coinflip! Choose your side and Pick 1 or "
-            "Pick 2 on the board. Pick 1 bans and picks first.",
+            "text": "teams are set and you won the coinflip! Choose your side on the board. "
+            "The Hidden King bans and picks first.",
         },
         match=match,
     )
@@ -255,7 +254,7 @@ def on_coinflip_timeout(match: Match) -> None:
 def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | None) -> None:
     mode = mode_of(match)
     if match.kind != MatchKind.SCRIM:
-        # Ranked: the winner's one choice sets the sides and who bans and picks first.
+        # Ranked: the winner's side sets the sides, and the Hidden King bans and picks first.
         match.coinflip_winner_choice = choice
         match.hidden_king_team, match.champion_first_pick = apply_ranked_coinflip(
             match.coinflip_winner, choice
@@ -435,16 +434,13 @@ def begin_lobby_code(match: Match, mode: DraftMode) -> None:
         deadline_at=seconds_from_now(mode.lobby_code.seconds),
     )
     save_transition(match, "lobby_code_host", "lobby_code_attempts", "step_index")
-    if runtime.of(match.community_id).auto_lobby:
-        # The host can still enter a code by hand while the bot asks deadlock-api for one.
-        add_effect(
-            match.community,
-            "create_api_lobby",
-            match=match,
-            dedupe_key=f"create_api_lobby:{match.pk}",
-        )
-    else:
-        _ping_host(match, host.player)
+    # deadlock-api's bot always makes the lobby. Only if that fails is the host asked for a code.
+    add_effect(
+        match.community,
+        "create_api_lobby",
+        match=match,
+        dedupe_key=f"create_api_lobby:{match.pk}",
+    )
     render_board(match)
 
 
@@ -471,6 +467,8 @@ def accept_api_lobby(match_id: int, party_id: str, party_code: str) -> bool:
     match = lock_match(match_id)
     if match.status != Status.LOBBY_CODE or match.held_seconds is not None:
         return False
+    if match.api_lobby_failed:
+        return False  # Too late: the host has been asked to make one, and theirs is the lobby.
     match.api_party_id = party_id[:32]
     match.api_lobby_created_at = now()
     _start_game(match, party_code, source=Source.SYSTEM, actor=None)
@@ -479,12 +477,27 @@ def accept_api_lobby(match_id: int, party_id: str, party_code: str) -> bool:
 
 @transaction.atomic
 def api_lobby_failed(match_id: int, reason: str) -> None:
-    """Lobby creation didn't work: the host makes one by hand, on the usual clock."""
+    """Lobby creation didn't work: the host makes one by hand."""
     match = lock_match(match_id)
-    if match.status != Status.LOBBY_CODE or match.lobby_code_host is None:
+    if match.status != Status.LOBBY_CODE or match.api_lobby_failed:
         return
     logger.warning("API lobby failed", extra={"match": match.pk, "reason": reason[:200]})
-    _ping_host(match, match.lobby_code_host, "the bot couldn't make the lobby, so please ")
+    _fall_back_to_code(match)
+
+
+def _fall_back_to_code(match: Match) -> None:
+    """The host now needs a code, and gets the full time to make the lobby and enter it."""
+    seconds = mode_of(match).lobby_code.seconds
+    match.api_lobby_failed = True
+    if match.held_seconds is not None:  # Paused for a sub: the time waits with the match.
+        match.held_seconds = seconds
+        bump(match, "api_lobby_failed", "held_seconds")
+    else:
+        match.deadline_at = seconds_from_now(seconds)
+        bump(match, "api_lobby_failed", "deadline_at")
+    if match.lobby_code_host is not None:
+        _ping_host(match, match.lobby_code_host, "the bot couldn't make the lobby, so please ")
+    render_board(match)
 
 
 def check_can_start_api(match_id: int, player: Player) -> str:
@@ -551,6 +564,11 @@ def on_lobby_code_timeout(match: Match) -> None:
     from league.services.lobby import void_live  # Avoids a cycle: lobby calls into the draft flow.
 
     mode = mode_of(match)
+    if not match.api_lobby_failed:
+        # deadlock-api never answered in time: treat it as a failure, and ask the host.
+        logger.warning("API lobby timed out", extra={"match": match.pk})
+        _fall_back_to_code(match)
+        return
     if match.lobby_code_attempts >= 2:
         void_live(match, source=Source.TIMEOUT, reason="No lobby code was provided")
         return
@@ -571,8 +589,17 @@ def check_lobby_host(match_id: int, player: Player) -> None:
     if match is None or match.status != Status.LOBBY_CODE:
         raise StaleAction("The lobby code step has finished.")
     require_not_on_hold(match)
+    _require_code_wanted(match, player)
+
+
+def _require_code_wanted(match: Match, player: Player) -> None:
+    if not match.api_lobby_failed:
+        raise StaleAction(API_LOBBY_PENDING)
     if match.lobby_code_host_id != player.pk:
         raise NotAllowed("Only the chosen host can enter the lobby code.")
+
+
+API_LOBBY_PENDING = "The bot is creating the lobby. If it can't, the host is asked for a code."
 
 
 @transaction.atomic
@@ -581,8 +608,7 @@ def submit_lobby_code(match_id: int, player: Player, code: str) -> None:
     if match.status != Status.LOBBY_CODE:
         raise StaleAction("The lobby code step has finished.")
     require_not_on_hold(match)
-    if match.lobby_code_host_id != player.pk:
-        raise NotAllowed("Only the chosen host can enter the lobby code.")
+    _require_code_wanted(match, player)
     cleaned = code.strip()
     if not LOBBY_CODE_PATTERN.match(cleaned):
         raise InvalidAction("That doesn't look like a lobby code: use letters, numbers or dashes.")

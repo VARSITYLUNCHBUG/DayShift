@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import discord
 from discord import Interaction, app_commands
-from django.conf import settings
 from django.db import transaction
-from django.db.models import Count
 
 from bot.db import db
 from bot.handlers.common import actor, community_of
@@ -19,38 +16,30 @@ from bot.handlers.results import send_name_picker
 from bot.routing import guarded, reply
 from league.domain.engine import TERMINAL, Status
 from league.domain.errors import InvalidAction
-from league.domain.mode_schema import ModeValidationError
-from league.integrations import deadlock_api
 from league.models import (
     ApiMatchCheck,
     Community,
-    DraftModeVersion,
     Match,
     MatchAward,
     Player,
     RatingEvent,
     ScoreboardRead,
 )
-from league.models.api import CheckStatus
 from league.models.permissions import Area
-from league.models.scoreboards import AwardSource, ReadStatus
+from league.models.scoreboards import AwardSource
 from league.services import (
     api_results,
     awards,
     boards,
-    champions,
     common,
     corrections,
     early_leave,
-    integrity,
     lobby,
-    modes,
     ocr,
     penalties,
     queue,
     ratings,
     results,
-    runtime,
     standing,
     steam,
 )
@@ -463,10 +452,10 @@ async def queue_clear(interaction: Interaction[Any]) -> None:
     await guarded(interaction, run)
 
 
-penalty_group = app_commands.Group(name="penalty", description="Staff: queue cooldowns")
+ban_group = app_commands.Group(name="ban", description="Staff: queue bans (cooldowns) and strikes")
 
 
-@penalty_group.command(name="add", description="Put a player on a queue cooldown")
+@ban_group.command(name="add", description="Ban a player from the queue for a while")
 @app_commands.choices(
     kind=[
         app_commands.Choice(name="Dodge", value="dodge"),
@@ -476,7 +465,7 @@ penalty_group = app_commands.Group(name="penalty", description="Staff: queue coo
     ]
 )
 @app_commands.describe(minutes="Leave empty to use the escalating ladder for this kind")
-async def penalty_add(
+async def ban_add(
     interaction: Interaction[Any],
     player: discord.Member,
     kind: app_commands.Choice[str],
@@ -504,9 +493,9 @@ async def penalty_add(
     await guarded(interaction, run)
 
 
-@penalty_group.command(name="revoke", description="Lift a player's active cooldown")
+@ban_group.command(name="revoke", description="Lift a player's active queue ban")
 @app_commands.describe(keep_strikes="Keep the strikes it added. By default they go too")
-async def penalty_revoke(
+async def ban_revoke(
     interaction: Interaction[Any], player: discord.Member, keep_strikes: bool = False
 ) -> None:
     async def run() -> None:
@@ -519,9 +508,9 @@ async def penalty_revoke(
     await guarded(interaction, run)
 
 
-@penalty_group.command(name="strikes", description="Add or remove dodge strikes by hand")
+@ban_group.command(name="strikes", description="Add or remove dodge strikes by hand")
 @app_commands.describe(delta="Positive adds strikes, negative removes them")
-async def penalty_strikes(
+async def ban_strikes(
     interaction: Interaction[Any],
     player: discord.Member,
     delta: app_commands.Range[int, -20, 20],
@@ -573,220 +562,9 @@ async def captain_clear(interaction: Interaction[Any], player: discord.Member, r
     await guarded(interaction, lambda: _set_captain(interaction, player, "clear", reason))
 
 
-ocr_group = app_commands.Group(name="ocr", description="Staff: reading report screenshots")
-
-
-def _set_ocr_mode(community: Community, mode: str) -> None:
-    if mode not in ocr.MODES:
-        raise InvalidAction("Choose off, stats only or on.")
-    if mode != "off" and not ocr.available():
-        raise InvalidAction(
-            "Reading screenshots isn't available on this bot yet. Ask whoever hosts it to "
-            "turn it on."
-        )
-    runtime.update(community, score_ocr=mode)
-
-
-def _ocr_status_text(community: Community) -> str:
-    settings_ = runtime.of(community)
-    reads = ScoreboardRead.objects.filter(match__community=community)
-    total = reads.count()
-    by_status = dict(reads.values("status").annotate(n=Count("id")).values_list("status", "n"))
-    available = "" if ocr.available() else " (not available on this bot)"
-    lines = [
-        f"Reading screenshots: **{settings_.get_score_ocr_display()}**{available}. "
-        f"{total} read so far."
-    ]
-    if total:
-        lines.append(", ".join(f"{ReadStatus(s).label}: {n}" for s, n in sorted(by_status.items())))
-    return "\n".join(lines)
-
-
-@ocr_group.command(name="mode", description="Turn reading report screenshots off or on")
-@app_commands.choices(
-    mode=[
-        app_commands.Choice(name="Off", value="off"),
-        app_commands.Choice(name="Stats only", value="shadow"),
-        app_commands.Choice(name="On: stats, MVP and key players, cross-checks", value="on"),
-    ]
-)
-async def ocr_mode(interaction: Interaction[Any], mode: app_commands.Choice[str]) -> None:
-    async def run() -> None:
-        community = await _staff_start(interaction, Area.SETUP)
-        await db(_set_ocr_mode, community, mode.value)
-        await reply(interaction, f"Reading screenshots: **{mode.name}**. New reports use it.")
-
-    await guarded(interaction, run)
-
-
-@ocr_group.command(name="status", description="Whether screenshots are read, and how it's gone")
-async def ocr_status(interaction: Interaction[Any]) -> None:
-    async def run() -> None:
-        community = await _staff_start(interaction, Area.SETUP)
-        await reply(interaction, await db(_ocr_status_text, community))
-
-    await guarded(interaction, run)
-
-
-mode_group = app_commands.Group(name="mode", description="Staff: draft modes")
-
-
-def _modes_text(community: Community) -> str:
-    lines = []
-    for version in modes.latest_versions():
-        active = " (active)" if version.pk == community.active_mode_id else ""
-        lines.append(f"**{version.name}**{active}: `/mode activate slug:{version.slug}`")
-    return "\n".join(lines) or "No modes loaded."
-
-
-@mode_group.command(name="list", description="Available draft modes")
-async def mode_list(interaction: Interaction[Any]) -> None:
-    async def run() -> None:
-        community = await _staff_start(interaction, Area.SETUP)
-        await reply(interaction, await db(_modes_text, community))
-
-    await guarded(interaction, run)
-
-
-def _activate_latest(community_id: int, slug: str) -> DraftModeVersion:
-    version = DraftModeVersion.objects.filter(slug=slug).order_by("-version").first()
-    if version is None:
-        raise InvalidAction(f"There's no mode called `{slug}`.")
-    try:
-        return modes.activate(community_id, version.pk)
-    except ModeValidationError as exc:
-        raise InvalidAction(
-            "That mode has a setup problem and can't be used. Ask whoever hosts the bot."
-        ) from exc
-
-
-@mode_group.command(name="activate", description="Use this mode for new lobbies")
-async def mode_activate(interaction: Interaction[Any], slug: str) -> None:
-    async def run() -> None:
-        community = await _staff_start(interaction, Area.SETUP)
-        version = await db(_activate_latest, community.pk, slug)
-        await db(common.render_queue, community)
-        await reply(
-            interaction, f"New lobbies now use **{version.name}**. Live matches keep their own."
-        )
-
-    await guarded(interaction, run)
-
-
-roster_group = app_commands.Group(name="roster", description="Staff: champion list")
-
-
-@roster_group.command(name="sync", description="Compare champions with the Deadlock API")
-async def roster_sync(interaction: Interaction[Any]) -> None:
-    async def run() -> None:
-        await _staff_start(interaction, Area.SETUP)
-        remote = await asyncio.to_thread(champions.fetch_remote)  # Never on the database thread.
-        diff = await db(champions.diff, remote)
-        if diff.is_empty:
-            await reply(interaction, "The roster is up to date.")
-            return
-        lines = [f"New: {hero.name}" for hero in diff.new]
-        lines += [f"Renamed: {old.name} -> {new}" for old, new in diff.renamed]
-        lines += [f"Would be disabled: {champion.name}" for champion in diff.missing_upstream]
-
-        async def apply(confirmed: Interaction[Any]) -> None:
-            await db(champions.apply_diff, diff)
-            await reply(confirmed, "Roster updated. New lobbies use it; live matches don't change.")
-
-        await _send_confirm(interaction, "\n".join(lines)[:1900], apply)
-
-    await guarded(interaction, run)
-
-
-@app_commands.command(name="ledger_check", description="Staff: check that ratings add up")
-async def ledger_check(interaction: Interaction[Any]) -> None:
-    async def run() -> None:
-        await _staff_start(interaction, Area.RATINGS)
-        problems = await db(integrity.check_all)
-        await reply(interaction, "\n".join(problems)[:1900] if problems else "Ratings add up.")
-
-    await guarded(interaction, run)
-
-
 deadlock_group = app_commands.Group(
-    name="deadlock", description="Staff: deadlock-api lobbies, result checks and Steam links"
+    name="deadlock", description="Staff: deadlock-api result checks and Steam links"
 )
-
-
-def _save_deadlock_settings(
-    community: Community, auto_lobby: bool | None, region: str | None, check_results: bool | None
-) -> None:
-    values: dict[str, object] = {}
-    if region is not None:
-        cleaned = region.strip().lower()
-        if cleaned and cleaned not in deadlock_api.SERVER_REGIONS:
-            raise InvalidAction("Unknown region. Start typing to see the list.")
-        values["lobby_region"] = cleaned
-    if auto_lobby is not None:
-        values["auto_lobby"] = auto_lobby
-    if check_results is not None:
-        values["api_results"] = check_results
-    if values:
-        runtime.update(community, **values)
-
-
-def _deadlock_status_text(community: Community) -> str:
-    settings_ = runtime.of(community)
-    checks = ApiMatchCheck.objects.filter(match__community=community)
-    by_status = dict(checks.values("status").annotate(n=Count("id")).values_list("status", "n"))
-    linked = Player.objects.filter(steam_account_id__isnull=False)
-    lines = [
-        f"Automatic lobbies: **{'on' if settings_.auto_lobby else 'off'}**"
-        f" (region: {settings_.lobby_region or 'automatic'}).",
-        f"Result checks: **{'on' if settings_.api_results else 'off'}**.",
-        f"Steam links: {linked.count()}, "
-        f"{linked.exclude(steam_verified_at=None).count()} verified.",
-    ]
-    if by_status:
-        lines.append(
-            "Checks so far: "
-            + ", ".join(f"{CheckStatus(s).label}: {n}" for s, n in sorted(by_status.items()))
-        )
-    if not settings.DEADLOCK_API_KEY:
-        lines.append("-# Automatic lobbies are limited to 10 an hour.")
-    return "\n".join(lines)
-
-
-async def _region_autocomplete(
-    _interaction: Interaction[Any], current: str
-) -> list[app_commands.Choice[str]]:
-    matches = [r for r in deadlock_api.SERVER_REGIONS if current.lower() in r]
-    return [app_commands.Choice(name=r, value=r) for r in matches[:25]]
-
-
-@deadlock_group.command(name="settings", description="Automatic lobbies, region, result checks")
-@app_commands.describe(
-    auto_lobby="Have deadlock-api's bot create each match's lobby",
-    region="Lobby server region. Leave empty for the API's default",
-    check_results="Check reported results against deadlock-api by match ID",
-)
-@app_commands.autocomplete(region=_region_autocomplete)
-async def deadlock_settings(
-    interaction: Interaction[Any],
-    auto_lobby: bool | None = None,
-    region: str | None = None,
-    check_results: bool | None = None,
-) -> None:
-    async def run() -> None:
-        community = await _staff_start(interaction, Area.SETUP)
-        await db(_save_deadlock_settings, community, auto_lobby, region, check_results)
-        await reply(interaction, await db(_deadlock_status_text, community))
-
-    await guarded(interaction, run)
-
-
-@deadlock_group.command(name="status", description="Lobby and result-check settings and counts")
-async def deadlock_status(interaction: Interaction[Any]) -> None:
-    async def run() -> None:
-        community = await _staff_start(interaction, Area.SETUP)
-        await reply(interaction, await db(_deadlock_status_text, community))
-
-    await guarded(interaction, run)
 
 
 @transaction.atomic
@@ -829,11 +607,8 @@ GROUPS: tuple[app_commands.Group, ...] = (
     match_group,
     rating_group,
     queue_admin_group,
-    penalty_group,
-    mode_group,
-    roster_group,
+    ban_group,
     captain_group,
-    ocr_group,
     deadlock_group,
 )
-COMMANDS: tuple[app_commands.Command[Any, Any, Any], ...] = (ledger_check,)
+COMMANDS: tuple[app_commands.Command[Any, Any, Any], ...] = ()

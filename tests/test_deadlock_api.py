@@ -262,7 +262,7 @@ def test_results_show_api_stats_for_linked_players(live: Match) -> None:
 
 @pytest.fixture
 def auto(league: Community) -> Community:
-    runtime.update(league, auto_lobby=True, lobby_region="south_africa")
+    runtime.update(league, lobby_region="south_africa")  # Lobbies are always the bot's.
     league.refresh_from_db()
     return league
 

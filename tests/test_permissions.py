@@ -284,6 +284,7 @@ def test_setup_needs_a_manager_first_then_the_setup_area(staffed: Community) -> 
         results_channel_id=3,
         archive_channel_id=4,
         staff_channel_id=5,
+        leaderboard_channel_id=6,
     )
     assert replies(_setup(_staffer(62, SETUP_ROLE), GUILD_ID))[0].startswith("Setup done.")
 

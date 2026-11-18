@@ -36,7 +36,7 @@ def ensure(guild_id: int, name: str) -> Community:
     return community
 
 
-def save_wiring(community_id: int, **ids: int | None) -> None:
+def save_wiring(community_id: int, **ids: int | list[int] | None) -> None:
     allowed = {
         "queue_channel_id",
         "queue_message_id",
@@ -46,6 +46,9 @@ def save_wiring(community_id: int, **ids: int | None) -> None:
         "match_category_id",
         "error_channel_id",
         "staff_channel_id",
+        "pug_role_id",
+        "leaderboard_channel_id",
+        "leaderboard_message_ids",
     }
     unknown = set(ids) - allowed
     if unknown:

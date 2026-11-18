@@ -313,10 +313,11 @@ def cancel_board_moves(match_id: int) -> None:
 def on_voice_join(discord_user_id: int, joined_channel_id: int) -> tuple[int, int] | None:
     """A member joined a voice channel. Returns where to send them: (guild ID, channel ID), or None.
 
-    - Joining your match's lobby or team voice records that you've arrived.
-    - The Waiting Room sends you on to your match's voice only until you've arrived. After that,
-      coming back to the Waiting Room (to requeue, say) leaves you there.
-    - The lobby voice always sends you on to your team's voice once teams have their own.
+    - The Waiting Room is the lobby, so before teams are picked nobody is moved.
+    - Joining your team's voice records that you've arrived.
+    - Once teams have their own voice, the Waiting Room sends you on to yours only until you've
+      arrived. After that, coming back to the Waiting Room (to requeue, say) leaves you there.
+    - A lobby voice, left from before the Waiting Room was the lobby, sends you on to your team's.
 
     Anyone else is left alone, wherever they are.
     """

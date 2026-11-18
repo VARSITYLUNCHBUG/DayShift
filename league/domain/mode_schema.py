@@ -1,9 +1,10 @@
 """The draft mode file format.
 
-Every mode runs the same flow: a captain vote, the player draft, a side claim, then the champion
-draft with the Hidden King team ("first") banning and picking first. A mode only sets timers, team
-size, the player draft order, the ban and pick order and excluded champions. Anything not listed
-here is rejected, including simultaneous or blind steps, which the v1 engine does not implement."""
+Every mode runs the same flow: a captain vote, the captains' check-in, the player draft, a side
+claim, then the champion draft with the Hidden King team ("first") banning and picking first. A
+mode only sets timers, team size, the player draft order, the ban and pick order and excluded
+champions. Anything not listed here is rejected, including simultaneous or blind steps, which the
+v1 engine does not implement."""
 
 from __future__ import annotations
 
@@ -36,6 +37,9 @@ class Captains(_Strict):
     breaks ties and fills any gap, and the lower-rated captain makes the first player pick."""
 
     vote_seconds: Seconds = 45
+    # Once captains are chosen, each has this long to press I'm here. A captain who doesn't is
+    # replaced by the next player in line, who gets the same time.
+    checkin_seconds: Seconds = 60
     # Completed matches in this server, across seasons, before a player can captain.
     min_games: Annotated[int, Field(ge=0, le=500)] = 5
     # A player carrying this many dodge strikes can't captain. None turns the check off.
@@ -56,9 +60,9 @@ class Step(_Strict):
 
 
 class ChampionDraft(_Strict):
-    """After the player draft, Bebot's captain coinflip settles the sides and which team
-    ("first") bans and picks first. A timed-out ban or pick takes a random champion, and the
-    acting captain can press Random."""
+    """After the player draft, the captain coinflip settles the sides. In ranked matches the
+    Hidden King is always "first", banning and picking first; scrims keep Bebot's coinflip. A
+    timed-out ban or pick takes a random champion, and the acting captain can press Random."""
 
     coinflip_seconds: Seconds = 20  # Each captain's time to choose. Then a random choice.
     seconds: Seconds = 30

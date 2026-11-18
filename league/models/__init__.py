@@ -2,6 +2,7 @@ from league.models.alerts import StaffAlert
 from league.models.api import ApiMatchCheck
 from league.models.champions import Champion
 from league.models.community import Community, RuntimeSettings
+from league.models.interim import InterimPointsChange, InterimRating
 from league.models.matches import (
     CaptainVote,
     DraftAction,
@@ -23,6 +24,7 @@ from league.models.ratings import PlayerRating, RatingEvent, RatingRun, Season
 from league.models.results import MatchResult, ResultSubmission
 from league.models.scoreboards import MatchAward, PlayerAlias, PlayerMatchStat, ScoreboardRead
 from league.models.subs import SubOffer, SubRequest
+from league.models.swaps import PlayerSwap
 
 __all__ = [
     "ApiMatchCheck",
@@ -36,6 +38,8 @@ __all__ = [
     "DraftAction",
     "DraftModeVersion",
     "EarlyLeave",
+    "InterimPointsChange",
+    "InterimRating",
     "Match",
     "MatchAward",
     "MatchParticipant",
@@ -48,6 +52,7 @@ __all__ = [
     "PlayerAlias",
     "PlayerMatchStat",
     "PlayerRating",
+    "PlayerSwap",
     "PrioEntry",
     "QueueEntry",
     "RatingEvent",

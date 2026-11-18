@@ -186,6 +186,9 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
     check(match)
     match = run_champion_draft(match)
     check(match)
+    draft.api_lobby_failed(match.pk, "test: no API")
+    match = fresh(match)
+    check(match)
     draft.submit_lobby_code(match.pk, match.lobby_code_host, "ABC123")
     match = fresh(match)
     check(match)
@@ -412,7 +415,10 @@ def test_no_format_footer_on_any_board() -> None:
 
 
 def test_settings_checklist_is_only_for_the_host() -> None:
-    assert "Lobby settings" in str(render_board(_state(Status.LOBBY_CODE)).to_components())
+    # Only once the bot couldn't make the lobby: then the host makes it, with the checklist.
+    assert "Lobby settings" not in str(render_board(_state(Status.LOBBY_CODE)).to_components())
+    failed = _state(Status.LOBBY_CODE, api_lobby_failed=True)
+    assert "Lobby settings" in str(render_board(failed).to_components())
     assert "Lobby settings" not in str(
         render_board(_state(Status.IN_PROGRESS, lobby_code="ABC")).to_components()
     )
@@ -830,7 +836,7 @@ def discord_ids(players: list[Player]) -> list[int]:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_gather_moves_waiting_room_and_dms_everyone_else(wired: Community) -> None:
+def test_gather_leaves_the_waiting_room_be_and_dms_everyone_else(wired: Community) -> None:
     players = [make_player(n) for n in range(1, 13)]
     ids = discord_ids(players)
     gateway = FakeGateway()
@@ -842,13 +848,13 @@ def test_gather_moves_waiting_room_and_dms_everyone_else(wired: Community) -> No
     drain(gateway)
 
     match = Match.objects.get()
-    lobby_voice = resource(match, ResourceKind.LOBBY_VOICE)
-    assert gateway.voice[lobby_voice] == set(ids[:4])
-    assert gateway.voice[WAITING_ROOM] == set()
+    # The Waiting Room is the lobby: no voice channel of the match's own until teams are set.
+    assert effects.resource_id(match.pk, ResourceKind.LOBBY_VOICE) is None
+    assert gateway.voice[WAITING_ROOM] == set(ids[:4])
     assert gateway.voice[9999] == {ids[4]}  # Left alone: they get an invite instead.
     assert {user for user, _view in gateway.dms} == set(ids[4:])
     payload = str(gateway.dms[0][1].to_components())
-    assert f"invite-{lobby_voice}" in payload
+    assert f"invite-{WAITING_ROOM}" in payload
     assert button_id("ready", match.pk) in payload
 
 
@@ -881,52 +887,36 @@ def test_lobby_channels_grant_the_lobby_members(wired: Community) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_joining_waiting_room_after_pop_targets_the_lobby(wired: Community) -> None:
+def test_the_waiting_room_is_the_lobby_until_teams_have_voice(wired: Community) -> None:
     players = [make_player(n) for n in range(1, 13)]
     gateway = FakeGateway()
     for player in players:
         queue.join(wired.pk, player)
     drain(gateway)
     match = Match.objects.get()
-    lobby_voice = resource(match, ResourceKind.LOBBY_VOICE)
-    user_id = players[0].discord_user_id
-    assert effects.on_voice_join(user_id, WAITING_ROOM) == (999, lobby_voice)
-    assert effects.on_voice_join(user_id, lobby_voice) is None
-    assert effects.on_voice_join(user_id, 12345) is None  # Their own business.
-    assert effects.on_voice_join(make_player(50).discord_user_id, WAITING_ROOM) is None
-
-
-@pytest.mark.django_db(transaction=True)
-def test_the_waiting_room_only_pulls_a_player_in_once(wired: Community) -> None:
-    players = [make_player(n) for n in range(1, 13)]
-    gateway = FakeGateway()
-    for player in players:
-        queue.join(wired.pk, player)
-    drain(gateway)
-    match = Match.objects.get()
-    lobby_voice = resource(match, ResourceKind.LOBBY_VOICE)
     first, second = players[0].discord_user_id, players[1].discord_user_id
-    # The first time, the Waiting Room sends them on to the lobby.
-    assert effects.on_voice_join(first, WAITING_ROOM) == (999, lobby_voice)
-    assert effects.on_voice_join(first, lobby_voice) is None  # The move lands: they've arrived.
+    # Before teams are picked there's nowhere else to go: the Waiting Room is the lobby.
+    assert effects.on_voice_join(first, WAITING_ROOM) is None
+    assert effects.on_voice_join(first, 12345) is None  # Their own business.
+    assert effects.on_voice_join(make_player(50).discord_user_id, WAITING_ROOM) is None
+    # Once teams have their own channels, the Waiting Room sends them on to theirs.
+    match = to_champion_draft(match)
+    drain(gateway)
+
+    def team_voice(player: Player) -> int:
+        team = match.participants.get(player=player).team
+        return resource(
+            match, ResourceKind.TEAM_A_VOICE if team == "A" else ResourceKind.TEAM_B_VOICE
+        )
+
+    assert effects.on_voice_join(first, WAITING_ROOM) == (999, team_voice(players[0]))
+    assert effects.on_voice_join(first, team_voice(players[0])) is None  # They've arrived.
     assert match.participants.get(player=players[0]).voice_joined_at is not None
     # Coming back later, they stay where they chose to be.
     assert effects.on_voice_join(first, WAITING_ROOM) is None
-    # Joining the lobby through the invite counts as arriving too.
-    assert effects.on_voice_join(second, lobby_voice) is None
+    # Joining their team's voice through the invite counts as arriving too.
+    assert effects.on_voice_join(second, team_voice(players[1])) is None
     assert effects.on_voice_join(second, WAITING_ROOM) is None
-    # Someone who never arrived is still pulled in.
-    third = players[2].discord_user_id
-    assert effects.on_voice_join(third, WAITING_ROOM) == (999, lobby_voice)
-    # Once teams have their own channels, someone who never arrived goes straight to their team.
-    match = to_champion_draft(match)
-    drain(gateway)
-    late = match.participants.get(player=players[2])
-    team_kind = ResourceKind.TEAM_A_VOICE if late.team == "A" else ResourceKind.TEAM_B_VOICE
-    team_voice = resource(match, team_kind)
-    assert effects.on_voice_join(third, WAITING_ROOM) == (999, team_voice)
-    assert effects.on_voice_join(third, team_voice) is None
-    assert effects.on_voice_join(third, WAITING_ROOM) is None  # Arrived: left alone now.
 
 
 @pytest.mark.django_db(transaction=True)
@@ -965,9 +955,8 @@ def test_full_match_through_effects(wired: Community) -> None:
         queue.join(wired.pk, player)
     drain(gateway)
     match = Match.objects.get()
-    lobby_voice = resource(match, ResourceKind.LOBBY_VOICE)
     text_id = resource(match, ResourceKind.TEXT)
-    assert gateway.voice[lobby_voice] == set(ids)
+    assert gateway.voice[WAITING_ROOM] == set(ids)  # Everyone waits in the Waiting Room.
     assert resource(match, ResourceKind.BOARD_MESSAGE)
     assert not gateway.dms
 
@@ -983,8 +972,7 @@ def test_full_match_through_effects(wired: Community) -> None:
     )
     assert gateway.voice[team_a] == a_ids
     assert gateway.voice[team_b] == b_ids
-    assert lobby_voice in gateway.deleted
-    assert effects.resource_id(match.pk, ResourceKind.LOBBY_VOICE) is None
+    assert gateway.voice[WAITING_ROOM] == set()
 
     match = to_in_progress(match)
     drain(gateway)
@@ -1012,7 +1000,7 @@ def test_full_match_through_effects(wired: Community) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_player_not_in_lobby_voice_gets_team_invite(wired: Community) -> None:
+def test_player_not_in_the_waiting_room_gets_team_invite(wired: Community) -> None:
     players = [make_player(n) for n in range(1, 13)]
     gateway = FakeGateway()
     for player in players:
@@ -1193,7 +1181,7 @@ def test_stale_channels_of_failed_cleanups_are_listed(wired: Community) -> None:
         status=EffectStatus.FAILED
     )
     listed = {row[1] for row in effects.stale_resources()}
-    assert ResourceKind.LOBBY_VOICE in listed
+    assert ResourceKind.TEXT in listed
 
 
 # --- Real discord.py objects ---------------------------------------------------------------
@@ -1254,7 +1242,7 @@ def test_board_stays_last_and_only_current_pings_survive_a_whole_match(wired: Co
     match = popped_match(wired, gateway)
     assert_board_last(gateway, match)
     assert live_notice_texts(gateway, match) == [
-        "your lobby is ready. Press **Ready** on the board below."
+        "your lobby is ready. Press **Ready** on the board below, and wait in the Waiting Room."
     ]
 
     match = ready_all(match)
@@ -1273,8 +1261,8 @@ def test_board_stays_last_and_only_current_pings_survive_a_whole_match(wired: Co
     drain(gateway)
     assert_board_last(gateway, match)
     assert live_notice_texts(gateway, match) == [
-        "teams are set and you won the coinflip! Choose your side and Pick 1 or Pick 2 on the "
-        "board. Pick 1 bans and picks first."
+        "teams are set and you won the coinflip! Choose your side on the board. The Hidden King "
+        "bans and picks first."
     ]
 
     match = settle_coinflip_for(match)
@@ -1709,7 +1697,9 @@ def test_match_channels_let_in_the_roles_that_look_after_matches(wired: Communit
     drain(gateway)
     match = Match.objects.get()
     assert gateway.staff_seen[resource(match, ResourceKind.TEXT)] == [71, 72]
-    assert gateway.staff_seen[resource(match, ResourceKind.LOBBY_VOICE)] == [71, 72]
+    match = to_champion_draft(match)
+    drain(gateway)
+    assert gateway.staff_seen[resource(match, ResourceKind.TEAM_A_VOICE)] == [71, 72]
 
 
 def test_an_offer_is_a_dm_and_nothing_in_any_channel(wired: Community) -> None:
@@ -1762,7 +1752,7 @@ def test_an_offer_to_closed_dms_goes_to_the_next_person(wired: Community) -> Non
     assert SubOffer.objects.get(player=open_).status == "pending"
 
 
-def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_lobby(
+def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_waiting_room(
     wired: Community, clock: Clock
 ) -> None:
     from league.services import deadlines, subs
@@ -1782,9 +1772,9 @@ def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_lobby(
     drain(gateway)
     successor = Match.objects.get(restarted_from=match)
     assert resource(successor, ResourceKind.TEXT) == text and text not in gateway.deleted
-    lobby_voice = resource(successor, ResourceKind.LOBBY_VOICE)  # Its own: teams had formed.
+    assert effects.resource_id(successor.pk, ResourceKind.LOBBY_VOICE) is None
     assert team_voice in gateway.deleted
-    assert sitting in gateway.voice[lobby_voice]
+    assert sitting in gateway.voice[WAITING_ROOM]  # Back in the lobby: the Waiting Room.
     board = gateway.views[resource(successor, ResourceKind.BOARD_MESSAGE)]
     assert "Restarted from" not in str(board.to_components())
     # Found in the live run: the empty seat showed as an ordinary sub out, with Name a sub.
@@ -1871,22 +1861,17 @@ def test_vote_board_has_a_two_choice_select(voting: Match, players: list[Player]
 
 
 @pytest.mark.django_db
-def test_coinflip_board_offers_the_winner_a_side_and_pick_order(voting: Match) -> None:
+def test_coinflip_board_offers_the_winner_a_side(voting: Match) -> None:
     match = run_player_draft(vote_captains(voting))
     text = str(_check(match))
     assert "Captain Coinflip" in text and "wins the flip!" in text
-    assert "Pick 1 bans and picks first" in text
+    assert "The Hidden King bans and picks first" in text
 
     buttons = all_buttons(_check(match))
     labels = [b["label"] for b in buttons if ":coin_choice:" in b.get("custom_id", "")]
-    assert labels == [
-        "Hidden King · Pick 1",
-        "Hidden King · Pick 2",
-        "Archmother · Pick 1",
-        "Archmother · Pick 2",
-    ]
+    assert labels == ["Hidden King", "Archmother"]
     draft_service.choose_coinflip(
-        match.pk, captain_of(match, match.coinflip_winner).player, "am_pick1"
+        match.pk, captain_of(match, match.coinflip_winner).player, "archmother"
     )
     assert fresh(match).status == Status.CHAMPION_DRAFT
 
@@ -2004,7 +1989,7 @@ def test_auto_captain_appoints_captains_without_a_vote(wired: Community) -> None
     runtime.update(wired, auto_captain=True)
     gateway = FakeGateway()
     match = ready_all(popped_match(wired, gateway))
-    assert match.status == Status.PLAYER_DRAFT
+    assert match.status == Status.CAPTAIN_CHECKIN  # Appointed captains still check in.
     assert match.participants.filter(is_captain=True).count() == 2
     assert not match.captain_votes.exists()
 
@@ -2014,14 +1999,16 @@ def test_match_voice_is_for_players_unless_opened(wired: Community) -> None:
     from league.services import runtime
 
     gateway = FakeGateway()
-    first = popped_match(wired, gateway)
-    assert gateway.open_voice[resource(first, ResourceKind.LOBBY_VOICE)] is False
+    first = to_champion_draft(popped_match(wired, gateway))
+    drain(gateway)
+    assert gateway.open_voice[resource(first, ResourceKind.TEAM_A_VOICE)] is False
     runtime.update(wired, open_match_voice=True, max_concurrent_matches=2)
     for player in [make_player(n) for n in range(20, 32)]:
         queue.join(wired.pk, player)
     drain(gateway)
-    second = Match.objects.exclude(pk=first.pk).get()
-    assert gateway.open_voice[resource(second, ResourceKind.LOBBY_VOICE)] is True
+    second = to_champion_draft(Match.objects.exclude(pk=first.pk).get())
+    drain(gateway)
+    assert gateway.open_voice[resource(second, ResourceKind.TEAM_A_VOICE)] is True
 
 
 @pytest.mark.django_db(transaction=True)

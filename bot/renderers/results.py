@@ -9,7 +9,7 @@ from discord.ui import ActionRow, Container, LayoutView, MediaGallery, Separator
 from bot.renderers import style
 from bot.renderers.board import player_mention
 from bot.routing import RouteButton
-from league.services.boards import CorrectionView, LeaderboardRow, ResultRow, ResultsView
+from league.services.boards import CorrectionView, ResultRow, ResultsView
 
 FIGURE_SPACE = "\u2007"  # As wide as a digit, and Discord doesn't collapse it.
 AWARD_MARKS = {"mvp": "🏅", "key": "⭐"}
@@ -104,16 +104,6 @@ def render_correction(view_model: CorrectionView) -> LayoutView:
     view = LayoutView(timeout=None)
     view.add_item(box)
     return view
-
-
-def leaderboard_text(rows: list[LeaderboardRow], minimum_games: int) -> str:
-    if not rows:
-        return f"No one has played {minimum_games} games yet."
-    body = "\n".join(
-        f"{row.rank:>2}. {row.name[:16]:<16} {row.rating:>4}  {row.wins}-{row.losses}"
-        for row in rows
-    )
-    return f"```\n{body}\n```"
 
 
 def render_scoreboard_notice(match_id: int, read_id: int, unmapped: int) -> LayoutView:

@@ -31,7 +31,7 @@ async def ready(ctx: Context) -> None:
             ctx.match_id,
             None,
             heading="✅ You're ready",
-            body="Join the lobby voice channel and keep an eye on the board.",
+            body="Wait in the Waiting Room and keep an eye on the board.",
             channel_url=await db(_match_channel_url, ctx.match_id),
         )
         with contextlib.suppress(discord.HTTPException):
@@ -49,3 +49,10 @@ async def captain_vote(ctx: Context) -> None:
     )
     names = " and ".join(f"**{player.display_name}**" for player in chosen)
     await reply(ctx.interaction, f"You voted for {names}. Vote again to change it.")
+
+
+@handles("checkin")
+async def checkin(ctx: Context) -> None:
+    """A captain's I'm here, before the player draft."""
+    await ctx.interaction.response.defer()
+    await db(lobby.check_in, ctx.match_id, await actor(ctx.interaction))

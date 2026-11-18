@@ -28,11 +28,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
+from django.db.models import Count
 
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.models import (
     Champion,
+    Community,
     Match,
     MatchParticipant,
     Player,
@@ -72,6 +74,31 @@ def available() -> bool:
     return all(
         importlib.util.find_spec(name) is not None for name in ("numpy", "onnxruntime", "PIL")
     )
+
+
+def validate_mode(mode: str) -> None:
+    """Refuse a mode this install can't run. The admin checks it before saving."""
+    if mode not in MODES:
+        raise InvalidAction("Choose off, stats only or on.")
+    if mode != "off" and not available():
+        raise InvalidAction(
+            "Reading screenshots isn't available on this install: numpy, onnxruntime and Pillow "
+            "aren't installed."
+        )
+
+
+def status_lines(community: Community) -> list[str]:
+    """Whether screenshots are read, and how reading has gone, for the admin."""
+    settings_ = runtime.of(community)
+    reads = ScoreboardRead.objects.filter(match__community=community)
+    total = reads.count()
+    by_status = dict(reads.values("status").annotate(n=Count("id")).values_list("status", "n"))
+    unavailable = "" if available() else " (not available on this install)"
+    lines = [f"Reading screenshots: {settings_.get_score_ocr_display()}{unavailable}."]
+    lines.append(f"{total} read so far.")
+    if total:
+        lines.append(", ".join(f"{ReadStatus(s).label}: {n}" for s, n in sorted(by_status.items())))
+    return lines
 
 
 _engine: Any = None
