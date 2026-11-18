@@ -1,0 +1,23 @@
+---
+# One check per secret, each item a true/false and a message, never the secret itself.
+- name: Refuse a placeholder or malformed secret
+  ansible.builtin.assert:
+    that: item.ok | bool
+    fail_msg: "{{ item.msg }} See vault.yml.example."
+    quiet: true
+  loop:
+    - name: "vault_grafana_admin_password"
+      ok: >-
+        {{ observability_grafana_admin_password not in observability_placeholders
+           and observability_grafana_admin_password | length >= 12
+           and observability_grafana_admin_password is not search("['\n\r]") }}
+      msg: >-
+        vault_grafana_admin_password must be 12+ characters with no quote or line break, not a
+        placeholder.
+    - name: "vault_alertmanager_discord_webhook_url"
+      ok: "{{ observability_alertmanager_discord_webhook_url is match(observability_webhook_pattern) }}"
+      msg: vault_alertmanager_discord_webhook_url must be empty or an https:// URL.
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    observability_webhook_pattern: '^(https://[A-Za-z0-9./_?=&%~:-]+)?$'

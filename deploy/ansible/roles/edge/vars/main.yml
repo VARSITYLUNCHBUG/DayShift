@@ -1,0 +1,17 @@
+---
+# nginx-unprivileged's user. certbot runs as it too, so the edge can read the keys it writes.
+edge_uid: 101
+edge_letsencrypt_dir: "{{ edge_root }}/letsencrypt"
+edge_live_dir: "{{ edge_letsencrypt_dir }}/live/{{ edge_domain }}"
+# Every name on the one certificate.
+edge_cert_names: "{{ [edge_domain] + ([edge_grafana_domain] if edge_grafana_domain else []) }}"
+# The admin access hook (infra/nginx/admin-access/README.md): the app role's .env points
+# EDGE_ADMIN_ACCESS_DIR here, and the edge includes its *.conf files in the /admin/ locations.
+edge_admin_access_dir: "{{ edge_root }}/edge/admin-access"
+edge_admin_access_on: "{{ edge_admin_allow_cidrs | length > 0 or edge_admin_basic_auth_users | length > 0 }}"
+# Each switched off is removed, so the edge stops applying it.
+edge_admin_access_files:
+  - { src: admin-access.conf.j2, dest: access.conf, enabled: "{{ edge_admin_access_on }}" }
+  - { src: htpasswd.j2, dest: htpasswd, enabled: "{{ edge_admin_basic_auth_users | length > 0 }}" }
+edge_renew_script: /usr/local/sbin/draftbot-certbot-renew
+edge_renew_unit: draftbot-certbot-renew

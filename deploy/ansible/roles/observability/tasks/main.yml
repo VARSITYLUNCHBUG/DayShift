@@ -1,0 +1,30 @@
+---
+# site.yml and rotate-secrets.yml run every role's checks first (draftbot_checked), before they
+# change anything; these cover deploy.yml and a role used on its own.
+- name: Check the secrets
+  ansible.builtin.import_tasks: checks.yml
+  when: observability_enabled | bool and not draftbot_checked | default(false)
+  tags: [observability, observability-check]
+
+- name: Run the observability services
+  ansible.builtin.import_tasks: present.yml
+  when: observability_enabled | bool
+  tags: [observability]
+
+# The app role left compose.observability.yaml out of COMPOSE_FILE, so their containers are
+# orphans now. Bringing up the database, which is already up, removes them and nothing else.
+- name: Remove the observability containers
+  community.docker.docker_compose_v2:
+    project_src: "{{ observability_root }}"
+    services: [db]
+    dependencies: false
+    remove_orphans: true
+  when: not observability_enabled | bool
+  tags: [observability]
+
+- name: Remove their secrets
+  ansible.builtin.file:
+    path: "{{ observability_env_file }}"
+    state: absent
+  when: not observability_enabled | bool
+  tags: [observability]

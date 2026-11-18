@@ -1,0 +1,36 @@
+---
+# The containers read these as their own users, so they are world-readable.
+- name: Install the observability configuration
+  ansible.builtin.copy:
+    src: "{{ observability_repo_root }}/infra/observability/"
+    dest: "{{ observability_root }}/infra/observability/"
+    owner: root
+    group: root
+    mode: "0644"
+    directory_mode: "0755"
+  notify: Restart the services that read it
+
+# Compose recreates Grafana and Alertmanager when it changes, on the next `up`.
+- name: Write .env.observability
+  ansible.builtin.template:
+    src: env.observability.j2
+    dest: "{{ observability_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Start or update the observability services
+  community.docker.docker_compose_v2:
+    project_src: "{{ observability_root }}"
+    services: "{{ observability_services }}"
+    dependencies: false
+    wait: true
+    wait_timeout: "{{ observability_wait_timeout }}"
+
+- name: Restart the services whose configuration changed
+  ansible.builtin.meta: flush_handlers
+
+- name: Keep Grafana's admin password in step with the vault
+  ansible.builtin.import_tasks: grafana_password.yml

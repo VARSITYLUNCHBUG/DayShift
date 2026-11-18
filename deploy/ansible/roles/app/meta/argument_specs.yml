@@ -1,0 +1,143 @@
+---
+argument_specs:
+  main:
+    short_description: The dl-mm-discord compose project. Files, .env, images, migrate job, app services.
+    options:
+      app_root:
+        type: path
+        required: true
+        description: The compose project directory on the server. Defaults to draftbot_root.
+      app_domain:
+        type: str
+        required: true
+        description: The public hostname. Defaults to draftbot_domain.
+      app_image_tag:
+        type: str
+        required: true
+        description: The tag to run, such as sha-<commit>. Defaults to draftbot_image_tag.
+      app_image:
+        type: str
+        default: ""
+        description: Another app image, without a tag. Empty runs the one compose.prod.yaml names.
+      app_pull_policy:
+        type: str
+        default: missing
+        choices: [always, missing]
+        description: Pull only images the server doesn't have, or every image every run.
+      app_registry:
+        type: str
+        default: ghcr.io
+        description: The registry to log in to when a username is set.
+      app_registry_username:
+        type: str
+        default: ""
+        description: Registry user for a private image. Empty pulls anonymously.
+      app_registry_password:
+        type: str
+        default: ""
+        no_log: true
+        description: Registry token for a private image.
+      app_repo_root:
+        type: path
+        description: The repository checkout on the controller, where the compose files come from.
+      app_compose_extra_files:
+        type: list
+        elements: path
+        default: []
+        description: Your own compose overrides on the controller, applied after the others.
+      app_observability:
+        type: bool
+        default: true
+        description: Run compose.observability.yaml too. Defaults to draftbot_observability.
+      app_db_monitor_password:
+        type: str
+        default: ""
+        no_log: true
+        description: >-
+          The exporters' read-only database role's password, 16+ letters or digits. Required with
+          observability.
+      app_grafana_domain:
+        type: str
+        default: ""
+        description: Serve Grafana through the edge at this name. Defaults to draftbot_grafana_domain.
+      app_discord_token:
+        type: str
+        required: true
+        no_log: true
+        description: The bot token.
+      app_discord_guild_id:
+        type: str
+        required: true
+        description: The Discord server's ID.
+      app_discord_client_id:
+        type: str
+        default: ""
+        description: The Discord application's ID, for web sign-in.
+      app_discord_client_secret:
+        type: str
+        default: ""
+        no_log: true
+        description: The Discord application's OAuth2 secret, for web sign-in.
+      app_django_secret_key:
+        type: str
+        required: true
+        no_log: true
+        description: Django's SECRET_KEY. At least 40 characters.
+      app_postgres_password:
+        type: str
+        required: true
+        no_log: true
+        description: The database password. Letters, digits, - and _ only.
+      app_db_app_password:
+        type: str
+        required: true
+        no_log: true
+        description: >-
+          The password of draftbot_app, the login web, bot and scheduler use (no superuser).
+          16+ letters, digits, - or _, and not the Postgres password.
+      app_deadlock_api_key:
+        type: str
+        default: ""
+        no_log: true
+        description: Optional deadlock-api.com key.
+      app_steam_web_api_key:
+        type: str
+        default: ""
+        no_log: true
+        description: Optional Steam Web API key.
+      app_error_log_channel_id:
+        type: str
+        default: ""
+        description: Optional channel ID for every error's traceback.
+      app_log_level:
+        type: str
+        default: INFO
+        choices: [DEBUG, INFO, WARNING, ERROR]
+        description: LOG_LEVEL.
+      app_env_extra:
+        type: dict
+        default: {}
+        description: More .env entries.
+      app_services:
+        type: list
+        elements: str
+        description: Services started, in order, after the migrate job.
+      app_wait_timeout:
+        type: int
+        default: 300
+        description: Seconds each service has to become healthy.
+      app_force_migrate:
+        type: bool
+        default: false
+        description: Run the migrate job even if this image ran it before.
+  systemd:
+    short_description: The unit that starts the compose project at boot. Run once every role is done.
+    options:
+      app_root:
+        type: path
+        required: true
+        description: The compose project directory on the server.
+      app_systemd_unit:
+        type: str
+        default: draftbot
+        description: Name of the systemd unit that starts the project at boot.

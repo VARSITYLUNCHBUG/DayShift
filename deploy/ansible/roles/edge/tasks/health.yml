@@ -1,0 +1,12 @@
+---
+# /readyz answers 200 once web reaches Postgres through pgbouncer, so this is the whole path:
+# DNS, the certificate, the edge, web and the database.
+- name: Wait for the site to answer over HTTPS
+  ansible.builtin.uri:
+    url: "https://{{ edge_domain }}/readyz"
+    status_code: 200
+    validate_certs: "{{ edge_public_url_validate_certs }}"
+  register: edge_public_health
+  until: edge_public_health.status == 200
+  retries: 20
+  delay: 6

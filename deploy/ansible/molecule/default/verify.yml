@@ -1,0 +1,1081 @@
+---
+- name: Verify the install
+  hosts: draftbot
+  become: true
+  vars:
+    verify_compose: docker compose
+    verify_url: "https://{{ draftbot_domain }}"
+    verify_grafana_vhost: "{{ draftbot_grafana_domain | default('') | length > 0 }}"
+    verify_admin_locked: "{{ edge_admin_basic_auth_users | default([]) | length > 0 }}"
+  tasks:
+    # --- The services ---------------------------------------------------------------------------
+    - name: List the services the compose files define
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} config --services"
+        chdir: "{{ draftbot_root }}"
+      register: verify_defined
+      changed_when: false
+
+    - name: List the running services
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} ps --format json"
+        chdir: "{{ draftbot_root }}"
+      register: verify_ps
+      changed_when: false
+
+    # The nginx exporter's image has no shell for a healthcheck; its scrape target stands in.
+    - name: Check every long-running service is up and healthy
+      ansible.builtin.assert:
+        that:
+          - verify_services.keys() | sort == verify_defined.stdout_lines | reject('==', 'migrate') | sort
+          - verify_services.values() | map(attribute='State') | unique == ['running']
+          - verify_services | dict2items | rejectattr('key', '==', 'nginx-exporter')
+            | map(attribute='value.Health') | unique == ['healthy']
+        fail_msg: "{{ verify_services | to_json }}"
+      vars:
+        verify_services: >-
+          {{ dict(verify_ps.stdout_lines | map('from_json') | map(attribute='Service')
+                  | zip(verify_ps.stdout_lines | map('from_json'))) }}
+
+    - name: Check only the edge is published beyond loopback
+      ansible.builtin.assert:
+        that:
+          - verify_public | map(attribute='PublishedPort') | unique | sort == [80, 443]
+          - verify_public | map(attribute='TargetPort') | unique | sort == [8080, 8443]
+        fail_msg: "{{ verify_public | to_json }}"
+      vars:
+        verify_public: >-
+          {{ verify_ps.stdout_lines | map('from_json') | map(attribute='Publishers') | flatten
+             | selectattr('PublishedPort', '>', 0) | rejectattr('URL', 'in', ['127.0.0.1', '::1']) }}
+
+    - name: Check the bot runs as the gateway and the scheduler on its own
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} logs --no-log-prefix {{ item.service }}"
+        chdir: "{{ draftbot_root }}"
+      register: verify_roles
+      changed_when: false
+      failed_when: ('--role ' ~ item.role) not in verify_roles.stdout
+      loop:
+        - { service: bot, role: gateway }
+        - { service: scheduler, role: scheduler }
+
+    - name: Read the app's effective settings
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} exec -T web printenv DEBUG DB_PGBOUNCER FORWARDED_ALLOW_IPS DEV_CONTROL"
+        chdir: "{{ draftbot_root }}"
+      register: verify_web_env
+      changed_when: false
+      failed_when: false
+
+    # Web believes proxy headers from the edge's fixed address only (EDGE_IP in compose.yaml).
+    - name: Check production settings hold
+      ansible.builtin.assert:
+        that:
+          - verify_web_env.stdout_lines[:3] == ['false', 'true', '10.203.140.2']
+          - verify_web_env.rc == 1
+        fail_msg: "{{ verify_web_env.stdout }}"
+
+    - name: Read the app containers' environment
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} exec -T {{ item }} env"
+        chdir: "{{ draftbot_root }}"
+      register: verify_app_env
+      changed_when: false
+      loop: [web, bot, scheduler]
+      no_log: true
+
+    # The exporters' database password is in .env, which compose hands to the app, so compose.yaml
+    # blanks it for them. Grafana's and Alertmanager's secrets are never in .env at all.
+    - name: Check the app never gets the observability services' secrets
+      ansible.builtin.assert:
+        that:
+          - item.stdout_lines | select('match', '^(GRAFANA_ADMIN_PASSWORD|GF_SECURITY_ADMIN_PASSWORD|ALERTMANAGER_)=')
+            | list == []
+          - item.stdout_lines | select('match', '^DB_MONITOR_PASSWORD=') | list == ['DB_MONITOR_PASSWORD=']
+        fail_msg: "{{ item.item }} has an observability secret."
+      loop: "{{ verify_app_env.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      no_log: true
+
+    - name: Read the project's env files
+      ansible.builtin.stat:
+        path: "{{ draftbot_root }}/{{ item }}"
+      register: verify_env_files
+      loop: [.env, .env.observability]
+
+    - name: Read .env
+      ansible.builtin.slurp:
+        src: "{{ draftbot_root }}/.env"
+      register: verify_dotenv
+      no_log: true
+
+    - name: Check both are root's alone, and .env holds no Grafana or Alertmanager secret
+      ansible.builtin.assert:
+        that:
+          - verify_env_files.results | map(attribute='stat.mode') | unique == ['0600']
+          - verify_env_files.results | map(attribute='stat.pw_name') | unique == ['root']
+          - verify_dotenv.content | b64decode is not search('^(GRAFANA_ADMIN|ALERTMANAGER_)', multiline=true)
+          - verify_dotenv.content | b64decode is search("^DB_MONITOR_PASSWORD='.+'$", multiline=true)
+        fail_msg: .env or .env.observability is wrong.
+      no_log: true
+
+    - name: Check app_env_extra can't turn on a dev-only setting
+      block:
+        - name: Try to set DEBUG through app_env_extra
+          ansible.builtin.include_role:
+            name: app
+            tasks_from: checks.yml
+          vars:
+            app_env_extra:
+              DEBUG: "true"
+
+        - name: Fail, since the checks let it through
+          ansible.builtin.fail:
+            msg: app_env_extra set DEBUG without an error.
+      rescue:
+        - name: Check the app_env_extra check is what refused it
+          ansible.builtin.assert:
+            that: ansible_failed_result.msg is search('app_env_extra keys')
+            fail_msg: "{{ ansible_failed_result.msg }}"
+
+    # --- pgbouncer ------------------------------------------------------------------------------
+    - name: Log in through pgbouncer with SCRAM, and fail with a wrong password
+      community.docker.docker_compose_v2_exec:
+        project_src: "{{ draftbot_root }}"
+        service: db
+        argv:
+          - sh
+          - -c
+          - >-
+            IFS= read -r PGPASSWORD && export PGPASSWORD &&
+            exec psql -h pgbouncer -p 6432 -U draftbot -d draftbot -tAc 'SELECT 1'
+        stdin: "{{ item.password }}"
+      register: verify_pgbouncer
+      changed_when: false
+      failed_when: (verify_pgbouncer.rc == 0 and verify_pgbouncer.stdout | trim == '1') != item.works
+      loop:
+        - { password: "{{ app_postgres_password }}", works: true }
+        - { password: not-the-password, works: false }
+      loop_control:
+        label: "{{ item.works }}"
+      no_log: true
+
+    # pgbouncer's console takes the exporters' role (stats_users), not the app's.
+    - name: Read pgbouncer's pools as the monitoring role
+      community.docker.docker_compose_v2_exec:
+        project_src: "{{ draftbot_root }}"
+        service: db
+        argv:
+          - sh
+          - -c
+          - >-
+            IFS= read -r PGPASSWORD && export PGPASSWORD &&
+            exec psql -h pgbouncer -p 6432 -U draftbot_monitor -d pgbouncer -tAc 'SHOW POOLS'
+        stdin: "{{ app_db_monitor_password }}"
+      register: verify_pools
+      changed_when: false
+      failed_when: verify_pools.stdout is not search('^draftbot\|draftbot\|.*\|transaction', multiline=true)
+
+    - name: Check the app's login can't reach pgbouncer's console
+      community.docker.docker_compose_v2_exec:
+        project_src: "{{ draftbot_root }}"
+        service: db
+        argv:
+          - sh
+          - -c
+          - >-
+            IFS= read -r PGPASSWORD && export PGPASSWORD &&
+            exec psql -h pgbouncer -p 6432 -U draftbot -d pgbouncer -tAc 'SHOW POOLS'
+        stdin: "{{ app_postgres_password }}"
+      register: verify_console
+      changed_when: false
+      failed_when: verify_console.rc == 0 or verify_console.stderr is not search('not allowed')
+      no_log: true
+
+    # migrate made it with the app's own config/app_role.py (prepare.yml copies it in).
+    - name: Log in through pgbouncer as the app's role, which is no superuser and can't create tables
+      community.docker.docker_compose_v2_exec:
+        project_src: "{{ draftbot_root }}"
+        service: db
+        argv:
+          - sh
+          - -c
+          - >-
+            IFS= read -r PGPASSWORD && export PGPASSWORD &&
+            exec psql -h pgbouncer -p 6432 -U draftbot_app -d draftbot -tAc
+            "SELECT rolsuper, has_schema_privilege('public', 'CREATE') FROM pg_roles WHERE rolname = current_user"
+        stdin: "{{ app_db_app_password }}"
+      register: verify_app_role
+      changed_when: false
+      failed_when: verify_app_role.stdout | trim != 'f|f'
+
+    - name: Read the database settings web, bot and scheduler run with
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - "{{ item }}"
+          - sh
+          - -c
+          - 'user=${DATABASE_URL#*://}; echo "${user%%:*}|${DATABASE_URL#*@}|${POSTGRES_PASSWORD}"'
+        chdir: "{{ draftbot_root }}"
+      register: verify_app_env
+      changed_when: false
+      loop: [web, bot, scheduler]
+
+    - name: Check they log in as the app's role through pgbouncer, without the superuser's password
+      ansible.builtin.assert:
+        that: verify_app_env.results | map(attribute='stdout') | map('trim') | unique
+          == ['draftbot_app|pgbouncer:6432/draftbot|']
+        fail_msg: "{{ verify_app_env.results | map(attribute='stdout') | list }}"
+
+    # --- The edge -------------------------------------------------------------------------------
+    - name: Check the edge's configuration
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} exec -T edge nginx -t"
+        chdir: "{{ draftbot_root }}"
+      changed_when: false
+
+    - name: Fetch /readyz through the edge
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/readyz"
+        validate_certs: false
+        return_content: true
+      register: verify_health
+
+    - name: Check the edge's headers
+      ansible.builtin.assert:
+        that:
+          - verify_health.json.status == 'ok'
+          - verify_health.x_stub_forwarded_proto == 'https'
+          - verify_health.x_stub_forwarded_for is match('^[0-9.]+$')
+          - verify_health.strict_transport_security is match('max-age=63072000')
+          - verify_health.x_content_type_options == 'nosniff'
+          - verify_health.x_frame_options == 'DENY'
+          - verify_health.server == 'nginx'
+        fail_msg: "{{ verify_health | to_json }}"
+
+    # migrate copied the image's /app/staticfiles to the volume the edge serves.
+    - name: Fetch a static file the edge serves from disk
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/static/molecule.txt"
+        validate_certs: false
+        return_content: true
+      register: verify_static
+      failed_when: verify_static.content != "molecule static file\n" or verify_static.cache_control != 'max-age=3600'
+
+    - name: Check plain HTTP redirects to HTTPS
+      ansible.builtin.uri:
+        url: "http://{{ draftbot_domain }}/readyz"
+        follow_redirects: none
+        status_code: 301
+      register: verify_redirect
+      failed_when: verify_redirect.location != verify_url ~ '/readyz'
+
+    - name: Check the internal endpoints aren't public
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/{{ item }}"
+        validate_certs: false
+        status_code: 404
+      loop: [metrics, nginx_status]
+
+    - name: Check a websocket upgrade under /ws/ reaches the web process
+      ansible.builtin.command:
+        argv:
+          - curl
+          - -sk
+          - --http1.1
+          - --max-time
+          - "5"
+          - -o
+          - /dev/null
+          - -w
+          - "%{http_code}"
+          - -H
+          - "Connection: Upgrade"
+          - -H
+          - "Upgrade: websocket"
+          - -H
+          - "Sec-WebSocket-Version: 13"
+          - -H
+          - "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+          - "{{ verify_url }}/ws/molecule"
+      register: verify_ws
+      changed_when: false
+      failed_when: verify_ws.stdout != '101'
+
+    # client_max_body_size 21m is 21 MiB: 22,020,096 bytes.
+    - name: Check a 20 MB upload passes and a 23 MB one is refused
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          head -c {{ item.bytes }} /dev/zero | curl -sk -o /dev/null -w '%{http_code}'
+          --data-binary @- {{ verify_url }}/upload
+        executable: /bin/bash
+      register: verify_upload
+      changed_when: false
+      failed_when: verify_upload.stdout != item.status
+      loop:
+        - { bytes: 20000000, status: "200" }
+        - { bytes: 23000000, status: "413" }
+
+    # IPv6: the edge network is dual-stack (compose.yaml's EDGE_SUBNET6), so a v6 client is seen
+    # as itself, and every TLS site, Grafana's vhost included, listens on [::] too. Without that, a
+    # v6 client meets the default server, which refuses the handshake.
+    - name: Inspect the edge's container
+      ansible.builtin.shell:
+        cmd: docker inspect "$({{ verify_compose }} ps -q edge)"
+        chdir: "{{ draftbot_root }}"
+      register: verify_edge_inspect
+      changed_when: false
+
+    - name: Check the edge has an IPv6 address on its network
+      ansible.builtin.assert:
+        that: verify_edge_v6 is match('^f[cd][0-9a-f]{2}:[0-9a-f:]+$')
+        fail_msg: "{{ (verify_edge_inspect.stdout | from_json)[0].NetworkSettings.Networks | to_json }}"
+      vars:
+        verify_edge_v6: >-
+          {{ (verify_edge_inspect.stdout | from_json)[0].NetworkSettings.Networks | dict2items
+             | selectattr('key', 'search', '_edge$') | map(attribute='value.GlobalIPv6Address') | first | default('') }}
+
+    - name: Reach each TLS site over IPv6
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_compose }} exec -T edge curl -sk -o /dev/null -w '%{http_code}'
+          --resolve {{ item.name }}:8443:[::1] https://{{ item.name }}:8443{{ item.path }}
+        chdir: "{{ draftbot_root }}"
+      register: verify_v6_site
+      changed_when: false
+      failed_when: verify_v6_site.stdout != item.status
+      loop: >-
+        {{ [{'name': draftbot_domain, 'path': '/readyz', 'status': '200'}]
+           + ([{'name': 'grafana.' ~ draftbot_domain, 'path': '/api/health', 'status': '401'}]
+              if verify_grafana_vhost else []) }}
+
+    # A changed site template reaches the running edge without a new container: the role renders
+    # the templates again, tests them and reloads. A copy of infra/nginx with one location added,
+    # then the real one back.
+    - name: Make a copy of infra/nginx with a probe location in the site template
+      delegate_to: localhost
+      become: false
+      run_once: true
+      vars:
+        verify_nginx_probe_src: /tmp/molecule-nginx-probe
+      block:
+        - name: Copy infra/nginx on the controller
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../../../infra/nginx/"
+            dest: "{{ verify_nginx_probe_src }}/"
+            mode: preserve
+
+        - name: Add the probe location
+          ansible.builtin.lineinfile:
+            path: "{{ verify_nginx_probe_src }}/templates/https/app.conf.template"
+            insertbefore: '^\s*include /etc/nginx/snippets/app.conf;'
+            line: '    location = /molecule-template { return 200 "probe ${EDGE_SERVER_NAME}"; }'
+
+    - name: Read the edge container's ID
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} ps -q edge"
+        chdir: "{{ draftbot_root }}"
+      register: verify_edge_before
+      changed_when: false
+
+    - name: Install the changed template with the edge role
+      ansible.builtin.include_role:
+        name: edge
+      vars:
+        edge_nginx_src: /tmp/molecule-nginx-probe
+
+    - name: Fetch the probe location, rendered from the new template
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/molecule-template"
+        validate_certs: false
+        return_content: true
+      register: verify_probe_location
+      failed_when: verify_probe_location.content != 'probe ' ~ draftbot_domain
+
+    - name: Put the real configuration back
+      ansible.builtin.include_role:
+        name: edge
+
+    - name: Read the edge container's ID again
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} ps -q edge"
+        chdir: "{{ draftbot_root }}"
+      register: verify_edge_after
+      changed_when: false
+
+    - name: Check the probe is gone, from the same container
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/molecule-template"
+        validate_certs: false
+        return_content: true
+        status_code: [200, 400, 404]
+      register: verify_probe_gone
+      failed_when: >-
+        verify_probe_gone.content is search('^probe ')
+        or verify_edge_after.stdout != verify_edge_before.stdout
+
+    # --- The admin's access control (edge_admin_*: on on noble, off on bookworm) -----------------
+    - name: List the admin access files
+      ansible.builtin.find:
+        paths: "{{ draftbot_root }}/edge/admin-access"
+      register: verify_admin_files
+
+    - name: Check the admin access files
+      ansible.builtin.assert:
+        that:
+          - verify_admin_files.files | map(attribute='path') | map('basename') | sort == verify_admin_expected
+          - verify_admin_files.files | map(attribute='mode') | unique | reject('==', '0640') | list == []
+          - verify_admin_files.files | map(attribute='gid') | unique | reject('==', 101) | list == []
+        fail_msg: "{{ verify_admin_files.files | map(attribute='path') | list }}"
+      vars:
+        verify_admin_expected: "{{ ['access.conf', 'htpasswd'] if verify_admin_locked else [] }}"
+
+    - name: Check the admin asks for the password only where it is on
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/{{ item }}"
+        validate_certs: false
+        status_code: "{{ 401 if verify_admin_locked else 200 }}"
+      loop: [admin/, admin/login/]
+
+    - name: Check the rest of the site never asks
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/{{ item }}"
+        validate_certs: false
+      loop: [readyz, static/molecule.txt, players/]
+
+    - name: Check the admin with the password
+      when: verify_admin_locked
+      block:
+        - name: Check the prompt's user reaches the admin
+          ansible.builtin.uri:
+            url: "{{ verify_url }}/admin/"
+            validate_certs: false
+            user: molecule
+            password: molecule-admin-only
+            force_basic_auth: true
+
+        - name: Check a wrong password is refused
+          ansible.builtin.uri:
+            url: "{{ verify_url }}/admin/"
+            validate_certs: false
+            user: molecule
+            password: not-the-password
+            force_basic_auth: true
+            status_code: 401
+
+        # The same rules with an allowlist this server's requests aren't on.
+        - name: Allow only an address nobody here has
+          ansible.builtin.include_role:
+            name: edge
+            tasks_from: "{{ verify_edge_tasks }}"
+          loop: [files.yml, start.yml]
+          loop_control:
+            loop_var: verify_edge_tasks
+          vars:
+            edge_admin_allow_cidrs: [192.0.2.0/24]
+
+        - name: Check an address off the allowlist is refused, even with the password
+          ansible.builtin.uri:
+            url: "{{ verify_url }}/admin/"
+            validate_certs: false
+            user: molecule
+            password: molecule-admin-only
+            force_basic_auth: true
+            status_code: 403
+
+        - name: Put the inventory's rules back
+          ansible.builtin.include_role:
+            name: edge
+            tasks_from: "{{ verify_edge_tasks }}"
+          loop: [files.yml, start.yml]
+          loop_control:
+            loop_var: verify_edge_tasks
+
+        - name: Check the admin is reachable again with the password
+          ansible.builtin.uri:
+            url: "{{ verify_url }}/admin/"
+            validate_certs: false
+            user: molecule
+            password: molecule-admin-only
+            force_basic_auth: true
+
+    # --- The certificate ------------------------------------------------------------------------
+    - name: Read the certificate the edge serves
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          openssl s_client -connect 127.0.0.1:443 -servername {{ draftbot_domain }} </dev/null 2>/dev/null
+          | openssl x509 -noout -issuer -serial -ext subjectAltName
+        executable: /bin/bash
+      register: verify_cert
+      changed_when: false
+
+    - name: Check it is the one this host should have
+      ansible.builtin.assert:
+        that:
+          - verify_cert.stdout is search('DNS:' ~ draftbot_domain)
+          - (verify_cert.stdout is search('DNS:grafana.' ~ draftbot_domain)) == verify_grafana_vhost
+          - >-
+            verify_cert.stdout is search('issuer=.*Pebble')
+            if edge_certificate == 'letsencrypt' else verify_cert.stdout is search('issuer=CN\s*=\s*' ~ draftbot_domain)
+        fail_msg: "{{ verify_cert.stdout }}"
+
+    - name: Check another name gets no certificate
+      ansible.builtin.shell:
+        cmd: openssl s_client -connect 127.0.0.1:443 -servername elsewhere.test </dev/null
+        executable: /bin/bash
+      register: verify_other_name
+      changed_when: false
+      failed_when: verify_other_name.rc == 0
+
+    - name: Check renewals
+      when: edge_certificate == 'letsencrypt'
+      block:
+        - name: Read the renewal timer
+          ansible.builtin.systemd_service:
+            name: draftbot-certbot-renew.timer
+          register: verify_renew_timer
+
+        - name: Check the renewal timer is on and reports failures
+          ansible.builtin.assert:
+            that:
+              - verify_renew_timer.status.ActiveState == 'active'
+              - verify_renew_timer.status.UnitFileState == 'enabled'
+
+        - name: Renew now, as the timer would once the certificate is due
+          ansible.builtin.command:
+            cmd: /usr/local/sbin/draftbot-certbot-renew --force-renewal
+          register: verify_renew
+          changed_when: true
+          failed_when: verify_renew.rc != 0 or verify_renew.stdout is not search('the edge serves the new certificate')
+
+        - name: Read the certificate the edge serves after the renewal
+          ansible.builtin.shell:
+            cmd: >-
+              set -o pipefail;
+              openssl s_client -connect 127.0.0.1:443 -servername {{ draftbot_domain }} </dev/null 2>/dev/null
+              | openssl x509 -noout -issuer -serial -ext subjectAltName
+            executable: /bin/bash
+          register: verify_renewed_cert
+          changed_when: false
+          failed_when: >-
+            verify_renewed_cert.stdout == verify_cert.stdout
+            or verify_renewed_cert.stdout is not search('issuer=.*Pebble')
+
+        - name: Renew again, when nothing is due
+          ansible.builtin.command:
+            cmd: /usr/local/sbin/draftbot-certbot-renew
+          register: verify_renew_idle
+          changed_when: false
+          failed_when: verify_renew_idle.rc != 0 or verify_renew_idle.stdout is search('the edge serves')
+
+    # --- Observability --------------------------------------------------------------------------
+    # Each target is scraped every 15 s, the certificate probe every 2 minutes.
+    - name: Wait for every Prometheus target to be up
+      ansible.builtin.uri:
+        url: http://127.0.0.1:19090/api/v1/targets?state=active
+        return_content: true
+      register: verify_targets
+      until: >-
+        verify_targets.json.data.activeTargets | length > 0
+        and verify_targets.json.data.activeTargets | map(attribute='health') | unique == ['up']
+      retries: 30
+      delay: 10
+
+    - name: Check every job is scraped
+      ansible.builtin.assert:
+        that: >-
+          verify_targets.json.data.activeTargets | map(attribute='labels.job') | sort
+          == ['alertmanager', 'bot', 'nginx', 'node', 'pgbouncer', 'postgres', 'prometheus', 'scheduler', 'tls', 'web']
+        fail_msg: "{{ verify_targets.json.data.activeTargets | map(attribute='labels.job') | list }}"
+
+    # A target is up when the exporter answers; these say it also logged in, as draftbot_monitor.
+    - name: Check the exporters reach Postgres and pgbouncer
+      ansible.builtin.uri:
+        url: http://127.0.0.1:19090/api/v1/query?query={{ item }}
+        return_content: true
+      register: verify_exporter_up
+      until: verify_exporter_up.json.data.result | map(attribute='value') | map('last') | list == ['1']
+      retries: 10
+      delay: 5
+      loop: [pg_up, pgbouncer_up]
+
+    - name: Read the certificate's expiry from Prometheus
+      ansible.builtin.uri:
+        url: http://127.0.0.1:19090/api/v1/query?query=probe_ssl_earliest_cert_expiry-time()
+        return_content: true
+      register: verify_expiry
+      failed_when: (verify_expiry.json.data.result[0].value[1] | float) < 14 * 86400
+
+    - name: Check the alert rules loaded
+      ansible.builtin.uri:
+        url: http://127.0.0.1:19090/api/v1/rules
+        return_content: true
+      register: verify_rules
+      failed_when: >-
+        verify_rules.json.data.groups | map(attribute='rules') | flatten | map(attribute='name')
+        | select('in', ['CertificateExpiringSoon', 'CertificateProbeFailing']) | list | length != 2
+
+    - name: Sign in to Grafana on 127.0.0.1, as over an SSH tunnel
+      ansible.builtin.uri:
+        url: http://127.0.0.1:13000/api/search
+        user: admin
+        password: "{{ observability_grafana_admin_password }}"
+        force_basic_auth: true
+        return_content: true
+      register: verify_grafana
+      failed_when: verify_grafana.json | selectattr('type', '==', 'dash-db') | list | length < 3
+
+    - name: Check Grafana's vhost
+      when: verify_grafana_vhost
+      block:
+        - name: Check the password prompt refuses a stranger
+          ansible.builtin.uri:
+            url: "https://grafana.{{ draftbot_domain }}/api/health"
+            validate_certs: false
+            status_code: 401
+
+        - name: Check the prompt's user reaches Grafana, which still asks for its own login
+          ansible.builtin.uri:
+            url: "https://grafana.{{ draftbot_domain }}/api/{{ item.path }}"
+            validate_certs: false
+            user: molecule
+            password: molecule-prompt-only
+            force_basic_auth: true
+            status_code: "{{ item.status }}"
+          loop:
+            - { path: health, status: 200 }
+            - { path: search, status: 401 }
+
+    # --- The server -----------------------------------------------------------------------------
+    - name: Read sshd's effective settings
+      ansible.builtin.command:
+        cmd: sshd -T
+      register: verify_sshd
+      changed_when: false
+
+    - name: Check root and password logins are off, and tunnels allowed
+      ansible.builtin.assert:
+        that:
+          - "'permitrootlogin no' in verify_sshd.stdout_lines"
+          - "'passwordauthentication no' in verify_sshd.stdout_lines"
+          - "'allowtcpforwarding yes' in verify_sshd.stdout_lines"
+
+    - name: Read the firewall
+      ansible.builtin.command:
+        cmd: ufw status
+      register: verify_ufw
+      changed_when: false
+
+    - name: Check the firewall is on with SSH, 80 and 443 open
+      ansible.builtin.assert:
+        that:
+          - "'Status: active' in verify_ufw.stdout"
+          - verify_ufw.stdout is search('22/tcp\s+LIMIT')
+          - verify_ufw.stdout is search('80/tcp\s+ALLOW')
+          - verify_ufw.stdout is search('443/tcp\s+ALLOW')
+          - verify_ufw.stdout is not search('/udp')
+
+    - name: Read the services
+      ansible.builtin.service_facts:
+
+    - name: Check the services are running and enabled
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['docker.service'].state == 'running'
+          - ansible_facts.services['fail2ban.service'].state == 'running'
+          - ansible_facts.services['draftbot.service'].status == 'enabled'
+          - ansible_facts.services['draftbot-backup.service'].status == 'static'
+          # Enabled; it only runs on a machine of its own, not in this container.
+          - ansible_facts.services['systemd-timesyncd.service'].status == 'enabled'
+
+    # The pattern in 52draftbot-unattended-upgrades must match what Docker's repository says it
+    # is, or Docker would never be upgraded.
+    - name: Read Docker's apt origin and what unattended-upgrades allows
+      ansible.builtin.command:
+        cmd: "{{ item }}"
+      register: verify_apt_docker
+      changed_when: false
+      loop:
+        - apt-cache policy
+        - apt-config dump
+
+    - name: Check unattended-upgrades upgrades Docker from its own repository
+      ansible.builtin.assert:
+        that:
+          - verify_apt_docker.results[0].stdout is search('release o=Docker,a=\S+,l=Docker CE,')
+          - verify_apt_docker.results[1].stdout is search(verify_docker_origin, multiline=true)
+          # Added to the distribution's security origins, not in place of them.
+          - verify_apt_docker.results[1].stdout is search(verify_security_origin, multiline=true)
+        fail_msg: "{{ verify_apt_docker.results | map(attribute='stdout') | map('truncate', 2000) | list }}"
+      vars:
+        verify_docker_origin: '^Unattended-Upgrade::Origins-Pattern:: "origin=Docker,label=Docker CE";$'
+        verify_security_origin: '^Unattended-Upgrade::(Allowed-Origins|Origins-Pattern):: ".*[Ss]ecurity.*";$'
+
+    # unattended-upgrade's own matching: Docker's repository is among the allowed origins.
+    - name: Ask unattended-upgrades which origins it allows
+      ansible.builtin.command:
+        cmd: unattended-upgrade --dry-run --debug
+      register: verify_uu
+      changed_when: false
+      failed_when: >-
+        verify_uu.rc != 0
+        or (verify_uu.stdout ~ verify_uu.stderr) is not search('Allowed origins are:.*origin=Docker,label=Docker CE')
+
+    - name: Read the boot unit
+      ansible.builtin.systemd_service:
+        name: draftbot.service
+      register: verify_boot_unit
+
+    # A oneshot that stays active once `compose up --wait` succeeded.
+    - name: Check the boot unit brought the project up
+      ansible.builtin.assert:
+        that:
+          - verify_boot_unit.status.ActiveState == 'active'
+          - verify_boot_unit.status.Result == 'success'
+
+    - name: Check the units report their failures
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+      register: verify_on_failure
+      failed_when: verify_on_failure.status.OnFailure != 'draftbot-notify@' ~ item ~ '.service'
+      loop: >-
+        {{ ['draftbot.service', 'draftbot-backup.service']
+           + (['draftbot-certbot-renew.service'] if edge_certificate == 'letsencrypt' else []) }}
+
+    - name: Report a failure, as a failed unit would
+      ansible.builtin.systemd_service:
+        name: draftbot-notify@molecule-check.service
+        state: started
+
+    - name: Check the failure reached the journal
+      ansible.builtin.command:
+        cmd: journalctl --identifier draftbot-notify --no-pager --output cat
+      register: verify_notice
+      changed_when: false
+      failed_when: verify_notice.stdout is not search('molecule-check failed on ')
+
+    - name: Read the backup timer
+      ansible.builtin.systemd_service:
+        name: draftbot-backup.timer
+      register: verify_timer
+
+    - name: Check the backup timer is on
+      ansible.builtin.assert:
+        that:
+          - verify_timer.status.ActiveState == 'active'
+          - verify_timer.status.UnitFileState == 'enabled'
+
+    # --- Backups: a probe row, a backup, a restore check, then a full restore over a change -----
+    - name: Create a probe table with one row
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_compose }} exec -T db psql -U draftbot -d draftbot -v ON_ERROR_STOP=1
+          -c "CREATE TABLE IF NOT EXISTS molecule_probe (id int)"
+          -c "TRUNCATE molecule_probe" -c "INSERT INTO molecule_probe VALUES (1)"
+        chdir: "{{ draftbot_root }}"
+      changed_when: true
+
+    - name: Take a backup
+      ansible.builtin.include_role:
+        name: backups
+        tasks_from: run.yml
+
+    - name: Check the backup restores into a scratch database
+      ansible.builtin.include_role:
+        name: backups
+        tasks_from: restore.yml
+
+    - name: Change the live database after the backup
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_compose }} exec -T db psql -U draftbot -d draftbot
+          -c "INSERT INTO molecule_probe VALUES (2)"
+        chdir: "{{ draftbot_root }}"
+      changed_when: true
+
+    - name: Replace the live database with the backup
+      ansible.builtin.include_role:
+        name: backups
+        tasks_from: restore.yml
+      vars:
+        backups_restore_mode: replace
+        backups_restore_confirm: true
+        backups_restore_file: "{{ backups_latest }}"
+
+    - name: Count the probe rows after the restore
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_compose }} exec -T db psql -U draftbot -d draftbot -tA
+          -c "SELECT count(*) FROM molecule_probe"
+        chdir: "{{ draftbot_root }}"
+      register: verify_probe
+      changed_when: false
+      failed_when: verify_probe.stdout | trim != '1'
+
+    # A dump of an emptied table restores cleanly too; the check compares it with the live data.
+    - name: Empty the probe table
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_compose }} exec -T db psql -U draftbot -d draftbot -c "TRUNCATE molecule_probe"
+        chdir: "{{ draftbot_root }}"
+      changed_when: true
+
+    - name: Back up the emptied table
+      ansible.builtin.include_role:
+        name: backups
+        tasks_from: run.yml
+
+    - name: Put the probe row back
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_compose }} exec -T db psql -U draftbot -d draftbot
+          -c "INSERT INTO molecule_probe VALUES (1)"
+        chdir: "{{ draftbot_root }}"
+      changed_when: true
+
+    - name: Check the restore check refuses the empty dump
+      block:
+        - name: Restore the empty dump into a scratch database
+          ansible.builtin.include_role:
+            name: backups
+            tasks_from: restore.yml
+
+        - name: Fail, since the check passed
+          ansible.builtin.fail:
+            msg: The restore check passed a dump with no data while the live database has some.
+      rescue:
+        - name: Check it failed on the data, not on something else
+          ansible.builtin.assert:
+            that: ansible_failed_result.msg | default('') is search('holds no data')
+            fail_msg: "{{ ansible_failed_result | to_json }}"
+
+    # Offsite copies, to a local folder standing in for a bucket, with a key pair made here.
+    - name: Install age, to make the key pair
+      ansible.builtin.apt:
+        name: age
+        state: present
+
+    - name: Make an age key pair for the offsite copies
+      ansible.builtin.command:
+        cmd: age-keygen -o /root/molecule-backups.key
+        creates: /root/molecule-backups.key
+
+    - name: Read its public key
+      ansible.builtin.command:
+        cmd: age-keygen -y /root/molecule-backups.key
+      register: verify_age_recipient
+      changed_when: false
+
+    - name: Turn on encrypted offsite copies
+      ansible.builtin.include_role:
+        name: backups
+      vars:
+        backups_rclone_remote: /var/backups/molecule-offsite
+        backups_offsite_age_recipients: ["{{ verify_age_recipient.stdout | trim }}"]
+
+    - name: Take a backup with an offsite copy
+      ansible.builtin.include_role:
+        name: backups
+        tasks_from: run.yml
+
+    - name: List the offsite copies
+      ansible.builtin.find:
+        paths: /var/backups/molecule-offsite
+        hidden: true
+      register: verify_offsite
+
+    - name: Check only the encrypted copy left the server
+      ansible.builtin.assert:
+        that: verify_offsite.files | map(attribute='path') | map('basename') | list
+          == [backups_latest | basename ~ '.age']
+        fail_msg: "{{ verify_offsite.files | map(attribute='path') | list }}"
+
+    - name: Check the operator's key decrypts it to the dump itself
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          age -d -i /root/molecule-backups.key /var/backups/molecule-offsite/{{ backups_latest | basename }}.age
+          | cmp - {{ backups_latest | quote }}
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Check the copy isn't the dump in the clear
+      ansible.builtin.command:
+        cmd: cmp -s /var/backups/molecule-offsite/{{ backups_latest | basename }}.age {{ backups_latest | quote }}
+      register: verify_offsite_plain
+      changed_when: false
+      failed_when: verify_offsite_plain.rc != 1
+
+    - name: Turn the offsite copies off again
+      ansible.builtin.include_role:
+        name: backups
+
+    # --- An upgrade, as deploy.yml does it, to a second build of the stand-in image -------------
+    - name: Build a newer stand-in image
+      community.docker.docker_image_build:
+        name: "{{ app_image }}"
+        tag: molecule-next
+        path: /opt/molecule-stub-app
+        labels:
+          molecule.release: next
+
+    - name: Upgrade to the newer image
+      ansible.builtin.include_role:
+        name: app
+      vars:
+        app_image_tag: molecule-next
+
+    - name: Look up the newer image
+      community.docker.docker_image_info:
+        name: "{{ app_image }}:molecule-next"
+      register: verify_next_image
+
+    - name: Read which image last migrated the database
+      ansible.builtin.slurp:
+        src: "{{ draftbot_root }}/.migrated-image"
+      register: verify_marker
+
+    - name: Read the image each service runs
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} ps --format {{ '{{.Service}} {{.Image}}' | quote }}"
+        chdir: "{{ draftbot_root }}"
+      register: verify_images
+      changed_when: false
+
+    - name: Check the upgrade migrated and moved every app service
+      ansible.builtin.assert:
+        that:
+          - verify_marker.content | b64decode | trim == verify_next_image.images[0].Id
+          - verify_images.stdout_lines | select('search', '^(web|bot|scheduler) ') | select('search', ':molecule-next$')
+            | list | length == 3
+        fail_msg: "{{ verify_images.stdout }}"
+
+    # --- Rotated secrets ------------------------------------------------------------------------
+    - name: Rotate the database, app role and monitoring role passwords
+      ansible.builtin.include_role:
+        name: app
+      vars:
+        app_image_tag: molecule-next
+        app_postgres_password: molecule_rotated_not_secret
+        app_db_app_password: molecule_app_rotated_not_secret
+        app_db_monitor_password: moleculemonitorrotated
+
+    # The same image as before, so the migrate job didn't run: app_password.yml set it, with the
+    # app's own config/app_role.py.
+    - name: Log in as the app's role with its rotated password, through pgbouncer too, and fail with the old one
+      community.docker.docker_compose_v2_exec:
+        project_src: "{{ draftbot_root }}"
+        service: db
+        argv:
+          - sh
+          - -c
+          - >-
+            IFS= read -r PGPASSWORD && export PGPASSWORD &&
+            exec psql -h {{ item.host }} -U draftbot_app -d draftbot -tAc 'SELECT count(*) FROM molecule_probe'
+        stdin: "{{ item.password }}"
+      register: verify_app_login
+      changed_when: false
+      failed_when: (verify_app_login.rc == 0) != item.works
+      loop:
+        - { host: db, password: molecule_app_rotated_not_secret, works: true }
+        - { host: "pgbouncer -p 6432", password: molecule_app_rotated_not_secret, works: true }
+        - { host: db, password: "{{ app_db_app_password }}", works: false }
+      loop_control:
+        label: "{{ item.host }} {{ item.works }}"
+      no_log: true
+
+    # Over the network name: the image trusts loopback, so 127.0.0.1 would accept any password.
+    - name: Log in with the rotated password, directly and through pgbouncer, and fail with the old one
+      community.docker.docker_compose_v2_exec:
+        project_src: "{{ draftbot_root }}"
+        service: db
+        argv:
+          - sh
+          - -c
+          - >-
+            IFS= read -r PGPASSWORD && export PGPASSWORD &&
+            exec psql -h {{ item.host }} -U draftbot -d draftbot -tAc 'SELECT 1'
+        stdin: "{{ item.password }}"
+      register: verify_login
+      changed_when: false
+      failed_when: (verify_login.rc == 0) != item.works
+      loop:
+        - { host: db, password: molecule_rotated_not_secret, works: true }
+        - { host: "pgbouncer -p 6432", password: molecule_rotated_not_secret, works: true }
+        - { host: db, password: "{{ app_postgres_password }}", works: false }
+      loop_control:
+        label: "{{ item.host }} {{ item.works }}"
+      no_log: true
+
+    - name: Log in as the monitoring role with its rotated password, and fail with the old one
+      community.docker.docker_compose_v2_exec:
+        project_src: "{{ draftbot_root }}"
+        service: db
+        argv:
+          - sh
+          - -c
+          - >-
+            IFS= read -r PGPASSWORD && export PGPASSWORD &&
+            exec psql -h {{ item.host }} -U draftbot_monitor -d {{ item.db }} -tAc '{{ item.sql }}'
+        stdin: "{{ item.password }}"
+      register: verify_monitor_login
+      changed_when: false
+      failed_when: (verify_monitor_login.rc == 0) != item.works
+      loop:
+        - { host: db, db: draftbot, sql: SELECT 1, password: moleculemonitorrotated, works: true }
+        - { host: "pgbouncer -p 6432", db: pgbouncer, sql: SHOW POOLS, password: moleculemonitorrotated, works: true }
+        - { host: db, db: draftbot, sql: SELECT 1, password: "{{ app_db_monitor_password }}", works: false }
+      loop_control:
+        label: "{{ item.host }} {{ item.works }}"
+      no_log: true
+
+    - name: Check the app reaches the database with it
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/readyz"
+        validate_certs: false
+
+    - name: Rotate Grafana's admin password
+      ansible.builtin.include_role:
+        name: observability
+      vars:
+        observability_grafana_admin_password: molecule-grafana-rotated
+
+    - name: Sign in to Grafana with the rotated password
+      ansible.builtin.uri:
+        url: http://127.0.0.1:13000/api/user
+        user: admin
+        password: molecule-grafana-rotated
+        force_basic_auth: true
+
+    # The observability role recreated them with the new password from .env.
+    - name: Check the exporters log in with the rotated password
+      ansible.builtin.uri:
+        url: http://127.0.0.1:19090/api/v1/query?query={{ item }}
+        return_content: true
+      register: verify_exporter_rotated
+      until: verify_exporter_rotated.json.data.result | map(attribute='value') | map('last') | list == ['1']
+      retries: 12
+      delay: 5
+      loop: [pg_up, pgbouncer_up]
+
+    # --- A restart, as at boot ------------------------------------------------------------------
+    - name: Restart the project through its boot unit
+      ansible.builtin.systemd_service:
+        name: draftbot.service
+        state: restarted
+
+    - name: Check the site answers again
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/readyz"
+        validate_certs: false
+      register: verify_after_restart
+      until: verify_after_restart.status == 200
+      retries: 10
+      delay: 3

@@ -1,0 +1,41 @@
+---
+- name: Create the certificate's directory
+  ansible.builtin.file:
+    path: "{{ edge_live_dir }}"
+    state: directory
+    owner: "{{ edge_uid }}"
+    group: "{{ edge_uid }}"
+    mode: "0700"
+
+- name: Make a self-signed certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -newkey
+      - ec
+      - -pkeyopt
+      - ec_paramgen_curve:P-256
+      - -noenc
+      - -days
+      - "365"
+      - -subj
+      - "/CN={{ edge_domain }}"
+      - -addext
+      - "subjectAltName={{ edge_cert_names | map('regex_replace', '^', 'DNS:') | join(',') }}"
+      - -keyout
+      - "{{ edge_live_dir }}/privkey.pem"
+      - -out
+      - "{{ edge_live_dir }}/fullchain.pem"
+  changed_when: true
+
+- name: Hand the key to the edge's user
+  ansible.builtin.file:
+    path: "{{ edge_live_dir }}/{{ item.name }}"
+    owner: "{{ edge_uid }}"
+    group: "{{ edge_uid }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { name: privkey.pem, mode: "0600" }
+    - { name: fullchain.pem, mode: "0644" }

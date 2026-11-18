@@ -1,0 +1,17 @@
+---
+# Check that the newest dump restores, by restoring it into a scratch database and dropping it:
+#   ansible-playbook -i inventories/<client> restore.yml --ask-vault-pass
+# Replace the live database with a dump (a backup of the live one is taken first):
+#   ansible-playbook -i inventories/<client> restore.yml --ask-vault-pass \
+#     -e backups_restore_mode=replace -e backups_restore_confirm=true \
+#     [-e backups_restore_file=/var/backups/draftbot/draftbot-<stamp>.dump]
+#     [-e backups_restore_upload=/path/on/this/machine/draftbot-<stamp>.dump]
+- name: Restore the dl-mm-discord database
+  hosts: draftbot
+  become: true
+  serial: 1
+  tasks:
+    - name: Restore a dump
+      ansible.builtin.include_role:
+        name: backups
+        tasks_from: restore.yml

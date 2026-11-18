@@ -1,0 +1,56 @@
+---
+base_timezone: Etc/UTC
+# Installed on every server, on top of base_extra_packages.
+base_packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - fail2ban
+  - gnupg
+  - jq
+  - openssh-server
+  - python3-systemd
+  - sudo
+  - tzdata
+  - ufw
+  - unattended-upgrades
+base_extra_packages: []
+
+base_deploy_user: deploy
+base_deploy_authorized_keys: []
+# Remove every other key from the deploy user's authorized_keys.
+base_deploy_authorized_keys_exclusive: true
+
+# sshd takes keys only. Root can't log in unless this is "prohibit-password" (keys only for root).
+base_ssh_permit_root_login: "no"
+# Where SSH is allowed from, rate limited. `any` means everywhere.
+base_ssh_allow_cidrs:
+  - any
+
+base_firewall_enabled: true
+# Opened on top of SSH. The edge needs 80 for ACME challenges and the redirect, 443 for HTTPS.
+base_firewall_allowed:
+  - { port: "80", proto: tcp }
+  - { port: "443", proto: tcp }
+
+base_fail2ban_enabled: true
+base_fail2ban_bantime: 1h
+base_fail2ban_findtime: 10m
+base_fail2ban_maxretry: 5
+
+base_unattended_upgrades_enabled: true
+base_unattended_reboot: false
+base_unattended_reboot_time: "04:00"
+# Docker's own repository too, so docker-ce, containerd.io (which ships runc) and the compose
+# plugin get their fixes the same night. dockerd restarts; containers keep running (live-restore,
+# roles/docker). false holds Docker at what's installed until `-e docker_upgrade=true`.
+base_unattended_docker: true
+
+# Deadlines, the scheduler's ticks, heartbeats and certificate checks all go by this clock. This
+# NTP client is installed and kept running unless the server already has chrony, ntpsec, ntp or
+# openntpd (as some cloud images do). node-exporter reports its state (node_timex_sync_status).
+base_time_sync_package: systemd-timesyncd
+
+# When a draftbot unit fails (a backup, a certificate renewal, the boot unit), draftbot-notify@
+# logs it to the journal and, with this set, posts it to a Discord channel's webhook too.
+base_notify_discord_webhook_url: ""

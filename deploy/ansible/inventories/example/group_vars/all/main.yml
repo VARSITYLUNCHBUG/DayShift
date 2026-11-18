@@ -1,0 +1,84 @@
+---
+# Everything about one client's install that isn't a secret. Secrets live in vault.yml next to
+# this file, encrypted with ansible-vault, and are mapped in at the bottom.
+
+# --- The install ---------------------------------------------------------------------------------
+# The public hostname players and staff use. Point its A (and AAAA) record at the server first.
+draftbot_domain: play.example.com
+# The image tag to run: `sha-<commit>` pins one build of main; `latest` follows main. Pin a sha tag
+# so every run of site.yml installs the same build, and change it here to upgrade.
+draftbot_image_tag: latest
+# Where the compose project, .env and certificates live on the server.
+draftbot_root: /opt/draftbot
+# Prometheus, Grafana and the exporters, with alerts. Grafana listens on the server's 127.0.0.1
+# only: `ssh -L 13000:127.0.0.1:13000 deploy@<server>`, then open http://127.0.0.1:13000.
+draftbot_observability: true
+# Optional: Grafana on the web as well, at this name, behind a password prompt (below) and its own
+# login. Point its DNS record at the server too. Empty keeps it to the SSH tunnel.
+draftbot_grafana_domain: ""
+
+# --- Server (roles/base) --------------------------------------------------------------------------
+base_timezone: Etc/UTC
+base_deploy_user: deploy
+# Public SSH keys allowed to log in as the deploy user. Root and password logins are switched off,
+# so this must hold at least one key you have.
+base_deploy_authorized_keys:
+  - ssh-ed25519 REPLACE_ME you@laptop
+# Reboot by itself at 04:00 when an unattended security upgrade needs it.
+base_unattended_reboot: true
+# Optional: a Discord channel webhook told when a backup, a certificate renewal or the boot unit
+# fails (see the vault). They are always logged to the journal.
+base_notify_discord_webhook_url: "{{ vault_notify_discord_webhook_url }}"
+
+# --- TLS (roles/edge) ----------------------------------------------------------------------------
+# The Let's Encrypt account's contact address. Let's Encrypt no longer emails expiry warnings:
+# the CertificateExpiringSoon alert and the renewal's failure notice cover that. Getting a
+# certificate accepts the Let's Encrypt Subscriber Agreement (https://letsencrypt.org/repository/).
+edge_acme_email: ops@example.com
+# Users for the password prompt in front of Grafana's web address (see the vault), and optionally
+# the only addresses that may reach it.
+edge_grafana_basic_auth_users: "{{ vault_grafana_basic_auth_users }}"
+edge_grafana_allow_cidrs: []
+# Optional: lock down the Django admin at the edge, in front of its own login. Only these addresses
+# or CIDRs may reach /admin/ (empty: anyone), and/or a password prompt for these users (see the
+# vault; empty: none). With both, edge_admin_satisfy `all` asks for both, `any` lets an allowed
+# address in without the prompt.
+edge_admin_allow_cidrs: []
+edge_admin_basic_auth_users: "{{ vault_admin_basic_auth_users }}"
+edge_admin_satisfy: all
+
+# --- The bot and web UI (roles/app) --------------------------------------------------------------
+# Right-click the server in Discord with Developer Mode on, and Copy Server ID.
+app_discord_guild_id: "000000000000000000"
+# The Discord application's ID (OAuth2 page), for the web UI's "Sign in with Discord".
+app_discord_client_id: ""
+# Optional: a channel ID where the bot posts every error's full traceback, for whoever runs it.
+app_error_log_channel_id: ""
+app_log_level: INFO
+# Anything else for .env, such as WEB_DB_THREADS: 8. It can't replace a setting .env already has,
+# or turn on the local-dev ones (DEBUG, DEV_CONTROL, WEB_DEV_LOGIN, the simulator URLs).
+app_env_extra: {}
+
+# --- Backups (roles/backups) ---------------------------------------------------------------------
+backups_retention_days: 14
+# Optional: an rclone remote to copy each night's dump to, such as `b2:my-bucket/draftbot`.
+# Its rclone.conf goes in the vault.
+backups_rclone_remote: ""
+backups_rclone_config: "{{ vault_backups_rclone_config }}"
+# Required with a remote: the age public keys each copy is encrypted to before it leaves the
+# server (a dump holds live sessions and password hashes). Make a key pair on your own machine
+# with `age-keygen -o draftbot-backups.key`, keep that file safe and off the server, and list the
+# public key it prints here, such as age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p.
+backups_offsite_age_recipients: []
+
+# --- Secrets, from vault.yml ---------------------------------------------------------------------
+app_discord_token: "{{ vault_discord_token }}"
+app_discord_client_secret: "{{ vault_discord_client_secret }}"
+app_django_secret_key: "{{ vault_django_secret_key }}"
+app_postgres_password: "{{ vault_postgres_password }}"
+app_db_app_password: "{{ vault_db_app_password }}"
+app_deadlock_api_key: "{{ vault_deadlock_api_key }}"
+app_steam_web_api_key: "{{ vault_steam_web_api_key }}"
+app_db_monitor_password: "{{ vault_db_monitor_password }}"
+observability_grafana_admin_password: "{{ vault_grafana_admin_password }}"
+observability_alertmanager_discord_webhook_url: "{{ vault_alertmanager_discord_webhook_url }}"

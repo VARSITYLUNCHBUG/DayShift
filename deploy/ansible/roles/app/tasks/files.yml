@@ -1,0 +1,59 @@
+---
+- name: Create the project directory
+  ansible.builtin.file:
+    path: "{{ app_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the compose files
+  ansible.builtin.copy:
+    src: "{{ app_repo_root }}/{{ item.src }}"
+    dest: "{{ app_root }}/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ app_compose_files | selectattr('enabled') }}"
+  loop_control:
+    label: "{{ item.dest }}"
+
+- name: Remove the compose files that are switched off
+  ansible.builtin.file:
+    path: "{{ app_root }}/{{ item.dest }}"
+    state: absent
+  loop: "{{ app_compose_files | rejectattr('enabled') }}"
+  loop_control:
+    label: "{{ item.dest }}"
+
+- name: Install your own compose overrides
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ app_root }}/{{ item | basename }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ app_compose_extra_files }}"
+
+# The pgbouncer container reads these as its own user, so they are world-readable; the auth
+# file it builds from the environment is not (infra/pgbouncer/entrypoint.sh).
+- name: Install pgbouncer's configuration
+  ansible.builtin.copy:
+    src: "{{ app_repo_root }}/infra/pgbouncer/"
+    dest: "{{ app_root }}/infra/pgbouncer/"
+    owner: root
+    group: root
+    mode: "0644"
+    directory_mode: "0755"
+  register: app_pgbouncer_config
+
+# Compose recreates any container whose settings change here on the next `up`.
+- name: Write .env
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ app_root }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false

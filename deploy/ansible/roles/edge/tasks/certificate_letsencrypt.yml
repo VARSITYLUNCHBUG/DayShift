@@ -1,0 +1,43 @@
+---
+# certbot won't write into a live/ directory it didn't make, and keeps another server's lineage.
+- name: Remove a certificate this ACME server didn't issue
+  ansible.builtin.file:
+    path: "{{ edge_letsencrypt_dir }}/{{ item }}"
+    state: absent
+  loop:
+    - live/{{ edge_domain }}
+    - archive/{{ edge_domain }}
+    - renewal/{{ edge_domain }}.conf
+  when: edge_cert_server.stdout | trim != edge_acme_server
+
+# The TLS sites (the app's and Grafana's) can't start without their certificate. Until there is
+# one, the edge serves only the challenge, on port 80.
+- name: Start the edge with only the ACME challenge
+  community.docker.docker_compose_v2:
+    project_src: "{{ edge_root }}"
+    services: [edge]
+    dependencies: false
+    wait: true
+    wait_timeout: "{{ edge_wait_timeout }}"
+  environment:
+    EDGE_SITE_TEMPLATES: ./edge/acme
+    EDGE_GRAFANA_CONF: /dev/null
+  when: edge_cert_server.stdout | trim != edge_acme_server
+
+# With --cert-name, certbot replaces the lineage's names with these when they change. The edge
+# serves the challenge from certbot's webroot on port 80 in either site.
+- name: Ask the ACME server for the certificate
+  community.docker.docker_compose_v2_run:
+    project_src: "{{ edge_root }}"
+    service: certbot
+    no_deps: true
+    cleanup: true
+    quiet_pull: true
+    argv: >-
+      {{
+        ['certonly', '--non-interactive', '--webroot', '--webroot-path', '/var/www/certbot',
+         '--cert-name', edge_domain, '--server', edge_acme_server,
+         '--email', edge_acme_email, '--agree-tos', '--no-eff-email']
+        + (edge_cert_names | map('regex_replace', '^', '--domain=') | list)
+      }}
+  changed_when: true

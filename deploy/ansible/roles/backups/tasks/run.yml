@@ -1,0 +1,28 @@
+---
+# The same service the timer starts, so a manual backup is logged and pruned the same way.
+- name: Take a backup now
+  ansible.builtin.systemd_service:
+    name: "{{ backups_unit }}.service"
+    state: started
+  changed_when: true
+
+- name: Find the newest dump
+  ansible.builtin.find:
+    paths: "{{ backups_dir }}"
+    patterns: draftbot-*.dump
+  register: backups_found
+
+- name: Remember the newest dump
+  ansible.builtin.set_fact:
+    backups_latest: "{{ (backups_found.files | sort(attribute='mtime') | last).path }}"
+
+- name: Show the newest dump
+  ansible.builtin.debug:
+    msg: "Backup: {{ backups_latest }}"
+
+- name: Copy the dump to the controller
+  ansible.builtin.fetch:
+    src: "{{ backups_latest }}"
+    dest: "{{ backups_fetch_dir }}/{{ inventory_hostname }}/"
+    flat: true
+  when: backups_fetch_dir | length > 0

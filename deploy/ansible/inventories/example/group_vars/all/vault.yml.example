@@ -1,0 +1,48 @@
+---
+# Every secret the install needs. Copy to vault.yml, fill in, then encrypt it:
+#   ansible-vault encrypt inventories/<client>/group_vars/all/vault.yml
+# Never commit vault.yml unencrypted. Placeholders below are refused by the roles.
+
+# Discord Developer Portal > your application > Bot > Reset Token.
+vault_discord_token: REPLACE_ME
+# Discord Developer Portal > OAuth2 > Client Secret. Empty switches "Sign in with Discord" off.
+vault_discord_client_secret: ""
+# Generate: python3 -c "import secrets; print(secrets.token_urlsafe(50))"
+vault_django_secret_key: REPLACE_ME
+# Letters, digits, - and _ only, since it goes into a URL. Generate: openssl rand -hex 32
+vault_postgres_password: REPLACE_ME
+# web, bot and scheduler's own database login (draftbot_app: reads and writes the tables, no
+# superuser). Letters, digits, - and _, and not the Postgres password. Generate: openssl rand -hex 32
+vault_db_app_password: REPLACE_ME
+# Optional. deadlock-api.com key: raises its rate limits.
+vault_deadlock_api_key: ""
+# Optional. Steam Web API key, only for /link with a custom profile URL.
+vault_steam_web_api_key: ""
+# The read-only database role Prometheus's exporters log in as (draftbot_monitor). Letters and
+# digits only, and not the Postgres password. Generate: openssl rand -hex 32
+vault_db_monitor_password: REPLACE_ME
+# Grafana's `admin` user, 12+ characters. Generate: openssl rand -base64 24
+vault_grafana_admin_password: REPLACE_ME
+# Optional. A Discord channel webhook (channel settings > Integrations > Webhooks) that alerts
+# are posted to. Empty shows them in Grafana and Prometheus only.
+vault_alertmanager_discord_webhook_url: ""
+# Optional. A webhook told when a backup, a certificate renewal or the boot unit fails. It can
+# be the same one.
+vault_notify_discord_webhook_url: ""
+# Only with draftbot_grafana_domain: the users for the password prompt in front of Grafana. As
+# with the admin's below, the edge role hashes each password on the server; the edge only ever
+# reads the hash.
+vault_grafana_basic_auth_users: []
+#  - username: staff
+#    password: a long random one, such as: openssl rand -base64 24
+# Optional: a password prompt in front of the Django admin (edge_admin_basic_auth_users).
+vault_admin_basic_auth_users: []
+#  - username: staff
+#    password: a long random one, such as: openssl rand -base64 24
+# Optional. The rclone.conf for backups_rclone_remote, as a block:
+vault_backups_rclone_config: ""
+# vault_backups_rclone_config: |
+#   [b2]
+#   type = b2
+#   account = ...
+#   key = ...

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Renews the edge's certificate once it is due (certbot renews 30 days before expiry), then
+# reloads the edge so it serves the new one. {{ edge_renew_unit }}.timer runs it twice a day;
+# arguments go to `certbot renew`, such as --dry-run.
+set -euo pipefail
+
+cd {{ edge_root | quote }}
+live={{ (edge_live_dir ~ '/fullchain.pem') | quote }}
+before=$(readlink -f "$live")
+
+docker compose run --rm --no-deps -T certbot renew --non-interactive "$@"
+
+if [ "$(readlink -f "$live")" != "$before" ]; then
+    docker compose exec -T edge nginx -s reload
+    echo "Renewed {{ edge_domain }}; the edge serves the new certificate."
+fi

@@ -1,0 +1,7 @@
+# Linting and the Molecule scenario, pinned. CI installs these; see deploy/README.md.
+-r requirements.txt
+ansible-lint==26.10.1
+yamllint==1.38.0
+molecule==26.10.0
+molecule-plugins[docker]==26.10.12
+requests==2.34.2

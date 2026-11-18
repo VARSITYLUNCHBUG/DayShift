@@ -1,0 +1,25 @@
+---
+# One service at a time, each healthy before the next, so an upgrade never has web, the scheduler
+# and the bot all down at once, and stops at the first one the new image can't start.
+- name: Start or update each service
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_root }}"
+    services: ["{{ item }}"]
+    dependencies: false
+    wait: true
+    wait_timeout: "{{ app_wait_timeout }}"
+  loop: "{{ app_services }}"
+  register: app_started
+
+# pgbouncer reads its configuration at start. A container that was just recreated already has
+# the new one. Under --tags app-start the files weren't installed, so there is nothing new.
+- name: Restart pgbouncer for its new configuration
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_root }}"
+    services: [pgbouncer]
+    state: restarted
+    wait: true
+    wait_timeout: "{{ app_wait_timeout }}"
+  when:
+    - app_pgbouncer_config | default({}) is changed
+    - app_started.results | selectattr('item', '==', 'pgbouncer') | selectattr('changed') | list | length == 0
