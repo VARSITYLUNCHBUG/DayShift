@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in the bot, the web admin or the deploy doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thanks for the report. For a security problem, don't use this form: follow
+        [SECURITY.md](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/blob/main/SECURITY.md).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where
+      options:
+        - Discord bot (queue, draft, match, ratings)
+        - Web admin
+        - Self-hosting with Compose
+        - Ansible deploy
+        - Metrics and alerts
+        - Dev tools (simulator, control panel)
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce it
+      placeholder: |
+        1. Start a queue with ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The image tag or commit you run (`docker compose images`, or `git rev-parse HEAD`).
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The relevant lines from `docker compose logs`. Remove tokens, passwords and server IDs first.
+      render: text

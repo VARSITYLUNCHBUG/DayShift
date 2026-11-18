@@ -1,0 +1,3 @@
+# The main branch's "maintainer approval" ruleset requires a code owner's review, so every
+# pull request needs the maintainer's approval before it can merge.
+* @VARSITYLUNCHBUG
