@@ -7,8 +7,8 @@ issue first so we can agree on the approach before you spend time on it.
 
 The [developer guide](docs/dev/README.md) covers everything: the dev stack against a Discord
 simulator (`scripts/fixture_to_test.sh`), the control panel, the tests and cleaning up. You need
-Docker and [uv](https://docs.astral.sh/uv/), plus Node 22 for the control panel. On Windows, each
-script has a `.bat` twin.
+Docker and [uv](https://docs.astral.sh/uv/), plus Node 22 or newer for the control panel (CI
+builds it on Node 26). On Windows, each script has a `.bat` twin.
 
 ## Making a change
 

@@ -74,7 +74,7 @@ Prometheus keeps 15 days, capped at 5 GB (`PROMETHEUS_RETENTION`, `PROMETHEUS_RE
 
 ```sh
 docker run --rm --entrypoint promtool -v "$PWD/infra/observability/prometheus:/etc/prometheus:ro" \
-  prom/prometheus:v3.15.1 check config /etc/prometheus/prometheus.yml
+  prom/prometheus:v3.16.0 check config /etc/prometheus/prometheus.yml
 docker run --rm --entrypoint promtool -w /etc/prometheus/tests \
-  -v "$PWD/infra/observability/prometheus:/etc/prometheus:ro" prom/prometheus:v3.15.1 test rules rules_test.yml
+  -v "$PWD/infra/observability/prometheus:/etc/prometheus:ro" prom/prometheus:v3.16.0 test rules rules_test.yml
 ```

@@ -37,7 +37,7 @@ services:
   # certificate, and draftbot-certbot-renew.timer twice a day for renewals. It runs as the edge's
   # user, so the edge can read the keys it writes.
   certbot:
-    image: certbot/certbot:v5.9.0
+    image: certbot/certbot:v5.10.0
     profiles: [certbot]
     user: "101:101"
     init: true
