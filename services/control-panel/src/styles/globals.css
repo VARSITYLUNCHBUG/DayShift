@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+
+/* `dark:` follows only the .dark class on <html> (the panel is always dark). */
+@custom-variant dark (&:is(.dark *));
+
+.dark,
+[data-theme="dark"] {
+  --radius: 0.4rem;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-size: 13px;
+}
+
+.mono {
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
