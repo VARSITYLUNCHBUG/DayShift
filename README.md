@@ -9,6 +9,10 @@ A big shout out to the ZA Deadlock community for playing in the inhouses, giving
 ---
 # dl-mm-discord
 
+[![CI](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/VARSITYLUNCHBUG/dl-mm-discord/badge)](https://scorecard.dev/viewer/?uri=github.com/VARSITYLUNCHBUG/dl-mm-discord)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 A Discord bot that runs a 6v6 Deadlock inhouse from queue to results: FIFO queue, ready check,
 captains and their check-in, player draft and swaps, champion pick/ban, an automatic lobby,
 screenshot reporting, OpenSkill ratings with MVP and key-player awards (with NeatQueue's points
@@ -754,3 +758,11 @@ On Windows, the same scripts end in `.bat`. The guide's
 - Current custom-lobby steps, for the host checklist text in `bot/renderers/board.py`.
 - Behaviour after Discord's 16 November 2026 channel change. Every channel the bot creates already
   grants the bot its own `VIEW_CHANNEL`.
+
+## License
+
+Apache License 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE). To help, read
+[CONTRIBUTING.md](CONTRIBUTING.md); to report a security problem, follow [SECURITY.md](SECURITY.md).
+
+Deadlock is a trademark of Valve Corporation. This project is not affiliated with or endorsed by
+Valve.
