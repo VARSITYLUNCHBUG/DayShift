@@ -1,0 +1,168 @@
+# Local dev stack: the app against the Discord simulator, with the dev control panel.
+#
+#   docker compose -p draftbot-dev -f compose.yaml -f compose.dev.yaml --profile sim up -d
+#
+# scripts/fixture_to_test.sh (or .bat) does it all from nothing: builds, migrates, seeds the
+# dev fixtures and prints the URLs. Ports are on 127.0.0.1 only, each set by an env var so two
+# stacks can run side by side (with another -p, and DEV_EDGE_SUBNET, DEV_EDGE_IP and
+# DEV_EDGE_IP_RANGE). See docs/dev/README.md.
+#
+# Real-Discord mode: set DRAFTBOT_ENV_FILE=.env (a real token and guild id) and leave out the
+# `sim` profile. scripts/fixture_to_test.sh --real-discord does that.
+
+name: draftbot-dev
+
+x-dev-app: &dev-app
+  # The image's dev target: the published one plus devtools/ and fixtures/ (Dockerfile).
+  build:
+    target: dev
+  # A local tag named after the project, so a dev build never overwrites the published image
+  # or another dev stack's.
+  image: ${COMPOSE_PROJECT_NAME}/app:local
+  env_file: !override
+    # .env.dev (from .env.dev.example) points the app at the simulator.
+    - path: ${DRAFTBOT_ENV_FILE:-.env.dev}
+      required: false
+
+# Merged into each app service's environment from compose.yaml. web logs in as the superuser:
+# the dev control API's reset empties the tables with TRUNCATE ... RESTART IDENTITY, which only
+# their owner may do. The bot and the scheduler log in as draftbot_app, as in production.
+x-dev-env: &dev-env
+  DATABASE_URL: postgres://draftbot:${DEV_DB_PASSWORD:-dev}@pgbouncer:6432/draftbot
+  DATABASE_DIRECT_URL: postgres://draftbot:${DEV_DB_PASSWORD:-dev}@db:5432/draftbot
+  DEBUG: "true"
+  DEV_CONTROL: "true"
+  WEB_DEV_LOGIN: "true"
+  ALLOWED_HOSTS: localhost,127.0.0.1,web
+  LOG_FORMAT: ${LOG_FORMAT:-text}
+
+x-dev-app-role: &dev-app-role
+  <<: *dev-env
+  DATABASE_URL: postgres://draftbot_app:${DEV_DB_APP_PASSWORD:-dev-app}@pgbouncer:6432/draftbot
+  DATABASE_DIRECT_URL: postgres://draftbot_app:${DEV_DB_APP_PASSWORD:-dev-app}@db:5432/draftbot
+
+# The dev-only services get the same hardening as the app.
+x-dev-hardening: &dev-hardening
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  tmpfs:
+    - /tmp
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  edge:
+    ports: !override
+      - "127.0.0.1:${DEV_EDGE_PORT:-18080}:8080"
+    networks:
+      edge:
+        ipv4_address: ${DEV_EDGE_IP:-10.203.140.18}
+
+  # The dev database's password. It only applies when the volume is created: change it with
+  # --fresh (scripts/fixture_to_test), or ALTER ROLE.
+  db:
+    environment:
+      POSTGRES_PASSWORD: ${DEV_DB_PASSWORD:-dev}
+    ports: !override
+      - "127.0.0.1:${DEV_DB_PORT:-15432}:5432"
+    volumes: !override
+      - dev-pgdata:/var/lib/postgresql/data
+
+  pgbouncer:
+    environment:
+      POSTGRES_PASSWORD: ${DEV_DB_PASSWORD:-dev}
+      DB_APP_PASSWORD: ${DEV_DB_APP_PASSWORD:-dev-app}
+
+  migrate:
+    <<: *dev-app
+    environment:
+      <<: *dev-env
+      DATABASE_URL: postgres://draftbot:${DEV_DB_PASSWORD:-dev}@db:5432/draftbot
+      DB_APP_PASSWORD: ${DEV_DB_APP_PASSWORD:-dev-app}
+
+  web:
+    <<: *dev-app
+    environment:
+      <<: *dev-env
+      FORWARDED_ALLOW_IPS: ${DEV_EDGE_IP:-10.203.140.18}
+    # Straight to web as well as through the edge: the control panel and the e2e suite use it.
+    ports:
+      - "127.0.0.1:${DEV_WEB_PORT:-18000}:8000"
+    healthcheck:
+      interval: 10s
+
+  bot:
+    <<: *dev-app
+    environment: *dev-app-role
+    healthcheck:
+      interval: 10s
+    depends_on:
+      discord-sim:
+        condition: service_healthy
+        # Real-Discord mode runs without the simulator.
+        required: false
+
+  scheduler:
+    <<: *dev-app
+    environment: *dev-app-role
+    healthcheck:
+      interval: 10s
+
+  # compose.test.yaml extends these two, so a setting added here reaches the test stack too.
+  discord-sim:
+    <<: *dev-hardening
+    profiles: [sim]
+    networks: [app]
+    build: services/discord-sim
+    image: ${COMPOSE_PROJECT_NAME}/discord-sim:local
+    environment:
+      SIM_SEED_USERS: ${SIM_SEED_USERS:-0}
+    ports:
+      - "127.0.0.1:${DEV_SIM_PORT:-18090}:8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8090/_sim/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 1s
+
+  control-panel:
+    <<: *dev-hardening
+    networks: [app]
+    build: services/control-panel
+    image: ${COMPOSE_PROJECT_NAME}/control-panel:local
+    ports:
+      - "127.0.0.1:${DEV_PANEL_PORT:-18091}:8091"
+    depends_on:
+      web:
+        condition: service_healthy
+      discord-sim:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 1s
+
+networks:
+  # IPv4 only: the dev edge listens on 127.0.0.1, and a second stack would need another IPv6
+  # subnet too.
+  edge:
+    enable_ipv6: false
+    ipam:
+      config: !override
+        - subnet: ${DEV_EDGE_SUBNET:-10.203.140.16/28}
+          ip_range: ${DEV_EDGE_IP_RANGE:-10.203.140.24/29}
+
+volumes:
+  dev-pgdata:

@@ -18,6 +18,10 @@ from channels.routing import ProtocolTypeRouter  # noqa: E402
 from django.conf import settings  # noqa: E402
 from django.core.exceptions import ImproperlyConfigured  # noqa: E402
 
+from config.logging import set_process  # noqa: E402
+
+set_process(service="web")
+
 # The websocket's only defence against another site opening it with a player's cookie is the
 # Origin check against ALLOWED_HOSTS, and "*" lets every origin through.
 if not settings.DEBUG and "*" in settings.ALLOWED_HOSTS:

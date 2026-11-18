@@ -1,0 +1,51 @@
+# Production: TLS for ${EDGE_SERVER_NAME}. The image renders this file with envsubst at start
+# (only EDGE_* variables; nginx's own $variables are left alone).
+#
+# The host publishes 80 -> 8080 and 443 -> 8443 (the edge runs unprivileged), over IPv4 and IPv6
+# (compose.yaml's edge network is dual-stack). It expects:
+#   /etc/letsencrypt         certbot's certificates, read-only
+#   /var/www/certbot         certbot's HTTP-01 webroot, read-only
+# certbot itself never touches the edge: the host's renewal script (the deploy edge role's
+# draftbot-certbot-renew, on a timer) runs certbot, then `nginx -s reload` in the edge when a
+# certificate was renewed.
+
+# Port 80: ACME challenges, and a redirect to HTTPS for everything else.
+server {
+    listen 8080 default_server;
+    listen [::]:8080 default_server;
+    server_name _;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://${EDGE_SERVER_NAME}$request_uri;
+    }
+}
+
+# Any other name on 443 gets no certificate and no answer.
+server {
+    listen 8443 ssl default_server;
+    listen [::]:8443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+
+server {
+    listen 8443 ssl;
+    listen [::]:8443 ssl;
+    http2 on;
+    server_name ${EDGE_SERVER_NAME};
+
+    ssl_certificate /etc/letsencrypt/live/${EDGE_SERVER_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${EDGE_SERVER_NAME}/privkey.pem;
+    include /etc/nginx/snippets/tls.conf;
+
+    # Two years, as Mozilla recommends. Django's own copy is hidden so the header is sent once.
+    proxy_hide_header Strict-Transport-Security;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+
+    include /etc/nginx/snippets/app.conf;
+}
