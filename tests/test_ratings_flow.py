@@ -11,7 +11,7 @@ from league.models import Community, Player, Season
 from league.models.scoreboards import AwardSource
 from league.services import boards, corrections, integrity
 from league.services.community import start_season
-from tests.helpers import play_full_match
+from tests.factories import played
 
 
 @pytest.mark.slow
@@ -23,10 +23,10 @@ def test_random_histories_keep_the_ledger_equal_to_a_replay(
     and a replay from scratch must agree after every step."""
     season: Season = start_season(league, {"placement_games": 0})
     rng = random.Random(seed)
-    played = []
+    history = []
     for number in range(1, 5):
-        match = play_full_match(league, players, rng.choice("AB"), number)
-        played.append(match)
+        match = played(league, players, rng.choice("AB"), number)
+        history.append(match)
         roster = list(
             match.participants.filter(removed_reason="").values_list("player_id", flat=True)
         )
@@ -35,10 +35,10 @@ def test_random_histories_keep_the_ledger_equal_to_a_replay(
             awards = {picked[0]: "mvp", picked[1]: "key", picked[2]: "key"}
             corrections.apply_award_correction(match.pk, awards, AwardSource.STAFF, None, "VOD")
         assert integrity.check_season(season) == []
-    target = rng.choice(played[:-1])
+    target = rng.choice(history[:-1])
     corrections.apply_outcome_correction(target.pk, "void", None, "Wrong lobby")
     assert integrity.check_season(season) == []
-    other = next(m for m in played if m.pk != target.pk)
+    other = next(m for m in history if m.pk != target.pk)
     other.refresh_from_db()
     flipped = "B" if other.winner == "A" else "A"
     corrections.apply_outcome_correction(other.pk, flipped, None, "Misreported")
@@ -47,7 +47,7 @@ def test_random_histories_keep_the_ledger_equal_to_a_replay(
 
 def test_results_show_awards_and_scoreboard_stats(league: Community, players: list[Player]) -> None:
     start_season(league, {"placement_games": 0})
-    match = play_full_match(league, players, "A", 1)
+    match = played(league, players, "A", 1)
     mvp = match.captain_of("A").player
     corrections.apply_award_correction(match.pk, {mvp.pk: "mvp"}, AwardSource.STAFF, None, "x")
     model = boards.results_view(match.pk)

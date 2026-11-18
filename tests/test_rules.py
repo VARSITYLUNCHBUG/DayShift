@@ -39,7 +39,8 @@ from league.services import (
 )
 from league.services.community import start_season
 from tests.conftest import Clock, make_player
-from tests.helpers import fresh, image, play_full_match, to_in_progress
+from tests.factories import in_progress, played
+from tests.helpers import fresh, image, to_in_progress
 
 PARAMS = merged_params(None)
 
@@ -61,9 +62,7 @@ def farm_season(league: Community) -> Season:
 
 
 def _play_with_mvp(league: Community, players: list[Player], number: int, mvp: Player) -> Match:
-    for player in players:
-        queue.join(league.pk, player)
-    match = to_in_progress(Match.objects.filter(community=league).order_by("-id").first())
+    match = in_progress(league, players)
     team = match.participants.get(player=mvp).team
     results.submit_report(
         match.pk, match.captain_of(team).player, team, image(number), None, {mvp.pk: "mvp"}
@@ -216,9 +215,7 @@ def test_award_holders_who_keep_winning_show_a_signal(
         rating_params={"placement_games": 0, "farming_min_games": 1000}
     )
     for number in range(1, 9):
-        for player in players:
-            queue.join(league.pk, player)
-        match = to_in_progress(Match.objects.filter(community=league).order_by("-id").first())
+        match = in_progress(league, players)
         team = match.participants.get(player=players[0]).team
         results.submit_report(
             match.pk, match.captain_of(team).player, team, image(number), None,
@@ -245,7 +242,7 @@ def test_the_dashboard_shows_the_award_check(
     staff_client: Any, league: Community, players: list[Player]
 ) -> None:
     for number in range(1, 3):
-        play_full_match(league, players, "A", number)
+        played(league, players, "A", number)
     body = staff_client.get("/admin/calibration/").content.decode()
     assert "Do MVP and key-player awards mean anything?" in body
     assert "Award share frozen" in body

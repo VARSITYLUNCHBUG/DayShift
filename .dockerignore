@@ -9,8 +9,11 @@
 !presets/
 !scoreocr/
 # The unit suite, for the `test` target only: the runtime and dev targets copy named folders.
+# The two control-panel sources are what tests/test_devtools_panel_contract.py checks.
 !tests/
 tests/e2e/
+!services/control-panel/src/api/control.ts
+!services/control-panel/src/lib/match.ts
 !manage.py
 !pyproject.toml
 !uv.lock

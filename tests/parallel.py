@@ -18,11 +18,21 @@ from pytest_django import DjangoDbBlocker
 
 ON_XDIST_WORKER = bool(os.environ.get("PYTEST_XDIST_WORKER"))
 
+# How hard the property-based tests look. `dev` (the default, make test) is quick: enough
+# examples to catch a regression in the paths they cover. `ci` is the merge gate's thorough run,
+# and EXPLORE=1 in test_stateful.py goes further still. HYPOTHESIS_PROFILE picks one.
+PROFILE = os.environ.get("HYPOTHESIS_PROFILE", "dev")
+THOROUGH = PROFILE == "ci"
+settings.register_profile("dev", max_examples=20)
+settings.register_profile("ci", max_examples=100)
+settings.load_profile(PROFILE)
 # Workers would otherwise share one `.hypothesis/` folder and replay each other's saved failures,
 # so a run would depend on what ran before it on that machine.
-settings.register_profile("xdist", database=None)
 if ON_XDIST_WORKER:
-    settings.load_profile("xdist")
+    settings.register_profile(
+        f"{PROFILE}-xdist", parent=settings.get_profile(PROFILE), database=None
+    )
+    settings.load_profile(f"{PROFILE}-xdist")
 
 
 def _seed_presets(**_: Any) -> None:

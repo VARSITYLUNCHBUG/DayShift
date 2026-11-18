@@ -52,6 +52,7 @@ from tests.helpers import (
     settle_coinflip_for,
     vote_captains,
 )
+from tests.parallel import THOROUGH
 
 
 class MatchMachine(RuleBasedStateMachine):
@@ -367,9 +368,10 @@ class MatchMachine(RuleBasedStateMachine):
 
 
 # The run is split into seeded chunks so pytest-xdist can spread it over workers. Each chunk also
-# runs Hypothesis's simplest example first, so it gets one more than its share of the total.
+# runs Hypothesis's simplest example first, so it gets one more than its share of the total. The
+# quick profile (make test) runs a third of the merge gate's examples (HYPOTHESIS_PROFILE=ci).
 CHUNKS = 10
-EXAMPLES = 60
+EXAMPLES = 60 if THOROUGH else 20
 EXPLORE_EXAMPLES = 150
 
 # Guards against the machine passing only because it never got anywhere interesting.
@@ -442,7 +444,8 @@ def test_match_machine(
             suppress_health_check=list(HealthCheck),
         ),
     )
-    # The chunks share the job, so whichever finishes last checks what they reached together.
+    # The chunks share the job, so whichever finishes last checks what they reached together. Only
+    # the thorough run has examples enough to promise every status (a dispute takes a long path).
     reached = statuses_of_every_chunk(tmp_path_factory, chunk, machine.statuses_seen)
-    if reached is not None:
+    if reached is not None and THOROUGH:
         assert reached >= MUST_REACH, sorted(MUST_REACH - reached)

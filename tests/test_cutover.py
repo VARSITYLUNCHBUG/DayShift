@@ -23,12 +23,12 @@ from league.services import (
     swaps,
 )
 from tests.conftest import Clock, make_player
+from tests.factories import played
 from tests.helpers import (
     check_in_captains,
     fail_api_lobby,
     finish,
     fresh,
-    play_full_match,
     ready_all,
     run_champion_draft,
     run_player_draft,
@@ -299,7 +299,7 @@ def test_import_carries_points_and_matches_move_them(
     season = Season.objects.open_for(league)
     assert interim.standings(season)[players[0].pk] == interim.Standing(1500, 10, 5)
 
-    match = play_full_match(league, players, "A", 1)
+    match = played(league, players, "A", 1)
     changes = interim.match_changes(match)
     assert len(changes) == 12
     winners = set(match.participants.filter(team="A").values_list("player_id", flat=True))
@@ -316,7 +316,7 @@ def test_a_rescore_rebuilds_the_points(league: Community, players: list[Player])
     from league.services import corrections
 
     interim.set_enabled(league, True)
-    match = play_full_match(league, players, "A", 1)
+    match = played(league, players, "A", 1)
     winner = match.participants.filter(team="A").first().player_id
     season = Season.objects.open_for(league)
     assert interim.standings(season)[winner].points > 1000
@@ -338,7 +338,7 @@ def test_the_interim_off_shows_openskill(league: Community, players: list[Player
 def test_the_leaderboard_lists_everyone_with_a_record(
     league: Community, players: list[Player]
 ) -> None:
-    play_full_match(league, players, "A", 1)
+    played(league, players, "A", 1)
     season = Season.objects.open_for(league)
     rows = leaderboards.table(season)
     assert len(rows) == 12
