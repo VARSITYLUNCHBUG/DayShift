@@ -16,6 +16,8 @@ from league.services import champions, common, community, modes, queue
 # on the loop production uses; the web tests only need the communicators, not the reactor.
 asyncio.set_event_loop_policy(None)
 
+pytest_plugins = ["tests.parallel"]
+
 PRESETS = settings.BASE_DIR / "presets"
 NOT_MODES = frozenset({"champions.yaml", "champion_emojis.yaml"})
 
@@ -117,7 +119,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
 
 @pytest.fixture
 def league(db: None) -> Community:
-    publish_presets()
+    # The presets are already published: tests.parallel seeds every test database with them.
     return community.ensure(guild_id=999, name="Test")
 
 

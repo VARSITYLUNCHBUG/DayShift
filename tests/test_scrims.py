@@ -32,7 +32,7 @@ from league.models import (
 from league.models.matches import MatchKind, ResourceKind
 from league.models.outbox import EffectStatus
 from league.services import boards, community, deadlines, draft, effects, queue, scrims
-from tests.conftest import Clock, activate, make_player, publish_presets
+from tests.conftest import Clock, activate, make_player
 from tests.helpers import acting_captain
 from tests.test_bot import FakeGateway, _http_error, all_buttons, assert_within_limits, drain
 
@@ -384,7 +384,6 @@ def test_custom_emojis_only_on_buttons_and_only_where_allowed(league: Community)
 
 @pytest.fixture
 def server(transactional_db: None) -> Iterator[Community]:
-    publish_presets()
     row = community.ensure(guild_id=999, name="Test")
     yield row
     asyncio.run(db(connections.close_all))

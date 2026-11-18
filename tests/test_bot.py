@@ -45,7 +45,7 @@ from league.services import draft as draft_service
 from league.services.boards import ResultRow
 from league.services.common import add_effect, captain_of, get_or_create_player, mode_of
 from league.services.common import render_queue as request_queue
-from tests.conftest import Clock, make_player, publish_presets
+from tests.conftest import Clock, make_player
 from tests.helpers import (
     acting_captain,
     finish,
@@ -806,7 +806,6 @@ ARCHIVE_CHANNEL = 7004
 
 @pytest.fixture
 def wired(transactional_db: None) -> Iterator[Community]:
-    publish_presets()
     row = community.ensure(guild_id=999, name="Test")
     community.save_wiring(
         row.pk,

@@ -5,14 +5,21 @@ Whatever order these arrive in, a match must never break its invariants or get s
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import timedelta
 
 import pytest
 from django.db import transaction
 from django.utils import timezone
-from hypothesis import HealthCheck, settings
-from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, rule
+from hypothesis import HealthCheck, seed, settings
+from hypothesis.stateful import (
+    RuleBasedStateMachine,
+    initialize,
+    invariant,
+    rule,
+    run_state_machine_as_test,
+)
 from hypothesis.strategies import integers, sampled_from
 
 from league.domain.draft_plan import build_plan, team_for_role
@@ -51,9 +58,10 @@ from tests.helpers import (
 class MatchMachine(RuleBasedStateMachine):
     """Runs inside a savepoint per example, so each example starts clean and fast."""
 
+    # Set per chunk by `chunk_machine`, so chunks sharing a worker never share them.
     community_id: int
     clock: Clock
-    statuses_seen: set[str] = set()  # noqa: RUF012
+    statuses_seen: set[str]
 
     def __init__(self) -> None:
         super().__init__()
@@ -359,29 +367,15 @@ class MatchMachine(RuleBasedStateMachine):
         assert len(used) == len(set(used))
 
 
-@pytest.mark.django_db
-def test_match_machine(league, clock: Clock) -> None:
-    from hypothesis.stateful import run_state_machine_as_test
+# The run is split into seeded chunks so pytest-xdist can spread it over workers. Each chunk also
+# runs Hypothesis's simplest example first, so it gets one more than its share of the total.
+CHUNKS = 10
+EXAMPLES = 60
+EXPLORE_EXAMPLES = 150
 
-    explore = bool(os.environ.get("EXPLORE"))
-    MatchMachine.community_id = league.pk
-    MatchMachine.clock = clock
-    assert clock.now() >= timezone.now() - timedelta(seconds=5)
-    run_state_machine_as_test(
-        MatchMachine,
-        settings=settings(
-            # Fixed by default, so a failure means something changed rather than bad luck. Set
-            # EXPLORE=1 for a longer hunt through sequences this run hasn't tried.
-            derandomize=not explore,
-            database=None,  # The same examples in every checkout, not ones saved locally.
-            max_examples=150 if explore else 60,
-            stateful_step_count=56,  # The 18-step champion draft takes a few more.
-            deadline=None,
-            suppress_health_check=list(HealthCheck),
-        ),
-    )
-    # Guards against the machine passing only because it never got anywhere interesting.
-    assert {
+# Guards against the machine passing only because it never got anywhere interesting.
+MUST_REACH = frozenset(
+    {
         Status.CAPTAIN_PHASE,
         Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
@@ -393,4 +387,63 @@ def test_match_machine(league, clock: Clock) -> None:
         Status.DISPUTED,
         Status.COMPLETED,
         Status.VOIDED,
-    } <= MatchMachine.statuses_seen, MatchMachine.statuses_seen
+    }
+)
+
+
+def chunk_machine(chunk: int, community_id: int, clock: Clock, explore: bool) -> type[MatchMachine]:
+    """A fresh subclass per chunk. Unless exploring, its seed fixes the examples it runs."""
+    machine: type[MatchMachine] = type(
+        f"MatchMachine{chunk}",
+        (MatchMachine,),
+        {"community_id": community_id, "clock": clock, "statuses_seen": set()},
+    )
+    return machine if explore else seed(chunk)(machine)
+
+
+def statuses_of_every_chunk(
+    tmp_path_factory: pytest.TempPathFactory, chunk: int, seen: set[str]
+) -> set[str] | None:
+    """Saves what this chunk reached. Once every chunk has, returns what they reached together.
+
+    The files go in the run's temp folder, which holds each xdist worker's own folder.
+    """
+    base = tmp_path_factory.getbasetemp()
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        base = base.parent
+    folder = base / "match-machine"
+    folder.mkdir(exist_ok=True)
+    partial = folder / f"{chunk}.part"
+    partial.write_text(json.dumps(sorted(seen)), encoding="utf-8")
+    partial.replace(folder / f"{chunk}.json")  # Atomic, so a reader never sees half a file.
+    saved = list(folder.glob("*.json"))
+    if len(saved) < CHUNKS:
+        return None
+    return {status for path in saved for status in json.loads(path.read_text(encoding="utf-8"))}
+
+
+@pytest.mark.slow
+@pytest.mark.django_db
+@pytest.mark.parametrize("chunk", range(CHUNKS))
+def test_match_machine(
+    chunk: int, league, clock: Clock, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    # Fixed by default, so a failure means something changed rather than bad luck. Set EXPLORE=1
+    # for a longer hunt through sequences this run hasn't tried.
+    explore = bool(os.environ.get("EXPLORE"))
+    assert clock.now() >= timezone.now() - timedelta(seconds=5)
+    machine = chunk_machine(chunk, league.pk, clock, explore)
+    run_state_machine_as_test(
+        machine,
+        settings=settings(
+            database=None,  # The same examples in every checkout, not ones saved locally.
+            max_examples=1 + (EXPLORE_EXAMPLES if explore else EXAMPLES) // CHUNKS,
+            stateful_step_count=56,  # The 18-step champion draft takes a few more.
+            deadline=None,
+            suppress_health_check=list(HealthCheck),
+        ),
+    )
+    # The chunks share the job, so whichever finishes last checks what they reached together.
+    reached = statuses_of_every_chunk(tmp_path_factory, chunk, machine.statuses_seen)
+    if reached is not None:
+        assert reached >= MUST_REACH, sorted(MUST_REACH - reached)

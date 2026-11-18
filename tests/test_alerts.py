@@ -20,7 +20,7 @@ from league.models.matches import ResourceKind
 from league.models.permissions import Area
 from league.services import alerts, community, lobby, permissions
 from league.services import results as results_service
-from tests.conftest import make_player, publish_presets
+from tests.conftest import make_player
 from tests.helpers import fresh, to_in_progress
 from tests.test_bot import FakeGateway, drain, live_notice_texts, popped_match, resource
 from tests.test_handlers import click, fake_interaction, replies
@@ -33,7 +33,6 @@ DISPUTES_ROLE, RATINGS_ROLE, SETUP_ROLE = 601, 602, 603
 
 @pytest.fixture
 def server(transactional_db: None) -> Iterator[Community]:
-    publish_presets()
     row = community.ensure(guild_id=999, name="Test")
     community.save_wiring(
         row.pk,

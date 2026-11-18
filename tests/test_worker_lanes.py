@@ -103,8 +103,9 @@ def test_a_slow_match_does_not_hold_up_another_match(
         assert await worker.dispatch() == 2
         # Match 202 finishes while match 101 is still stuck on its Discord call.
         await asyncio.wait_for(slow_and_fast.fast_ran.wait(), timeout=15)
-        await settle(lambda: 2 in outbox.done)  # Marking it done runs on the DB thread.
-        assert worker.busy_matches == {101}
+        # Marking it done runs on the DB thread, and its lane closes after that, back on the loop.
+        await settle(lambda: worker.busy_matches == {101})
+        assert outbox.done == [2]
         slow_and_fast.release.set()
         await worker.run_once()
         assert worker.busy_matches == set()
@@ -123,8 +124,8 @@ def _run_slow_then_fast(outbox: Outbox, state: SimpleNamespace, stuck_lane: obje
         assert await worker.dispatch() == 2
         # Generous: on a busy machine the other lane can take a moment to be scheduled.
         await asyncio.wait_for(state.fast_ran.wait(), timeout=15)
-        await settle(lambda: 2 in outbox.done)
-        assert worker.busy_matches == {stuck_lane}
+        await settle(lambda: worker.busy_matches == {stuck_lane})
+        assert outbox.done == [2]
         state.release.set()
         await worker.run_once()
 
