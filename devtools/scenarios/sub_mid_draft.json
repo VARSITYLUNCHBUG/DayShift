@@ -1,0 +1,72 @@
+{
+  "description": "A player subs out during the player draft, and the next player in the queue takes the spot.",
+  "steps": [
+    {
+      "title": "Start from the dev fixtures",
+      "method": "POST",
+      "path": "reset"
+    },
+    {
+      "title": "Twelve fixture players join the queue, which pops a lobby",
+      "method": "POST",
+      "path": "queue/join",
+      "body": {
+        "count": 12
+      }
+    },
+    {
+      "title": "A substitute waits in the queue",
+      "method": "POST",
+      "path": "players",
+      "body": {
+        "count": 1,
+        "name_prefix": "Sub",
+        "join_queue": true,
+        "rating": 1200
+      }
+    },
+    {
+      "title": "Through the ready check and captain vote",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "player_draft"
+      }
+    },
+    {
+      "title": "A player asks to sub out: the match pauses",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "request_sub",
+        "player_id": "non_captain:1"
+      }
+    },
+    {
+      "title": "They skip naming someone and ask the queue",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "offer_queue",
+        "player_id": "requester"
+      }
+    },
+    {
+      "title": "The substitute accepts and takes the seat",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "accept_sub",
+        "player_id": "offered"
+      }
+    },
+    {
+      "title": "The player draft finishes",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "coinflip"
+      }
+    }
+  ]
+}

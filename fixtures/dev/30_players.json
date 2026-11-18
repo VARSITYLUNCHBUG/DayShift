@@ -1,0 +1,198 @@
+[
+  {
+    "model": "league.player",
+    "pk": 1,
+    "fields": {
+      "discord_user_id": 1100000000000000100,
+      "display_name": "Ash",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 2,
+    "fields": {
+      "discord_user_id": 1100000000000000101,
+      "display_name": "Bex",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 3,
+    "fields": {
+      "discord_user_id": 1100000000000000102,
+      "display_name": "Cato",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 4,
+    "fields": {
+      "discord_user_id": 1100000000000000103,
+      "display_name": "Dara",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 5,
+    "fields": {
+      "discord_user_id": 1100000000000000104,
+      "display_name": "Ezra",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 6,
+    "fields": {
+      "discord_user_id": 1100000000000000105,
+      "display_name": "Fenn",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 7,
+    "fields": {
+      "discord_user_id": 1100000000000000106,
+      "display_name": "Gale",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 8,
+    "fields": {
+      "discord_user_id": 1100000000000000107,
+      "display_name": "Hollis",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 9,
+    "fields": {
+      "discord_user_id": 1100000000000000108,
+      "display_name": "Iris",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 10,
+    "fields": {
+      "discord_user_id": 1100000000000000109,
+      "display_name": "Jory",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 11,
+    "fields": {
+      "discord_user_id": 1100000000000000110,
+      "display_name": "Kit",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 12,
+    "fields": {
+      "discord_user_id": 1100000000000000111,
+      "display_name": "Lux",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 13,
+    "fields": {
+      "discord_user_id": 1100000000000000112,
+      "display_name": "Mags",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.player",
+    "pk": 14,
+    "fields": {
+      "discord_user_id": 1100000000000000113,
+      "display_name": "Nico",
+      "steam_account_id": null,
+      "steam_name": "",
+      "steam_linked_at": null,
+      "steam_verified_at": null,
+      "created_at": "2026-11-01T00:00:00Z",
+      "updated_at": "2026-11-01T00:00:00Z"
+    }
+  }
+]

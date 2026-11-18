@@ -1,0 +1,57 @@
+{
+  "description": "One captain misses the check-in: the next player in the vote takes over, and the draft starts.",
+  "steps": [
+    {
+      "title": "Start from the dev fixtures",
+      "method": "POST",
+      "path": "reset"
+    },
+    {
+      "title": "Twelve fixture players join the queue, which pops a lobby",
+      "method": "POST",
+      "path": "queue/join",
+      "body": {
+        "count": 12
+      }
+    },
+    {
+      "title": "Through the ready check and the captain vote",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "captain_checkin"
+      }
+    },
+    {
+      "title": "Team A's captain checks in",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "checkin",
+        "player_id": "captain:A"
+      }
+    },
+    {
+      "title": "The check-in runs out: team B's captain is replaced by the next in the vote",
+      "method": "POST",
+      "path": "matches/latest/fire"
+    },
+    {
+      "title": "The new captain checks in, and the player draft starts",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "checkin",
+        "player_id": "captain:B"
+      }
+    },
+    {
+      "title": "The captains draft the players",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "coinflip"
+      }
+    }
+  ]
+}

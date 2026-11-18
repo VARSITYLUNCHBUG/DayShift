@@ -1,0 +1,90 @@
+{
+  "description": "A whole ranked match, from an empty queue to the posted result, one phase per step.",
+  "steps": [
+    {
+      "title": "Start from the dev fixtures",
+      "method": "POST",
+      "path": "reset"
+    },
+    {
+      "title": "Twelve fixture players join the queue, which pops a lobby",
+      "method": "POST",
+      "path": "queue/join",
+      "body": {
+        "count": 12
+      }
+    },
+    {
+      "title": "Everyone readies up",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "captain_phase"
+      }
+    },
+    {
+      "title": "Everyone votes for captains",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "captain_checkin"
+      }
+    },
+    {
+      "title": "Both captains check in",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "player_draft"
+      }
+    },
+    {
+      "title": "The captains draft the players",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "coinflip"
+      }
+    },
+    {
+      "title": "The coinflip winner picks a side",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "champion_draft"
+      }
+    },
+    {
+      "title": "The captains ban and pick champions",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "lobby_code"
+      }
+    },
+    {
+      "title": "deadlock-api makes the lobby and its code is posted",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "in_progress"
+      }
+    },
+    {
+      "title": "A captain starts the match, then reports a win",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "awaiting_confirmation"
+      }
+    },
+    {
+      "title": "The other captain confirms, and the result is posted",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "completed"
+      }
+    }
+  ]
+}

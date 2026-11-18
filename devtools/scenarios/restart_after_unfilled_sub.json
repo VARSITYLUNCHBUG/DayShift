@@ -1,0 +1,77 @@
+{
+  "description": "Nobody takes a seat left during the draft, so the lobby restarts with the same players and a fresh captain vote.",
+  "steps": [
+    {
+      "title": "Start from the dev fixtures",
+      "method": "POST",
+      "path": "reset"
+    },
+    {
+      "title": "Twelve fixture players join the queue, which pops a lobby",
+      "method": "POST",
+      "path": "queue/join",
+      "body": {
+        "count": 12
+      }
+    },
+    {
+      "title": "Through the ready check and captain vote",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "player_draft"
+      }
+    },
+    {
+      "title": "A player asks to sub out: the match pauses",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "request_sub",
+        "player_id": "non_captain:1"
+      }
+    },
+    {
+      "title": "They ask the queue, which is empty",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "offer_queue",
+        "player_id": "requester"
+      }
+    },
+    {
+      "title": "The sub wait runs out with nobody found: the lobby restarts, its seat still open",
+      "method": "POST",
+      "path": "matches/latest/fire"
+    },
+    {
+      "title": "A late player joins the queue: the scheduler offers them the restarted lobby's seat",
+      "method": "POST",
+      "path": "players",
+      "body": {
+        "count": 1,
+        "name_prefix": "Late",
+        "join_queue": true,
+        "rating": 1000
+      }
+    },
+    {
+      "title": "The late player takes the seat they were offered",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "accept_sub",
+        "player_id": "offered"
+      }
+    },
+    {
+      "title": "The restarted lobby votes for captains again",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "player_draft"
+      }
+    }
+  ]
+}
