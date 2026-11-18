@@ -27,14 +27,14 @@ Please allow a reasonable time for a fix before you disclose publicly; 90 days i
 
 Fixes land on `main` and ship in the next published image, `ghcr.io/varsitylunchbug/dl-mm-discord`
 (the `latest` tag, and the newest `v*` tag once there are releases). Older images get no fixes:
-upgrade as [docs/ops/upgrades.md](docs/ops/upgrades.md) describes.
+upgrade as [deploy/README.md](deploy/README.md#running-it) describes.
 
 ## Scope
 
 In scope:
 
 - The bot, the web app and the Django admin.
-- The container images, the Compose files and the nginx, pgbouncer and observability config.
+- The container images, the Compose files and the Caddy edge's configuration.
 - The Ansible deploy in `deploy/`.
 
 Out of scope:
@@ -47,6 +47,5 @@ Out of scope:
 
 ## Running it safely
 
-[docs/ops/secrets.md](docs/ops/secrets.md) covers every secret and how to rotate it, and
-[docs/architecture.md](docs/architecture.md) explains the networks and database roles that keep
-the services apart.
+[deploy/README.md](deploy/README.md) covers the secrets and how to rotate them, and
+[docs/architecture.md](docs/architecture.md) explains the networks that keep the services apart.

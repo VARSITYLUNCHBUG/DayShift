@@ -48,7 +48,7 @@ norecursedirs = [
 addopts = "-ra --strict-markers"
 # WhiteNoise looks for the collected static files, which only the image build makes.
 filterwarnings = ["ignore:No directory at:UserWarning"]
-# Run in parallel with `pytest -n auto` (CI, scripts/test.sh). A plain `pytest` stays serial.
+# Run in parallel with `pytest -n auto` (CI, make test). A plain `pytest` stays serial.
 markers = ["slow: a long test; parallel runs start it first"]
 
 [tool.ruff]

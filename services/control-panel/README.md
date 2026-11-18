@@ -12,7 +12,7 @@ machine.
 
 ## Running it
 
-With the dev stack (`scripts/fixture_to_test.sh`, see `docs/dev/README.md`) it runs as the
+With the dev stack (`make dev`, see `docs/dev/README.md`) it runs as the
 `control-panel` service at <http://127.0.0.1:18091>. The container is nginx serving the built
 app on port 8091, and it proxies:
 

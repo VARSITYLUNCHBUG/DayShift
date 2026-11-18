@@ -1,5 +1,5 @@
 """Where the stack under test is. compose.test.yaml sets these in the e2e container; the
-defaults are the dev stack on this machine (scripts/fixture_to_test.sh), reached through the
+defaults are the dev stack on this machine (make dev), reached through the
 control panel's proxy."""
 
 from __future__ import annotations

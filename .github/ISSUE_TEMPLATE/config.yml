@@ -6,6 +6,6 @@ contact_links:
   - name: Developer guide
     url: https://github.com/VARSITYLUNCHBUG/dl-mm-discord/blob/main/docs/dev/README.md
     about: Setting up the dev stack, running the tests and the control panel.
-  - name: Operations guide
-    url: https://github.com/VARSITYLUNCHBUG/dl-mm-discord/blob/main/docs/ops/README.md
-    about: Deploying, upgrading, backups, secrets and alerts.
+  - name: Deploy guide
+    url: https://github.com/VARSITYLUNCHBUG/dl-mm-discord/blob/main/deploy/README.md
+    about: Deploying, upgrading, backups, secrets and health alerts.

@@ -77,7 +77,7 @@ loads the fixtures and seeds the ratings, and says the channels aren't wired.
   | 409 | `invalid_action`, `stale_action` | The league refused: a rule, or the match moved on |
   | 502 | `sim_error` | The simulator answered with an error, or isn't reachable |
   | 503 | `bot_offline` | No bot is connected to the simulator's gateway (a press waits up to 10 s for it to reconnect first) |
-  | 503 | `busy` | A reset couldn't get the league tables from the bot and the scheduler in 30 s |
+  | 503 | `busy` | A reset couldn't get the league tables from the bot in 30 s |
   | 504 | `timeout` | The bot didn't act on a simulated click in time |
   | 500 | `server_error` | A bug: the web process logs the traceback |
 
@@ -230,7 +230,7 @@ Body: `{"fixture": "dev_default"}` (default) or `{"fixture": "none"}`.
 First stops the bot's pending effects and waits (up to 5 s) for the ones it is running, so none
 writes into the emptied tables. Then it locks every league table at once, so nothing can happen
 between that and the wipe: no deadline fires, no effect is claimed. Each try at the locks gives
-up after 0.5 s and goes again, so a reset never deadlocks with the bot or the scheduler; if the
+up after 0.5 s and goes again, so a reset never deadlocks with the bot; if the
 bot claimed an effect in between, the reset goes round again. After 30 s of that it answers 503
 (`busy`) and changes nothing. Holding the locks, it resets the simulator (`POST /_sim/reset`),
 empties every league table except champions and draft modes (ids restart at 1, except outbox
@@ -407,9 +407,9 @@ host), `other_captain` (the captain who hasn't reported yet), `participant:N` (t
 participant by id, from 1), `non_captain:N`, `queued:N` (the Nth in the queue), `offered`
 (the player of the newest pending sub offer), `requester` (whoever asked for the newest sub).
 Before it picks `offered`, an open seat nobody has been asked for yet while someone waits in the
-queue is offered to them first: the scheduler's sub pass (`subs.tick`) runs then, as it would
-within a second anyway, so a step that acts as `offered` right after a player joins doesn't race
-the scheduler.
+queue is offered to them first: the deadline loop's sub pass (`subs.tick`) runs then, as it
+would within a second anyway, so a step that acts as `offered` right after a player joins doesn't
+race the bot's own pass.
 
 Response: `{"match": Match, "actions": [{"player_id": 1, "action": "ready", "args": {}, "via": "service"}]}`.
 
