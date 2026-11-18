@@ -14,8 +14,10 @@ captains and their check-in, player draft and swaps, champion pick/ban, an autom
 screenshot reporting, OpenSkill ratings with MVP and key-player awards (with NeatQueue's points
 carried over while the server cuts over), a leaderboard channel, and optional score OCR.
 
-Python, Django and Postgres. One codebase and one image, running as two processes: `bot`
-(discord.py) and `web` (the Django admin and the staff calibration dashboard).
+Python, Django and Postgres. One codebase and one image, run as a few services: `bot` (the
+discord.py gateway connection), `scheduler` (match timers), `web` (the Django admin and the staff
+calibration dashboard) and a one-shot `migrate`, behind an nginx `edge` and with pgbouncer in
+front of Postgres. [docs/architecture.md](docs/architecture.md) shows how they fit together.
 
 This README is for whoever runs the bot. Players have the
 [wiki](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/wiki), a short guide to playing a match,
@@ -24,7 +26,19 @@ subs, strikes, ratings and commands. Bugs and ideas go in
 [Giving Feedback](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/wiki#giving-feedback) says what
 to include.
 
+| Guide | For |
+|---|---|
+| This README | Running the bot: setup, how a match runs, settings, ratings, commands |
+| [deploy/README.md](deploy/README.md) | Installing it for a client on their own server, with HTTPS, backups and alerts |
+| [docs/ops/](docs/ops/README.md) | Keeping that server running: alerts and their runbooks, backups, upgrades, secrets, capacity, incidents |
+| [docs/dev/README.md](docs/dev/README.md) | Working on the code: the local stack against a Discord simulator, the control panel, tests |
+| [docs/architecture.md](docs/architecture.md) | The services, how a click and a timer reach Discord, and why it's built this way |
+
 ## Run it
+
+This is the quickstart on one machine, with the admin on 127.0.0.1. For a server on the internet,
+use the [deploy guide](deploy/README.md): it adds HTTPS, metrics and alerts, nightly backups and a
+hardened host.
 
 1. Create an application and bot in the
    [Discord Developer Portal](https://discord.com/developers/applications). No privileged intents
@@ -34,19 +48,32 @@ to include.
    https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+applications.commands&permissions=281475298741265
    ```
 3. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`, `DISCORD_GUILD_ID`,
-   `DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD`. Use the same password in `DATABASE_URL`.
-   Generate a secret key with:
+   `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD` (the database superuser's) and `DB_APP_PASSWORD`
+   (the login web, bot and scheduler use, which can't change the schema). The two passwords
+   must differ, and go into database URLs, so use letters and digits only. Generate the key and
+   the passwords with:
    ```bash
    uv run python -c "import secrets; print(secrets.token_urlsafe(50))"
+   uv run python -c "import secrets; print(secrets.token_hex(32))"
    ```
-4. Start everything. This also runs migrations and loads the presets:
+   `DATABASE_URL` in `.env` is only for running `manage.py` on your machine; if you do, use the
+   superuser's password there.
+4. Start everything, either from the published image:
+   ```bash
+   docker compose pull && docker compose up -d
+   ```
+   or built from your checkout. Set `DRAFTBOT_IMAGE_TAG=local` in `.env` first, so your build
+   has a tag of its own that a later `pull` doesn't replace:
    ```bash
    docker compose up -d --build
    ```
-   To use the published image instead of building, run `docker compose pull` and then
-   `docker compose up -d`. The image is `ghcr.io/varsitylunchbug/dl-mm-discord`, listed under the
-   repo's Packages. It's built from `main` without score OCR: `latest` and `main` follow `main`,
-   and `sha-<commit>` pins one build.
+   That starts `db` (Postgres), `pgbouncer`, the one-shot `migrate` (static files, migrations,
+   presets and the database roles, before anything else), `web`, `bot`, `scheduler` and the
+   `edge`, which serves the admin on http://127.0.0.1:8000. `docker compose ps` should show every
+   service it lists as healthy (`migrate` has exited by then, so only `ps -a` shows it).
+   The published image is `ghcr.io/varsitylunchbug/dl-mm-discord`, listed under the repo's
+   Packages. It's built from `main` without score OCR: `latest` and `main` follow `main`, and
+   `sha-<commit>` pins one build (`DRAFTBOT_IMAGE_TAG`).
 5. In Discord, run `/setup pug_role:@PUGS` as the server owner or an Administrator. It creates
    the queue, Waiting Room, results, leaderboard, archive and staff-alerts channels, and it is
    safe to run again. With a PUG role, only that role sees the queue, Waiting Room, results and
@@ -57,8 +84,10 @@ to include.
    docker compose exec web python manage.py createsuperuser
    ```
 
-The admin binds to localhost. Put a TLS reverse proxy in front of it before exposing it, and set
-`BEHIND_TLS_PROXY=true`, `SECURE_COOKIES=true` and `CSRF_TRUSTED_ORIGINS`.
+The edge listens on 127.0.0.1 only (`EDGE_PORT`), and Postgres on 127.0.0.1:55432 (`DB_PORT`)
+for tools on your machine. Don't publish either: to put the bot on the internet, use the
+[deploy guide](deploy/README.md), which serves the same stack over HTTPS with certificates from
+Let's Encrypt.
 
 ## The admin and Discord
 
@@ -423,7 +452,7 @@ name, hero, K/D/A, souls, damage, healing and badge. It's optional, because its 
 large. Build with it:
 
 ```bash
-INSTALL_OCR=true docker compose up -d --build
+INSTALL_OCR=true DRAFTBOT_IMAGE_TAG=local docker compose up -d --build
 ```
 
 Then choose a mode in Runtime settings (Score OCR), which refuses anything but off when it isn't
@@ -645,7 +674,26 @@ bot/renderers/    State to Discord components, with no I/O. style.py is the one 
                   names.py names the channels the bot creates
 bot/effects/      Runs Discord side effects from the outbox, with retries
 bot/error_log.py  Posts ERROR logs to each server's /seterrorchannel channel
+bot/metrics.py    The bot's and the scheduler's Prometheus metrics
+league/observability/  The web process's metrics: requests, and the league's gauges
+config/           Django settings, the ASGI app, health probes (/healthz, /readyz), logging
 scoreocr/         Scoreboard screenshot reader, used through league/services/ocr.py when installed
+presets/          Draft modes, hero emojis and draft GIFs, loaded by load_presets
+
+devtools/         Dev only: the /_control/ API, the autopilot that plays matches, scenarios
+fixtures/dev/     Dev only: the community, season, staff grants and players dev_seed loads
+services/discord-sim/    Dev and test only: a fake Discord (REST, gateway) and deadlock-api
+services/control-panel/  Dev and test only: the control panel over the two APIs above
+tests/            The unit suite (pytest, Postgres)
+tests/e2e/        The browser suite: Playwright against the whole stack and the simulator
+
+infra/nginx/      The edge: sites, TLS, rate limits, security headers, JSON access logs
+infra/pgbouncer/  The pooler's configuration and the entrypoint that writes its auth file
+infra/observability/  Prometheus scrapes and alert rules, Alertmanager, Grafana dashboards
+compose*.yaml     The stack, and an override per environment (dev, test, observability)
+deploy/           Ansible for a client's server, and the production compose overrides
+scripts/          fixture_to_test, test, clean_containers: the dev stack and the test runs
+docs/             Architecture, the developer guide, the operations guides
 ```
 
 The rules that keep it reliable:
@@ -663,58 +711,34 @@ The rules that keep it reliable:
 ## Operations
 
 ```bash
-docker compose logs -f bot
-```
-
-```bash
+docker compose ps
+docker compose logs -f bot scheduler
 docker compose exec bot python manage.py check_ledger
 ```
 
-(The same check is **Check ledger** on the admin's Rating runs list.)
+`check_ledger` is also **Check ledger** on the admin's Rating runs list. `rebuild_ratings`
+recreates `player_ratings` from the ledger; it never writes to the ledger itself. Check the Outbox
+effects page in admin, filtered to `failed`, if channels aren't being created or cleaned up.
 
-```bash
-docker compose exec db pg_dump -U draftbot draftbot > backup.sql
-```
-
-`rebuild_ratings` recreates `player_ratings` from the ledger. It never writes to the ledger itself.
-Back up the database daily: the volume is the only copy of match history and ratings.
-
-Check the Outbox effects page in admin, filtered to `failed`, if channels aren't being created or
-cleaned up. The bot's healthcheck fails if its loops stop updating the heartbeat file.
+Back up the database daily: the volume is the only copy of match history and ratings. A client
+install does that by itself; [docs/ops/backups.md](docs/ops/backups.md) has both ways, and how to
+restore. The rest of running a server (alerts and their runbooks, upgrades, secrets, capacity) is
+in [docs/ops/](docs/ops/README.md).
 
 ## Development
 
-Postgres runs in Docker on port 55432. System Python isn't needed; `uv` manages it.
+[docs/dev/README.md](docs/dev/README.md) is the developer guide. In short, with Docker and
+[uv](https://docs.astral.sh/uv/):
 
 ```bash
-docker compose up -d db
+scripts/fixture_to_test.sh      # the whole stack against a Discord simulator, seeded, with the control panel
+scripts/test.sh --local         # the unit suite, in parallel, against a throwaway Postgres
+scripts/test.sh e2e             # the browser suite against the whole stack
+scripts/clean_containers.sh     # remove everything the dev and test stacks left behind
 ```
 
-```bash
-DEBUG=true uv run pytest
-```
-
-```bash
-uv run ruff check bot league config tests manage.py && uv run ruff format --check bot league config tests manage.py
-```
-
-```bash
-DEBUG=true uv run mypy bot league config
-```
-
-Run the bot on your machine, without building an image:
-
-```bash
-DEBUG=true uv run python manage.py migrate
-```
-
-```bash
-DEBUG=true uv run python manage.py load_presets
-```
-
-```bash
-DEBUG=true uv run python manage.py runbot
-```
+On Windows, the same scripts end in `.bat`. The guide's
+[lint and type checks](docs/dev/README.md#lint-and-type-checks) are what CI runs before a merge.
 
 ## Check before launch
 
