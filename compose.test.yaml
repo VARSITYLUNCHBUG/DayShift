@@ -15,8 +15,6 @@ x-test-app: &test-app
   build:
     target: dev
   image: ${COMPOSE_PROJECT_NAME}/app:local
-  # Self-contained: no .env needed. Everything the app reads is below.
-  env_file: !reset []
   restart: "no"
 
 # web logs in as the superuser, for the dev control API's reset (compose.dev.yaml says why); the
@@ -108,6 +106,9 @@ services:
   migrate:
     <<: *test-app
     profiles: [e2e]
+    # Self-contained: no .env needed. Everything the app reads is below. The reset is on the
+    # service itself, not in x-test-app: Compose v2 drops a !reset that arrives through `<<:`.
+    env_file: !reset []
     command: >-
       sh -c "python manage.py migrate --noinput && python manage.py load_presets
       && python -m config.app_role && python manage.py dev_seed"
@@ -122,6 +123,7 @@ services:
   web:
     <<: *test-app
     profiles: [e2e]
+    env_file: !reset []
     environment:
       <<: *test-env
       FORWARDED_ALLOW_IPS: ${TEST_EDGE_IP:-10.203.140.34}
@@ -131,6 +133,7 @@ services:
   bot:
     <<: *test-app
     profiles: [e2e]
+    env_file: !reset []
     environment: *test-app-role
     healthcheck:
       interval: 10s
@@ -138,6 +141,7 @@ services:
   scheduler:
     <<: *test-app
     profiles: [e2e]
+    env_file: !reset []
     environment: *test-app-role
     healthcheck:
       interval: 10s
