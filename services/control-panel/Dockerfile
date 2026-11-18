@@ -8,7 +8,7 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.30.6-alpine3.24
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine3.24
 LABEL org.opencontainers.image.title="draft-bot control panel" \
       org.opencontainers.image.description="Dev-only UI for the local stack and the Discord simulator"
 ENV NGINX_ENTRYPOINT_QUIET_LOGS=1
