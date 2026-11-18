@@ -3,6 +3,10 @@
   ansible.builtin.apt:
     name: "{{ docker_conflicting_packages }}"
     state: absent
+  # A server that ran Ubuntu's docker.io: removing it leaves systemd holding that package's
+  # docker.socket and docker.service until a reload, so docker-ce's units don't take over and
+  # docker.service, which takes its listener from docker.socket (-H fd://), won't start.
+  notify: Reload systemd
   tags: [docker]
 
 - name: Install what the apt repository and Ansible's Docker modules need
@@ -76,6 +80,17 @@
     validate: /usr/bin/dockerd --validate --config-file %s
   notify: Restart docker
   tags: [docker, docker-config]
+
+- name: Reload systemd now, if the distribution's Docker was just replaced
+  ansible.builtin.meta: flush_handlers
+  tags: [docker]
+
+- name: Keep Docker's socket listening
+  ansible.builtin.systemd_service:
+    name: docker.socket
+    state: started
+    enabled: true
+  tags: [docker]
 
 - name: Keep Docker running
   ansible.builtin.service:

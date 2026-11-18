@@ -120,6 +120,38 @@
         fail_msg: .env or .env.observability is wrong.
       no_log: true
 
+    # Docker refuses a CPU limit above the host's count, so the db's must fit a 1-CPU server.
+    - name: Check the db's CPU limit fits this server
+      ansible.builtin.assert:
+        that:
+          - verify_dotenv.content | b64decode is search("^DB_CPUS='" ~ verify_db_cpus_expected ~ "'$", multiline=true)
+        fail_msg: .env's DB_CPUS doesn't match the server's CPUs.
+      vars:
+        verify_db_cpus_expected: "{{ [ansible_facts['processor_vcpus'] | int, 2] | min }}"
+      no_log: true
+
+    - name: Find the db's container
+      ansible.builtin.command:
+        cmd: "{{ verify_compose }} ps -q db"
+        chdir: "{{ draftbot_root }}"
+      register: verify_db_container
+      changed_when: false
+
+    - name: Check the db runs with that limit
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{% raw %}{{ .HostConfig.NanoCpus }}{% endraw %}"
+          - "{{ verify_db_container.stdout }}"
+      register: verify_db_cpus
+      changed_when: false
+      # NanoCpus counts billionths of a CPU.
+      failed_when: verify_db_cpus.stdout | int != verify_db_cpus_expected | int * 10**9
+      vars:
+        verify_db_cpus_expected: "{{ [ansible_facts['processor_vcpus'] | int, 2] | min }}"
+
     - name: Check app_env_extra can't turn on a dev-only setting
       block:
         - name: Try to set DEBUG through app_env_extra
