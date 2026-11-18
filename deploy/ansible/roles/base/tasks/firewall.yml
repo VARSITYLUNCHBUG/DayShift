@@ -1,0 +1,33 @@
+---
+# Docker publishes ports through its own iptables chains, ahead of ufw. Only the edge's 80 and 443
+# are published on every interface; the rest of the compose project binds 127.0.0.1 or nothing.
+- name: Deny incoming traffic by default
+  community.general.ufw:
+    default: deny
+    direction: incoming
+
+- name: Allow outgoing traffic
+  community.general.ufw:
+    default: allow
+    direction: outgoing
+
+- name: Allow SSH, rate limited
+  community.general.ufw:
+    rule: limit
+    port: "22"
+    proto: tcp
+    from_ip: "{{ item }}"
+  loop: "{{ base_ssh_allow_cidrs }}"
+
+- name: Allow the web ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+  loop: "{{ base_firewall_allowed }}"
+  loop_control:
+    label: "{{ item.port }}/{{ item.proto }}"
+
+- name: Turn the firewall on
+  community.general.ufw:
+    state: enabled

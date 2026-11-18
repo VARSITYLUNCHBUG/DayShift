@@ -1,0 +1,106 @@
+# Weekly dependency updates, one grouped pull request per ecosystem for minor and patch
+# releases; a major release gets a pull request of its own. A release has to be a week old
+# before Dependabot proposes it, so a bad or hijacked one is usually pulled first.
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directories:
+      - "/"
+      - "/services/discord-sim"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # deploy/ansible's pinned ansible-core and ansible-lint.
+  - package-ecosystem: pip
+    directory: "/deploy/ansible"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      ansible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # The browser suite's locked requirements. Playwright moves with the Playwright image in
+  # tests/e2e/Dockerfile (the docker update below): bump requirements.in to match in that PR.
+  - package-ecosystem: pip
+    directory: "/tests/e2e"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: playwright
+    groups:
+      e2e:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: "/services/control-panel"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Base images in every Dockerfile.
+  - package-ecosystem: docker
+    directories:
+      - "/"
+      - "/scripts/docker"
+      - "/services/control-panel"
+      - "/services/discord-sim"
+      - "/tests/e2e"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      docker:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Service images in the compose files: Postgres, pgbouncer, nginx, the observability stack.
+  - package-ecosystem: docker-compose
+    directories:
+      - "/"
+      - "/deploy"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      compose:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Actions are pinned by commit; Dependabot moves the SHA and its version comment together.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]

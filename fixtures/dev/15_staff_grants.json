@@ -1,0 +1,79 @@
+[
+  {
+    "model": "league.communityrolegrant",
+    "pk": 1,
+    "fields": {
+      "community": 1,
+      "role_id": 1100000000000000004,
+      "area": "setup",
+      "granted_by_discord_id": 1100000000000000000,
+      "created_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.communityrolegrant",
+    "pk": 2,
+    "fields": {
+      "community": 1,
+      "role_id": 1100000000000000004,
+      "area": "match_control",
+      "granted_by_discord_id": 1100000000000000000,
+      "created_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.communityrolegrant",
+    "pk": 3,
+    "fields": {
+      "community": 1,
+      "role_id": 1100000000000000004,
+      "area": "disputes",
+      "granted_by_discord_id": 1100000000000000000,
+      "created_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.communityrolegrant",
+    "pk": 4,
+    "fields": {
+      "community": 1,
+      "role_id": 1100000000000000004,
+      "area": "ratings",
+      "granted_by_discord_id": 1100000000000000000,
+      "created_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.communityrolegrant",
+    "pk": 5,
+    "fields": {
+      "community": 1,
+      "role_id": 1100000000000000004,
+      "area": "moderation",
+      "granted_by_discord_id": 1100000000000000000,
+      "created_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.communityrolegrant",
+    "pk": 6,
+    "fields": {
+      "community": 1,
+      "role_id": 1100000000000000004,
+      "area": "community",
+      "granted_by_discord_id": 1100000000000000000,
+      "created_at": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "league.communityrolegrant",
+    "pk": 7,
+    "fields": {
+      "community": 1,
+      "role_id": 1100000000000000004,
+      "area": "scrims",
+      "granted_by_discord_id": 1100000000000000000,
+      "created_at": "2026-11-01T00:00:00Z"
+    }
+  }
+]

@@ -1,0 +1,8 @@
+---
+profile: production
+exclude_paths:
+  - collections/
+  - .cache/
+  # Compose files, not playbooks. yamllint still checks them.
+  - molecule/default/compose.molecule.yaml
+  - molecule/default/pebble/

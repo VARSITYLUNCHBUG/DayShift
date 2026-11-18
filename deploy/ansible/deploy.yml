@@ -1,0 +1,46 @@
+---
+# Upgrade to another image tag: back up, pull, migrate, then restart the services one at a time.
+# Changes to the compose files and the edge and observability configuration ship with it.
+#   ansible-playbook -i inventories/<client> deploy.yml --ask-vault-pass
+# Set the new tag in draftbot_image_tag first, or pass -e draftbot_image_tag=sha-<commit>.
+- name: Deploy a dl-mm-discord image
+  hosts: draftbot
+  become: true
+  serial: 1
+  vars:
+    # false skips the pre-upgrade backup.
+    deploy_backup_first: true
+    # Fetch every image again: a moved tag, and the infrastructure images' patch releases.
+    app_pull_policy: always
+  pre_tasks:
+    - name: Check the inventory and the vault
+      ansible.builtin.import_tasks: tasks/preflight.yml
+
+    - name: Read the tag the server runs now
+      ansible.builtin.command:
+        cmd: grep -oP "^DRAFTBOT_IMAGE_TAG='\K[^']+" {{ draftbot_root }}/.env
+      register: deploy_current_tag
+      changed_when: false
+      failed_when: false
+
+    - name: Show the upgrade
+      ansible.builtin.debug:
+        msg: >-
+          {{ deploy_current_tag.stdout | default('nothing') or 'nothing' }} -> {{ draftbot_image_tag }}.
+          To roll back, deploy the old tag; if the new one migrated the database, restore the
+          pre-upgrade backup with restore.yml as well.
+
+    - name: Back up before the upgrade
+      ansible.builtin.include_role:
+        name: backups
+        tasks_from: run.yml
+      when: deploy_backup_first | bool and deploy_current_tag.rc == 0
+  roles:
+    - role: app
+    - role: edge
+    - role: observability
+  post_tasks:
+    - name: Start the project at boot
+      ansible.builtin.include_role:
+        name: app
+        tasks_from: systemd.yml

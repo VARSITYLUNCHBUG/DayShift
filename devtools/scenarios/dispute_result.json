@@ -1,0 +1,61 @@
+{
+  "description": "The captains disagree on the result, and staff settle the dispute.",
+  "steps": [
+    {
+      "title": "Start from the dev fixtures",
+      "method": "POST",
+      "path": "reset"
+    },
+    {
+      "title": "Twelve fixture players join the queue, which pops a lobby",
+      "method": "POST",
+      "path": "queue/join",
+      "body": {
+        "count": 12
+      }
+    },
+    {
+      "title": "Through the draft to the game",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "in_progress"
+      }
+    },
+    {
+      "title": "Team A's captain reports that A won",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "report",
+        "player_id": "captain:A",
+        "args": {
+          "winner": "A"
+        }
+      }
+    },
+    {
+      "title": "Team B's captain disputes it",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "dispute",
+        "player_id": "captain:B",
+        "args": {
+          "note": "We won that one."
+        }
+      }
+    },
+    {
+      "title": "Staff resolve it for team B",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "resolve",
+        "args": {
+          "outcome": "B"
+        }
+      }
+    }
+  ]
+}

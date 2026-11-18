@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 import discord
 
+from bot import metrics
 from bot.db import db
 from bot.effects.gateway import ChannelGone, Gateway
 from bot.effects.handlers import HANDLERS, Env, Skip
@@ -101,15 +102,18 @@ class EffectWorker:
         handler = HANDLERS.get(effect.kind)
         if handler is None:
             await db(effects.mark_failed, effect.pk, f"No handler for {effect.kind}")
+            metrics.EFFECTS.labels(effect.kind, "failed").inc()
             logger.error("Unknown effect kind", extra={"kind": effect.kind})
             return True
         if not await db(effects.mark_started, effect.pk):
             return True  # Finished or cancelled since it was fetched.
         env = Env(self.gateway, effect, effect.community, effect.match)
         try:
-            await handler(env)
+            with metrics.EFFECT_DURATION.time():
+                await handler(env)
         except (Skip, ChannelGone) as exc:
             await db(effects.mark_done, effect.pk, EffectStatus.SKIPPED)
+            metrics.EFFECTS.labels(effect.kind, "skipped").inc()
             logger.debug("Effect skipped", extra={"kind": effect.kind, "why": str(exc)})
             return True
         except discord.HTTPException as exc:
@@ -124,6 +128,7 @@ class EffectWorker:
             )
             return await self._retry(effect, repr(exc))
         await db(effects.mark_done, effect.pk)
+        metrics.EFFECTS.labels(effect.kind, "done").inc()
         return True
 
     async def _retry(self, effect: OutboxEffect, error: str) -> bool:
@@ -131,6 +136,7 @@ class EffectWorker:
         if status == EffectStatus.FAILED:
             await self._on_failed(effect, error)
             return True
+        metrics.EFFECTS.labels(effect.kind, "retried").inc()
         logger.warning("Effect will retry", extra={"kind": effect.kind, "error": error})
         return False
 
@@ -139,6 +145,7 @@ class EffectWorker:
         await self._on_failed(effect, error)
 
     async def _on_failed(self, effect: OutboxEffect, error: str) -> None:
+        metrics.EFFECTS.labels(effect.kind, "failed").inc()
         logger.error(
             "Effect failed for good",
             extra={

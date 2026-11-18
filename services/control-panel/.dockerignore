@@ -1,0 +1,10 @@
+# Only what the build needs: sources, configs and the lockfile.
+node_modules
+dist
+coverage
+*.tsbuildinfo
+.env*
+Dockerfile
+.dockerignore
+README.md
+mock

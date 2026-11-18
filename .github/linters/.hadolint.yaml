@@ -1,0 +1,15 @@
+# hadolint for every Dockerfile in the repo. CI and pre-commit both run:
+#   hadolint --config .github/linters/.hadolint.yaml <Dockerfile>
+# Warnings and errors fail; info-level hints are only printed.
+failure-threshold: warning
+
+ignored:
+  # USER by name: every image creates that user with a fixed uid, and no orchestrator here needs
+  # a numeric one to check runAsNonRoot.
+  - DL3066
+
+# Base images come from these registries only.
+trustedRegistries:
+  - docker.io
+  - ghcr.io
+  - mcr.microsoft.com

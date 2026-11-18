@@ -1,0 +1,29 @@
+# yamllint for the repo's YAML outside deploy/ansible, which deploy-lint.yml lints with its own
+# config. CI and pre-commit both run: yamllint -c .github/linters/.yamllint.yaml .
+extends: default
+
+rules:
+  # Reported but not fatal: compose healthchecks are one-line commands. A key whose value is
+  # one long word, such as an image pinned by digest, is fine.
+  line-length:
+    max: 120
+    level: warning
+    allow-non-breakable-inline-mappings: true
+  # The presets write flow mappings as `{ key: value }`.
+  braces:
+    max-spaces-inside: 1
+  comments:
+    min-spaces-from-content: 1
+  # GitHub Actions' `on:` key is a string, not a boolean.
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+  # Compose and workflow files start without `---`.
+  document-start: disable
+  # A few committed files are CRLF; .gitattributes owns line endings.
+  new-lines: disable
+
+ignore: |
+  deploy/ansible/
+  node_modules/
+  .venv/

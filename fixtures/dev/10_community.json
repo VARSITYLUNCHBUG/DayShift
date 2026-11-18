@@ -1,0 +1,78 @@
+[
+  {
+    "model": "league.community",
+    "pk": 1,
+    "fields": {
+      "discord_guild_id": 1100000000000000001,
+      "name": "Dev League",
+      "active_mode": 2,
+      "queue_channel_id": null,
+      "queue_message_id": null,
+      "waiting_room_channel_id": null,
+      "results_channel_id": null,
+      "archive_channel_id": null,
+      "match_category_id": null,
+      "staff_channel_id": null,
+      "error_channel_id": null,
+      "pug_role_id": null,
+      "leaderboard_channel_id": null,
+      "leaderboard_message_ids": [],
+      "penalty_policy": {
+        "ladders": {
+          "missed_ready": [
+            5,
+            15,
+            60,
+            180,
+            720
+          ],
+          "dodge": [
+            60,
+            360,
+            1440,
+            4320,
+            10080
+          ],
+          "leaver": [
+            120,
+            720,
+            2880,
+            10080
+          ],
+          "false_report": [
+            1440,
+            4320,
+            10080
+          ]
+        },
+        "strikes": {
+          "missed_ready": 1,
+          "dodge": 2,
+          "leaver": 3,
+          "false_report": 3,
+          "manual": 0
+        },
+        "games_per_strike": 3,
+        "decay_days": 14,
+        "max_strikes": 10
+      }
+    }
+  },
+  {
+    "model": "league.runtimesettings",
+    "pk": 1,
+    "fields": {
+      "community": 1,
+      "max_concurrent_matches": 12,
+      "auto_captain": false,
+      "open_match_voice": false,
+      "match_channel_close_minutes": 1,
+      "score_ocr": "off",
+      "lobby_region": "",
+      "api_results": false,
+      "interim_points": false,
+      "interim_start_points": 1000,
+      "interim_k_factor": 32
+    }
+  }
+]

@@ -1,0 +1,34 @@
+---
+# Docker Engine and the compose plugin from Docker's own apt repository.
+docker_apt_url: https://download.docker.com/linux
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+# Upgrade them to the newest release now, instead of leaving them to unattended-upgrades'
+# nightly run (roles/base, base_unattended_docker). For example, for a runc fix:
+#   ansible-playbook -i inventories/<client> site.yml --tags docker -e docker_upgrade=true
+docker_upgrade: false
+# Distribution packages that clash with Docker's, removed first.
+docker_conflicting_packages:
+  - docker.io
+  - docker-doc
+  - docker-compose
+  - docker-compose-v2
+  - podman-docker
+  - containerd
+  - runc
+
+# Container logs rotate: each container keeps at most max-file files of max-size.
+docker_log_driver: local
+docker_log_max_size: 10m
+docker_log_max_file: 5
+# Containers keep running while dockerd restarts, as on a Docker upgrade.
+docker_live_restore: true
+# Anything else for /etc/docker/daemon.json.
+docker_daemon_extra: {}
+
+# Users who can run docker without sudo. Membership is root in all but name.
+docker_users: []

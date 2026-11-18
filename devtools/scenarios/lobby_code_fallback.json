@@ -1,0 +1,58 @@
+{
+  "description": "deadlock-api can't make the lobby, so the host creates one and enters its code.",
+  "steps": [
+    {
+      "title": "Start from the dev fixtures",
+      "method": "POST",
+      "path": "reset"
+    },
+    {
+      "title": "deadlock-api refuses lobbies from now on",
+      "method": "PUT",
+      "path": "lobbies",
+      "body": {
+        "lobby": "fail"
+      }
+    },
+    {
+      "title": "Twelve fixture players join the queue, which pops a lobby",
+      "method": "POST",
+      "path": "queue/join",
+      "body": {
+        "count": 12
+      }
+    },
+    {
+      "title": "Through the champion draft",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "lobby_code"
+      }
+    },
+    {
+      "title": "The lobby fails over to the host, who enters the code",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "in_progress"
+      }
+    },
+    {
+      "title": "The result, reported and confirmed",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "completed"
+      }
+    },
+    {
+      "title": "deadlock-api makes lobbies again",
+      "method": "PUT",
+      "path": "lobbies",
+      "body": {
+        "lobby": "create"
+      }
+    }
+  ]
+}

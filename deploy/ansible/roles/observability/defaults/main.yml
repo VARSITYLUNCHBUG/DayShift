@@ -1,0 +1,14 @@
+---
+# Prometheus, Alertmanager, Grafana and the exporters (compose.observability.yaml). Off, their
+# containers are removed; their data volumes stay.
+observability_enabled: "{{ draftbot_observability | default(true) }}"
+observability_root: "{{ draftbot_root }}"
+# The checkout you run Ansible from.
+observability_repo_root: "{{ role_path }}/../../../.."
+# .env.observability, which only Grafana and Alertmanager read (never the app's containers).
+# Grafana's `admin` user, 12+ characters. Grafana only reads GRAFANA_ADMIN_PASSWORD when it
+# first creates its database, so this role resets the password when it no longer works.
+observability_grafana_admin_password: ""
+# A Discord channel webhook alerts are posted to. Empty shows them in Grafana and Prometheus only.
+observability_alertmanager_discord_webhook_url: ""
+observability_wait_timeout: 300

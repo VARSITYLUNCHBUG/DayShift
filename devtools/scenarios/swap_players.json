@@ -1,0 +1,52 @@
+{
+  "description": "After the player draft, one captain offers a swap and the other accepts: the two players change teams.",
+  "steps": [
+    {
+      "title": "Start from the dev fixtures",
+      "method": "POST",
+      "path": "reset"
+    },
+    {
+      "title": "Twelve fixture players join the queue, which pops a lobby",
+      "method": "POST",
+      "path": "queue/join",
+      "body": {
+        "count": 12
+      }
+    },
+    {
+      "title": "Through to the coinflip",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "coinflip"
+      }
+    },
+    {
+      "title": "Team A's captain offers their first player for team B's first",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "swap",
+        "player_id": "captain:A"
+      }
+    },
+    {
+      "title": "Team B's captain accepts the swap",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "accept_swap",
+        "player_id": "captain:B"
+      }
+    },
+    {
+      "title": "The rest of the match, to the result",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "completed"
+      }
+    }
+  ]
+}

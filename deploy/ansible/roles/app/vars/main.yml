@@ -1,0 +1,69 @@
+---
+# The project's compose files: from the repo (source on the controller, name on the server), in
+# the order COMPOSE_FILE applies them. Each one switched off is removed from the server.
+app_compose_files:
+  - { src: compose.yaml, dest: compose.yaml, enabled: true }
+  - { src: deploy/compose.prod.yaml, dest: compose.prod.yaml, enabled: true }
+  - { src: compose.observability.yaml, dest: compose.observability.yaml, enabled: "{{ app_observability | bool }}" }
+  - src: deploy/compose.grafana.yaml
+    dest: compose.grafana.yaml
+    enabled: "{{ app_observability | bool and app_grafana_domain | length > 0 }}"
+app_compose_file_names: >-
+  {{ app_compose_files | selectattr('enabled') | map(attribute='dest') | list
+     + app_compose_extra_files | map('basename') | list }}
+# Written after a successful migrate job: the ID of the image that ran it.
+app_migrated_marker: "{{ app_root }}/.migrated-image"
+# Values that mean the vault was never filled in.
+app_placeholders: ["", "REPLACE_ME", "change-me", "changeme"]
+# Keys app_env_extra can't set: the ones env.j2 and the compose files already set, the
+# observability services' secrets (in .env.observability, never the app's .env), and the
+# local-dev switches, which must stay off in production.
+app_env_reserved:
+  - ALERTMANAGER_DISCORD_WEBHOOK_URL
+  - ALLOWED_HOSTS
+  - BEHIND_TLS_PROXY
+  - BOT_HEARTBEAT_FILE
+  - BOT_ROLE
+  - COMPOSE_FILE
+  - CSRF_TRUSTED_ORIGINS
+  - DATABASE_DIRECT_URL
+  - DATABASE_URL
+  - DB_APP_PASSWORD
+  - DB_CONN_MAX_AGE
+  - DB_MONITOR_PASSWORD
+  - DB_PGBOUNCER
+  - DB_POOL
+  - DEADLOCK_API_KEY
+  - DEBUG
+  - DISCORD_CLIENT_ID
+  - DISCORD_CLIENT_SECRET
+  - DISCORD_GUILD_ID
+  - DISCORD_TOKEN
+  - DJANGO_SECRET_KEY
+  - DRAFTBOT_IMAGE
+  - DRAFTBOT_IMAGE_TAG
+  - EDGE_ADMIN_ACCESS_DIR
+  - EDGE_GRAFANA_CONF
+  - EDGE_IP
+  - EDGE_IP_RANGE
+  - EDGE_SERVER_NAME
+  - EDGE_SITE_TEMPLATES
+  - EDGE_SUBNET
+  - EDGE_SUBNET6
+  - ERROR_LOG_CHANNEL_ID
+  - FORWARDED_ALLOW_IPS
+  - GRAFANA_ADMIN_PASSWORD
+  - GRAFANA_DOMAIN
+  - LOG_LEVEL
+  - METRICS_ADDR
+  - OBSERVABILITY_ENV_FILE
+  - POSTGRES_PASSWORD
+  - PUBLIC_URL
+  - SECURE_COOKIES
+  - STEAM_WEB_API_KEY
+  # Local dev and the Discord simulator.
+  - DEV_CONTROL
+  - DISCORD_API_BASE
+  - DISCORD_GATEWAY_URL
+  - DISCORD_SIM_URL
+  - WEB_DEV_LOGIN

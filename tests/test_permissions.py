@@ -21,7 +21,7 @@ from bot.handlers.permissions import member_areas
 from league.models import Community, CommunityRoleGrant, QueueEntry
 from league.models.permissions import Area
 from league.services import community, permissions, queue
-from tests.conftest import make_player, publish_presets
+from tests.conftest import make_player
 from tests.helpers import finish
 from tests.test_handlers import (
     GUILD_ID,
@@ -62,7 +62,6 @@ def _refused(interaction: MagicMock) -> bool:
 
 @pytest.fixture
 def server(transactional_db: None) -> Iterator[Community]:
-    publish_presets()
     row = community.ensure(guild_id=GUILD_ID, name="Test")
     yield row
     asyncio.run(db(connections.close_all))

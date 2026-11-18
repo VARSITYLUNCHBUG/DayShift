@@ -1,0 +1,44 @@
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ base_packages + base_extra_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Read the installed packages
+  ansible.builtin.package_facts:
+    manager: apt
+
+# Installing systemd-timesyncd would remove another NTP client (they conflict), so one that is
+# there already stays.
+- name: Install an NTP client
+  ansible.builtin.apt:
+    name: "{{ base_time_sync_package }}"
+    state: present
+  when: base_time_sync_present | length == 0
+  register: base_time_sync_install
+  vars:
+    base_time_sync_present: "{{ ansible_facts.packages.keys() | intersect(['chrony', 'ntpsec', 'ntp', 'openntpd']) }}"
+
+# Its unit skips itself in a container, where the host keeps the time, so it only starts on a
+# machine of its own.
+- name: Keep the clock synchronised
+  ansible.builtin.systemd_service:
+    name: systemd-timesyncd
+    enabled: true
+    state: >-
+      {{ omit if ansible_facts['virtualization_role'] == 'guest'
+         and ansible_facts['virtualization_type'] in base_container_types else 'started' }}
+  when:
+    - base_time_sync_package == 'systemd-timesyncd'
+    # Installed just now (not in --check, where it isn't), or before.
+    - >-
+      'systemd-timesyncd' in ansible_facts.packages
+      or (base_time_sync_install is changed and not ansible_check_mode)
+  vars:
+    base_container_types: [docker, container, containerd, podman, lxc, openvz, systemd-nspawn]
+
+- name: Set the timezone
+  community.general.timezone:
+    name: "{{ base_timezone }}"

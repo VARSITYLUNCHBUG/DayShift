@@ -42,11 +42,13 @@ def rating(season_owner: Match, player_id: int) -> int:
     return PlayerRating.objects.get(season=season_owner.season, player_id=player_id).rating
 
 
+@pytest.mark.slow
 def test_ledger_is_clean_after_many_matches(league: Community) -> None:
     ladder(league)
     assert integrity.check_all() == []
 
 
+@pytest.mark.slow
 def test_replay_from_scratch_reproduces_the_ledger(league: Community) -> None:
     matches = ladder(league)
     season = matches[0].season
@@ -54,6 +56,7 @@ def test_replay_from_scratch_reproduces_the_ledger(league: Community) -> None:
     assert corrections.diff_against_ledger(season, fold) == {}
 
 
+@pytest.mark.slow
 def test_void_cascades_and_stays_consistent(league: Community) -> None:
     matches = ladder(league)
     first = matches[0]
@@ -69,6 +72,7 @@ def test_void_cascades_and_stays_consistent(league: Community) -> None:
     assert integrity.check_all() == []
 
 
+@pytest.mark.slow
 def test_rescore_flips_result_and_stays_consistent(league: Community) -> None:
     matches = ladder(league)
     target = matches[1]
@@ -81,6 +85,7 @@ def test_rescore_flips_result_and_stays_consistent(league: Community) -> None:
     assert row.wins + row.losses == row.games
 
 
+@pytest.mark.slow
 def test_correction_is_append_only(league: Community) -> None:
     matches = ladder(league)
     before_ids = set(RatingEvent.objects.values_list("id", flat=True))
@@ -90,6 +95,7 @@ def test_correction_is_append_only(league: Community) -> None:
     assert before == after
 
 
+@pytest.mark.slow
 def test_preview_writes_nothing_and_predicts_the_result(league: Community) -> None:
     matches = ladder(league)
     target = matches[0]
@@ -106,6 +112,7 @@ def test_preview_writes_nothing_and_predicts_the_result(league: Community) -> No
     assert RatingEvent.objects.count() == events_before + preview.events_to_write
 
 
+@pytest.mark.slow
 def test_void_then_restore_returns_to_original_ratings(league: Community) -> None:
     matches = ladder(league)
     target = matches[0]
@@ -150,6 +157,7 @@ def test_match_voided_during_the_player_draft_cannot_be_rated(popped: Match) -> 
     assert RatingEvent.objects.count() == 0
 
 
+@pytest.mark.slow
 def test_late_sub_moves_result_to_the_substitute(league: Community) -> None:
     match = ladder(league, 2)[0]
     leaving = match.participants.filter(team="A").first().player
@@ -165,6 +173,7 @@ def test_late_sub_moves_result_to_the_substitute(league: Community) -> None:
     assert integrity.check_all() == []
 
 
+@pytest.mark.slow
 def test_seed_and_adjust_survive_a_correction(league: Community) -> None:
     matches = ladder(league)
     season = matches[0].season

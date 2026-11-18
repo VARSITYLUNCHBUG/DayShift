@@ -222,6 +222,7 @@ def test_awards_must_go_to_the_roster(
         awards.record(match, {first.pk: "mvp", second.pk: "mvp"}, AwardSource.STAFF, None)
 
 
+@pytest.mark.slow
 def test_a_void_after_awards_refolds_cleanly(
     openskill: Season, league: Community, players: list[Player]
 ) -> None:

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/VARSITYLUNCHBUG/dl-mm-discord/security/advisories/new
+    about: Please report security problems privately, never as an issue.
+  - name: Developer guide
+    url: https://github.com/VARSITYLUNCHBUG/dl-mm-discord/blob/main/docs/dev/README.md
+    about: Setting up the dev stack, running the tests and the control panel.
+  - name: Operations guide
+    url: https://github.com/VARSITYLUNCHBUG/dl-mm-discord/blob/main/docs/ops/README.md
+    about: Deploying, upgrading, backups, secrets and alerts.

@@ -1,6 +1,8 @@
 # Environment files: everything except the template.
 .env*
 !.env.example
+!.env.dev.example
+!.env.observability.example
 *.env
 
 # Python and tooling caches
@@ -17,6 +19,8 @@ staticfiles/
 .bot-heartbeat
 postmatch_screens/
 scoreocr_out/
+# Playwright traces and screenshots from scripts/test.sh e2e.
+test-results/
 
 # Local database dumps.
 backups/

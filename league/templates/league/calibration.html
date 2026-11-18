@@ -2,7 +2,7 @@
 {% block title %}Rating calibration | {{ site_title }}{% endblock %}
 
 {% block extrastyle %}
-<style>
+<style nonce="{{ request.csp_nonce }}">
   .viz-root {
     color-scheme: light;
     --series-1: #2a78d6;
@@ -107,7 +107,7 @@
   <div class="tip" role="tooltip"></div>
 </div>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
   (function () {
     const root = document.querySelector(".viz-root");
     const tip = root.querySelector(".tip");

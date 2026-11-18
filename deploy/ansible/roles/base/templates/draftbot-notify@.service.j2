@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+# Started by a failed unit's OnFailure=; the instance is that unit's name.
+[Unit]
+Description=Report that %i failed
+
+[Service]
+Type=oneshot
+ExecStart={{ base_notify_script }} %i

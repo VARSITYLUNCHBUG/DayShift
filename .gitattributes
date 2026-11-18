@@ -1,0 +1,39 @@
+# Line endings that must hold on every checkout, whatever core.autocrlf says. Everything that a
+# Linux container, a Linux server or a POSIX shell reads stays LF: one CR at a line's end breaks
+# a shebang, a heredoc, an nginx or pgbouncer directive, or an Ansible template rendered on the
+# host. Batch files for cmd.exe stay CRLF. Everything else follows the checkout's own settings.
+
+# Whole trees that only ever run on Linux. text=auto still leaves binaries alone.
+deploy/** text=auto eol=lf
+infra/** text=auto eol=lf
+.github/** text=auto eol=lf
+
+# Shell scripts, and the templates Ansible renders into them and into configs.
+*.sh text eol=lf
+*.j2 text eol=lf
+# Run by its shebang as well as by `python manage.py`.
+manage.py text eol=lf
+
+# Container builds.
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+.dockerignore text eol=lf
+*.dockerignore text eol=lf
+
+# Configs mounted into containers: nginx, pgbouncer, Prometheus, compose and the rest.
+*.conf text eol=lf
+*.ini text eol=lf
+*.template text eol=lf
+*.pem text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Batch files for cmd.exe.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binaries: never converted or diffed as text.
+*.png binary
+*.webp binary
+*.onnx binary
+*.npz binary

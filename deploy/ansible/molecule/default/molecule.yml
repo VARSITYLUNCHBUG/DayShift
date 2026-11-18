@@ -1,0 +1,104 @@
+---
+# site.yml, end to end, against two throwaway systemd servers, Ubuntu 24.04 and Debian 12, each
+# running its own Docker daemon. A stand-in app image (stub-app/) replaces the real one, so no
+# Discord token is needed; everything else is the real images.
+#   noble     a Let's Encrypt certificate from Pebble, its test CA (pebble/), Grafana's vhost, and
+#             the admin behind an allowlist and a password prompt
+#   bookworm  a self-signed certificate, Grafana on 127.0.0.1 only, the admin open
+# See deploy/README.md, "Testing the deploy".
+#   cd deploy/ansible && molecule test
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ${MOLECULE_PROJECT_DIRECTORY}/requirements.yml
+    # It lists collections only. Naming it for roles too stops the warning that there is no roles file.
+    role-file: ${MOLECULE_PROJECT_DIRECTORY}/requirements.yml
+driver:
+  name: docker
+platforms:
+  - name: ${MOLECULE_PLATFORM_PREFIX:-draftbot-molecule}-noble
+    # Pinned, so a rebuilt upstream image can't change the test under you.
+    image: "geerlingguy/docker-ubuntu2404-ansible:latest@sha256:\
+      fa0889a991fe4f9404efc2f53d5960804f4e409e74bff6ad2443992cc57915c4"
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    command: ""
+    override_command: false
+    tmpfs: [/run, /tmp]
+    # The inner Docker's storage can't sit on the container's own overlay filesystem.
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ${MOLECULE_PLATFORM_PREFIX:-draftbot-molecule}-noble-docker:/var/lib/docker
+      - ${MOLECULE_PLATFORM_PREFIX:-draftbot-molecule}-noble-containerd:/var/lib/containerd
+    groups: [draftbot]
+  - name: ${MOLECULE_PLATFORM_PREFIX:-draftbot-molecule}-bookworm
+    image: "geerlingguy/docker-debian12-ansible:latest@sha256:\
+      39bdd16916ec475a12db0502550b72e4f4c2cc858a1939ad2a17f21f6eb51b65"
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    command: ""
+    override_command: false
+    tmpfs: [/run, /tmp]
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ${MOLECULE_PLATFORM_PREFIX:-draftbot-molecule}-bookworm-docker:/var/lib/docker
+      - ${MOLECULE_PLATFORM_PREFIX:-draftbot-molecule}-bookworm-containerd:/var/lib/containerd
+    groups: [draftbot]
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/roles
+  config_options:
+    defaults:
+      callback_result_format: yaml
+      interpreter_python: auto_silent
+  inventory:
+    group_vars:
+      draftbot:
+        draftbot_domain: draftbot.test
+        draftbot_image_tag: molecule
+        draftbot_root: /opt/draftbot
+        base_deploy_authorized_keys:
+          - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f molecule
+        app_image: molecule/draftbot-stub
+        app_discord_token: molecule-not-a-real-token
+        app_discord_guild_id: "1100000000000000001"
+        app_django_secret_key: molecule-only-not-secret-molecule-only-not-secret
+        app_postgres_password: molecule_only_not_secret
+        app_db_app_password: molecule_app_only_not_secret
+        app_db_monitor_password: moleculemonitoronly
+        observability_grafana_admin_password: molecule-grafana-only
+        edge_public_url_validate_certs: false
+        backups_restore_check_sql: SELECT count(*) FROM molecule_probe
+    host_vars:
+      ${MOLECULE_PLATFORM_PREFIX:-draftbot-molecule}-noble:
+        edge_certificate: letsencrypt
+        edge_acme_email: ops@draftbot.test
+        edge_acme_server: https://pebble:14000/dir
+        draftbot_grafana_domain: grafana.draftbot.test
+        edge_grafana_basic_auth_users:
+          - { username: molecule, password: molecule-prompt-only }
+        # The admin behind both an allowlist (the private ranges the published ports' traffic comes
+        # from) and a password prompt. bookworm keeps both off.
+        edge_admin_allow_cidrs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+        edge_admin_basic_auth_users:
+          - { username: molecule, password: molecule-admin-only }
+        app_compose_extra_files:
+          - ${MOLECULE_SCENARIO_DIRECTORY}/compose.molecule.yaml
+      ${MOLECULE_PLATFORM_PREFIX:-draftbot-molecule}-bookworm:
+        edge_certificate: selfsigned
+verifier:
+  name: ansible
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - destroy

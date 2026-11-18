@@ -1,0 +1,47 @@
+---
+argument_specs:
+  main:
+    short_description: Docker Engine and the compose plugin, with log rotation.
+    options:
+      docker_apt_url:
+        type: str
+        default: https://download.docker.com/linux
+        description: Docker's apt repository, without the distribution part.
+      docker_packages:
+        type: list
+        elements: str
+        description: The Docker packages to install.
+      docker_upgrade:
+        type: bool
+        default: false
+        description: Upgrade the Docker packages to the newest release now (unattended-upgrades does it nightly).
+      docker_conflicting_packages:
+        type: list
+        elements: str
+        description: Distribution packages removed before Docker's are installed.
+      docker_log_driver:
+        type: str
+        default: local
+        choices: [local, json-file]
+        description: The default logging driver. Both rotate with the options below.
+      docker_log_max_size:
+        type: str
+        default: 10m
+        description: Size of one log file before it rotates.
+      docker_log_max_file:
+        type: int
+        default: 5
+        description: Log files kept per container.
+      docker_live_restore:
+        type: bool
+        default: true
+        description: Keep containers running while dockerd restarts.
+      docker_daemon_extra:
+        type: dict
+        default: {}
+        description: Extra keys for /etc/docker/daemon.json.
+      docker_users:
+        type: list
+        elements: str
+        default: []
+        description: Users added to the docker group.

@@ -15,6 +15,7 @@ from league.services.community import start_season
 from tests.helpers import play_full_match
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("seed", [1, 2, 3])
 def test_random_histories_keep_the_ledger_equal_to_a_replay(
     seed: int, league: Community, players: list[Player]

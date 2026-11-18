@@ -1,0 +1,24 @@
+---
+# Let's Encrypt's test CA, standing in for the real one, as a compose project of its own so it is
+# up before the draftbot project exists. prepare.yml starts it. compose.molecule.yaml puts the edge
+# (by the test domains' names) and certbot on its network.
+name: molecule-pebble
+
+services:
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:2.10.1
+    command: ["-config", "/etc/pebble/pebble.json"]
+    environment:
+      # Answer right away, and never reject a nonce on purpose: certbot is under test, not this.
+      PEBBLE_VA_NOSLEEP: "1"
+      PEBBLE_WFE_NONCEREJECT: "0"
+    volumes:
+      - ./pebble.json:/etc/pebble/pebble.json:ro
+    networks:
+      acme:
+        aliases: [pebble]
+    restart: unless-stopped
+
+networks:
+  acme:
+    name: molecule-acme

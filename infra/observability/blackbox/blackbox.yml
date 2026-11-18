@@ -1,0 +1,14 @@
+# The blackbox exporter's one probe: a TLS handshake, to read the certificate's expiry.
+# entrypoint.sh fills in EDGE_SERVER_NAME: the probe dials the edge by its service name, and the
+# edge refuses a handshake for any name but its own. Verification is off because the date is all
+# this watches, and an expired certificate must still be read; browsers do the verifying.
+
+modules:
+  tls_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      tls: true
+      tls_config:
+        server_name: "${EDGE_SERVER_NAME}"
+        insecure_skip_verify: true

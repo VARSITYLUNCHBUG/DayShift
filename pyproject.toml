@@ -7,22 +7,26 @@ dependencies = [
     "dj-database-url>=2.3,<4",
     "discord.py>=2.7,<2.8",
     "django>=5.2,<5.3",
-    "gunicorn>=23",
     "httpx>=0.28",
-    "psycopg[binary]>=3.2,<4",
+    "psycopg[binary,pool]>=3.2,<4",
     "pydantic>=2.10,<3",
     "pyyaml>=6",
     "whitenoise>=6.9",
     "openskill>=6.2,<7",
+    "channels>=4.2,<5",
+    "uvicorn[standard]>=0.30,<1",
+    "prometheus-client>=0.26,<1",
 ]
 
 [dependency-groups]
 dev = [
+    "daphne>=4.1,<5",
     "django-stubs>=5.2",
     "hypothesis>=2.0",
     "mypy>=1.15",
     "pytest>=8",
     "pytest-django>=4.10",
+    "pytest-xdist>=3.8",
     "ruff>=0.11",
     "types-pyyaml>=6",
 ]
@@ -39,7 +43,13 @@ package = false
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
+# pytest's defaults, plus tests/e2e: the browser suite runs in its own container.
+norecursedirs = [
+    "*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "e2e",
+]
 addopts = "-ra --strict-markers"
+# Run in parallel with `pytest -n auto` (CI, scripts/test.sh). A plain `pytest` stays serial.
+markers = ["slow: a long test; parallel runs start it first"]
 
 [tool.ruff]
 line-length = 100
@@ -59,6 +69,12 @@ plugins = ["mypy_django_plugin.main"]
 ignore_missing_imports = true
 check_untyped_defs = true
 exclude = ["league/migrations/"]
+
+# scoreocr is the optional score-OCR engine, typed loosely against numpy and pillow. Follow it so
+# its signatures still check league/services/ocr.py, but don't report its own errors.
+[[tool.mypy.overrides]]
+module = ["scoreocr", "scoreocr.*"]
+follow_imports = "silent"
 
 [tool.django-stubs]
 django_settings_module = "config.settings"

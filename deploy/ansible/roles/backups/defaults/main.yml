@@ -1,0 +1,36 @@
+---
+backups_compose_dir: "{{ draftbot_root }}"
+# Dumps land here on the server, readable by root only.
+backups_dir: /var/backups/draftbot
+backups_retention_days: 14
+# systemd calendar syntax, server time, with up to backups_randomized_delay added.
+backups_on_calendar: "*-*-* 03:30:00"
+backups_randomized_delay: 15m
+
+# Offsite copies. An rclone remote such as `b2:my-bucket/draftbot`, and the rclone.conf that
+# defines it. Empty keeps dumps on the server only.
+backups_rclone_remote: ""
+backups_rclone_config: ""
+# Each offsite copy is encrypted to these age public keys (`age1...`, printed by `age-keygen`)
+# before it leaves the server, and lands as draftbot-<stamp>.dump.age: a dump holds live admin and
+# web sessions, password hashes and every player's Discord ID. Keep the private key off the
+# server; `age -d -i key.txt` decrypts. Required with backups_rclone_remote.
+backups_offsite_age_recipients: []
+# Delete offsite dumps older than backups_retention_days too.
+backups_rclone_prune: true
+
+# backup.yml: also copy the new dump to this directory on the controller. Empty doesn't.
+backups_fetch_dir: ""
+
+# restore.yml. `verify` restores a dump into a scratch database, checks it, and drops it;
+# `replace` swaps the live database for the dump and needs backups_restore_confirm.
+backups_restore_mode: verify
+# A dump on the server to restore. Empty takes the newest in backups_dir.
+backups_restore_file: ""
+# A dump on the controller to upload and restore instead.
+backups_restore_upload: ""
+backups_restore_confirm: false
+# Counts rows of the league's own data. verify runs it on the restored copy and on the live
+# database, and fails when the copy has none while the live one has some: a dump of an empty or
+# truncated database restores just as cleanly as a good one.
+backups_restore_check_sql: SELECT (SELECT count(*) FROM players) + (SELECT count(*) FROM matches)

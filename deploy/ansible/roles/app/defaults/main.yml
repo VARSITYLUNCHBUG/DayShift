@@ -1,0 +1,60 @@
+---
+app_root: "{{ draftbot_root }}"
+app_domain: "{{ draftbot_domain }}"
+app_image_tag: "{{ draftbot_image_tag }}"
+# Another image than the one compose.prod.yaml names (a private fork's, say), without a tag.
+# Empty runs ghcr.io/varsitylunchbug/dl-mm-discord.
+app_image: ""
+# `missing` pulls only images the server doesn't have, which is right for a pinned sha- tag and
+# keeps site.yml from reporting a change every run. deploy.yml uses `always`, which also fetches
+# a moved tag such as `latest`.
+app_pull_policy: missing
+# For a private image's registry. Empty pulls anonymously.
+app_registry: ghcr.io
+app_registry_username: ""
+app_registry_password: ""
+
+# The compose files, from the checkout you run Ansible from.
+app_repo_root: "{{ role_path }}/../../../.."
+# Your own overrides (resource limits, say), on the controller. Applied last, in this order.
+app_compose_extra_files: []
+
+# Prometheus, Grafana and the exporters (compose.observability.yaml). Their own secrets belong to
+# roles/observability; only the exporters' database password goes in .env.
+app_observability: "{{ draftbot_observability | default(true) }}"
+# The exporters' read-only database role, draftbot_monitor: letters and digits, 16 or more.
+# Required with observability.
+app_db_monitor_password: ""
+# Grafana through the edge at this name, too (compose.grafana.yaml). Empty keeps it on
+# 127.0.0.1 only.
+app_grafana_domain: "{{ draftbot_grafana_domain | default('') }}"
+
+# .env, from the inventory and the vault.
+app_discord_token: ""
+app_discord_guild_id: ""
+app_discord_client_id: ""
+app_discord_client_secret: ""
+app_django_secret_key: ""
+app_postgres_password: ""
+# draftbot_app's: the login web, bot and scheduler use, which reads and writes the tables and
+# nothing more. The migrate job keeps the superuser (app_postgres_password) to itself.
+app_db_app_password: ""
+app_deadlock_api_key: ""
+app_steam_web_api_key: ""
+app_error_log_channel_id: ""
+app_log_level: INFO
+app_env_extra: {}
+
+# Started one at a time after the migrate job, each healthy before the next. The edge and
+# observability roles start the rest.
+app_services:
+  - pgbouncer
+  - web
+  - scheduler
+  - bot
+app_wait_timeout: 300
+# Run the migrate job even if this image has migrated the database before.
+app_force_migrate: false
+
+# The systemd unit that starts the compose project at boot.
+app_systemd_unit: draftbot

@@ -47,9 +47,6 @@ def race(*calls: Callable[[], object]) -> tuple[list[object], list[Exception]]:
 
 @pytest.fixture
 def live_league(transactional_db: None) -> Community:
-    from tests.conftest import publish_presets
-
-    publish_presets()
     return community.ensure(guild_id=999, name="Test")
 
 

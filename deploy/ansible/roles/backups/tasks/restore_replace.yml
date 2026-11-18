@@ -1,0 +1,46 @@
+---
+- name: Take a backup of the live database first
+  ansible.builtin.import_tasks: run.yml
+
+- name: Stop everything that writes to the database
+  ansible.builtin.command:
+    cmd: docker compose stop web bot scheduler
+    chdir: "{{ backups_compose_dir }}"
+  changed_when: true
+
+- name: Restore, and start the services again whatever happens
+  block:
+    - name: Recreate the database empty
+      ansible.builtin.command:
+        cmd: >-
+          docker compose exec -T db psql -U draftbot -d postgres -v ON_ERROR_STOP=1
+          -c "DROP DATABASE IF EXISTS draftbot WITH (FORCE)"
+          -c "CREATE DATABASE draftbot OWNER draftbot"
+        chdir: "{{ backups_compose_dir }}"
+      changed_when: true
+
+    - name: Restore the dump
+      ansible.builtin.shell:
+        cmd: >-
+          docker compose exec -T db pg_restore -U draftbot -d draftbot
+          --no-owner --exit-on-error < {{ backups_restore_path | quote }}
+        chdir: "{{ backups_compose_dir }}"
+      changed_when: true
+
+    # The running image may be newer than the dump.
+    - name: Migrate the restored database
+      ansible.builtin.command:
+        cmd: docker compose run --rm --no-deps migrate
+        chdir: "{{ backups_compose_dir }}"
+      changed_when: true
+  always:
+    - name: Start the services
+      ansible.builtin.command:
+        cmd: docker compose up --detach --wait --wait-timeout 300 --no-deps web scheduler bot
+        chdir: "{{ backups_compose_dir }}"
+      changed_when: true
+
+- name: Report the restore
+  ansible.builtin.debug:
+    msg: >-
+      Restored {{ backups_restore_path }}. The database as it was before is in {{ backups_latest }}.

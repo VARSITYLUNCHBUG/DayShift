@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: edge
+  namespace: draftbot
+  author: dl-mm-discord
+  description: The nginx edge. Its configuration, a Let's Encrypt certificate, renewals, Grafana's vhost.
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Ubuntu
+      versions: [noble]
+    - name: Debian
+      versions: [bookworm]
+dependencies: []

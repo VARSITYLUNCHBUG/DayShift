@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Dumps the draftbot database, checks the dump reads back, prunes old dumps and copies the new one
+# offsite. draftbot-backup.timer runs it nightly; `systemctl start draftbot-backup` runs it now.
+set -euo pipefail
+umask 077
+
+cd {{ backups_compose_dir | quote }}
+dest={{ backups_dir | quote }}
+name="draftbot-$(date -u +%Y%m%dT%H%M%SZ).dump"
+partial="$dest/.$name.partial"
+trap 'rm -f "$partial"' EXIT
+
+# Straight to Postgres over the db container's own socket, not through pgbouncer: the dump reads
+# one snapshot in one long transaction.
+docker compose exec -T db pg_dump -U draftbot -d draftbot --format=custom > "$partial"
+# A dump pg_restore can't read is no backup.
+docker compose exec -T db pg_restore --list < "$partial" > /dev/null
+mv "$partial" "$dest/$name"
+echo "Wrote $dest/$name ($(du -h "$dest/$name" | cut -f1))"
+
+find "$dest" -maxdepth 1 -type f -name 'draftbot-*.dump' -mtime +{{ backups_retention_days }} -print -delete
+{% if backups_rclone_remote %}
+
+# Offsite, only ever encrypted: the dump holds live sessions, password hashes and Discord IDs.
+# age encrypts to public keys, so this server can't read the copies back; the operator's private
+# key does (`age -d -i key.txt draftbot-<stamp>.dump.age > draftbot-<stamp>.dump`).
+sealed="$dest/.$name.age.partial"
+trap 'rm -f "$partial" "$sealed"' EXIT
+age{% for recipient in backups_offsite_age_recipients %} -r {{ recipient | quote }}{% endfor %} -o "$sealed" "$dest/$name"
+rclone --config {{ backups_rclone_conf_path | quote }} copyto "$sealed" {{ backups_rclone_remote | quote }}/"$name.age"
+echo "Copied $name.age to {{ backups_rclone_remote }}"
+{% if backups_rclone_prune %}
+rclone --config {{ backups_rclone_conf_path | quote }} delete {{ backups_rclone_remote | quote }} \
+    --include 'draftbot-*.dump.age' --include 'draftbot-*.dump' --min-age {{ backups_retention_days }}d
+{% endif %}
+{% endif %}

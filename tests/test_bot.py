@@ -22,7 +22,6 @@ from bot.handlers import lobby as _lobby  # noqa: F401
 from bot.handlers import queue as _queue  # noqa: F401
 from bot.handlers import results as _results  # noqa: F401
 from bot.handlers.results import parse_deadlock_match_id
-from bot.images import detect_image
 from bot.renderers.board import render_board, render_pickers, render_ready_dm
 from bot.renderers.queue import render_queue
 from bot.renderers.results import render_results, team_table
@@ -37,6 +36,7 @@ from bot.routing import (
 from league.domain.draft_plan import build_plan, team_for_role
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
+from league.domain.images import detect_image
 from league.models import Community, Match, OutboxEffect, Player
 from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
@@ -45,7 +45,7 @@ from league.services import draft as draft_service
 from league.services.boards import ResultRow
 from league.services.common import add_effect, captain_of, get_or_create_player, mode_of
 from league.services.common import render_queue as request_queue
-from tests.conftest import Clock, make_player, publish_presets
+from tests.conftest import Clock, make_player
 from tests.helpers import (
     acting_captain,
     finish,
@@ -806,7 +806,6 @@ ARCHIVE_CHANNEL = 7004
 
 @pytest.fixture
 def wired(transactional_db: None) -> Iterator[Community]:
-    publish_presets()
     row = community.ensure(guild_id=999, name="Test")
     community.save_wiring(
         row.pk,
@@ -1902,7 +1901,12 @@ def test_finished_draft_shows_its_name_gif_and_glhf(voting: Match) -> None:
     text = str(_check(match))
     assert draft_name(match.rng_seed) in text
     assert "GLHF" in text
-    assert "tenor.com" in text  # The GIF, from presets/draft_gifs.json.
+    # The GIF: one of presets/draft_gifs.json's, as a whole URL.
+    import json
+    from pathlib import Path
+
+    presets = Path(__file__).resolve().parents[1] / "presets" / "draft_gifs.json"
+    assert any(gif in text for gif in json.loads(presets.read_text())["gifs"])
 
 
 @pytest.mark.django_db

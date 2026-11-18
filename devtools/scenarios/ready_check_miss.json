@@ -1,0 +1,80 @@
+{
+  "description": "Two players miss the ready check: they get a cooldown, and their seats are offered to the queue and filled.",
+  "steps": [
+    {
+      "title": "Start from the dev fixtures",
+      "method": "POST",
+      "path": "reset"
+    },
+    {
+      "title": "Twelve fixture players join the queue, which pops a lobby",
+      "method": "POST",
+      "path": "queue/join",
+      "body": {
+        "count": 12
+      }
+    },
+    {
+      "title": "Two more players wait in the queue",
+      "method": "POST",
+      "path": "players",
+      "body": {
+        "count": 2,
+        "name_prefix": "Spare",
+        "join_queue": true,
+        "rating": 1000
+      }
+    },
+    {
+      "title": "Ten of the twelve ready up",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "ready",
+        "player_ids": [
+          "participant:1",
+          "participant:2",
+          "participant:3",
+          "participant:4",
+          "participant:5",
+          "participant:6",
+          "participant:7",
+          "participant:8",
+          "participant:9",
+          "participant:10"
+        ]
+      }
+    },
+    {
+      "title": "The ready check runs out: the two are removed and their seats offered",
+      "method": "POST",
+      "path": "matches/latest/fire"
+    },
+    {
+      "title": "A spare accepts a seat",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "accept_sub",
+        "player_id": "offered"
+      }
+    },
+    {
+      "title": "The other spare accepts the last seat, and the captain vote opens",
+      "method": "POST",
+      "path": "matches/latest/act",
+      "body": {
+        "action": "accept_sub",
+        "player_id": "offered"
+      }
+    },
+    {
+      "title": "The vote finishes",
+      "method": "POST",
+      "path": "matches/latest/advance",
+      "body": {
+        "until": "player_draft"
+      }
+    }
+  ]
+}

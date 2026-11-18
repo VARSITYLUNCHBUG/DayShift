@@ -1,0 +1,17 @@
+---
+- name: Check the settings and secrets
+  ansible.builtin.import_tasks: checks.yml
+  when: not draftbot_checked | default(false)
+  tags: [app, app-files, app-check]
+
+- name: Install the compose project's files
+  ansible.builtin.import_tasks: files.yml
+  tags: [app, app-files]
+
+- name: Get the images and migrate the database
+  ansible.builtin.import_tasks: migrate.yml
+  tags: [app, app-start]
+
+- name: Start the services one at a time
+  ansible.builtin.import_tasks: start.yml
+  tags: [app, app-start]

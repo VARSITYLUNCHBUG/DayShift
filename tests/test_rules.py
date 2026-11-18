@@ -73,6 +73,7 @@ def _play_with_mvp(league: Community, players: list[Player], number: int, mvp: P
     return fresh(match)
 
 
+@pytest.mark.slow
 def test_an_mvp_every_game_freezes_the_award_share_live_and_on_replay(
     farm_season: Season, league: Community, players: list[Player]
 ) -> None:
@@ -90,6 +91,7 @@ def test_an_mvp_every_game_freezes_the_award_share_live_and_on_replay(
     assert report.frozen_matches == 2
 
 
+@pytest.mark.slow
 def test_a_late_award_change_refolds_the_freeze(
     farm_season: Season, league: Community, players: list[Player]
 ) -> None:
@@ -205,6 +207,7 @@ def test_an_early_abandon_in_deadlock_api_flags_the_player(game_on: Match) -> No
 # --- The award check -------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_award_holders_who_keep_winning_show_a_signal(
     farm_season: Season, league: Community, players: list[Player]
 ) -> None:

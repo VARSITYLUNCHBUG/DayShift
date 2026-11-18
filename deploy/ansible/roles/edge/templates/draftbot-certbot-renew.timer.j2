@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Renew the edge's TLS certificate when it is due
+
+[Timer]
+OnCalendar={{ edge_renew_on_calendar }}
+RandomizedDelaySec={{ edge_renew_randomized_delay }}
+# A run missed while the server was off happens at the next boot.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

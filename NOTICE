@@ -1,0 +1,15 @@
+dl-mm-discord
+Copyright 2026 VARSITYLUNCHBUG and the dl-mm-discord contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party material in this repository:
+
+- scoreocr/assets/ch_PP-OCRv4_rec_infer.onnx is the PP-OCRv4 text recognition model from
+  PaddleOCR (https://github.com/PaddlePaddle/PaddleOCR), as shipped unmodified in the
+  rapidocr-onnxruntime 1.4.4 wheel. Apache License, Version 2.0. See scoreocr/assets/NOTICE.txt.
+
+- Deadlock, its hero names and its in-game imagery belong to Valve Corporation. The scoreboard
+  screenshots in tests/fixtures/ and the templates built from them (scoreocr/assets/*.npz) are
+  here for testing and are not covered by this project's license. This project is not
+  affiliated with or endorsed by Valve.

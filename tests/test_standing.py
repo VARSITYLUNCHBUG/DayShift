@@ -214,6 +214,7 @@ def test_the_queue_refusal_says_how_to_clear_strikes(
         queue.join(league.pk, players[0])
 
 
+@pytest.mark.slow
 def test_clean_matches_play_strikes_off(
     league: Community, players: list[Player], clock: Clock
 ) -> None:
@@ -326,6 +327,7 @@ def test_completed_matches_count_and_a_void_takes_one_back(
     assert standing.completed_matches(league, [players[0].pk]) == {players[0].pk: 0}
 
 
+@pytest.mark.slow
 def test_five_completed_matches_make_a_player_eligible(
     captain_rule: Community, players: list[Player]
 ) -> None:

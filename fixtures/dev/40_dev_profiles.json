@@ -1,0 +1,205 @@
+[
+  {
+    "model": "devtools.devprofile",
+    "pk": 1,
+    "fields": {
+      "player": 1,
+      "prefer": [
+        13,
+        7
+      ],
+      "ban": [
+        3
+      ],
+      "dm_open": true,
+      "seed_rating": 1600,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 2,
+    "fields": {
+      "player": 2,
+      "prefer": [
+        1,
+        2
+      ],
+      "ban": [
+        31
+      ],
+      "dm_open": true,
+      "seed_rating": 1450,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 3,
+    "fields": {
+      "player": 3,
+      "prefer": [
+        6,
+        25
+      ],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 1300,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 4,
+    "fields": {
+      "player": 4,
+      "prefer": [],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 1200,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 5,
+    "fields": {
+      "player": 5,
+      "prefer": [],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 1150,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 6,
+    "fields": {
+      "player": 6,
+      "prefer": [],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 1100,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 7,
+    "fields": {
+      "player": 7,
+      "prefer": [
+        20,
+        11
+      ],
+      "ban": [
+        13
+      ],
+      "dm_open": true,
+      "seed_rating": 1000,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 8,
+    "fields": {
+      "player": 8,
+      "prefer": [
+        50,
+        52
+      ],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 950,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 9,
+    "fields": {
+      "player": 9,
+      "prefer": [],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 900,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 10,
+    "fields": {
+      "player": 10,
+      "prefer": [],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 800,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 11,
+    "fields": {
+      "player": 11,
+      "prefer": [],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 700,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 12,
+    "fields": {
+      "player": 12,
+      "prefer": [],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 600,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 13,
+    "fields": {
+      "player": 13,
+      "prefer": [],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 500,
+      "sim_user": false,
+      "retired": false
+    }
+  },
+  {
+    "model": "devtools.devprofile",
+    "pk": 14,
+    "fields": {
+      "player": 14,
+      "prefer": [],
+      "ban": [],
+      "dm_open": true,
+      "seed_rating": 400,
+      "sim_user": false,
+      "retired": false
+    }
+  }
+]

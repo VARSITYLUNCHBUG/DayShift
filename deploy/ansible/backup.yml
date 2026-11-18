@@ -1,0 +1,12 @@
+---
+# Take a backup now, on top of the nightly one. Add -e backups_fetch_dir=backups to copy it to
+# backups/<host>/ here as well (git ignores that folder).
+#   ansible-playbook -i inventories/<client> backup.yml --ask-vault-pass
+- name: Back up the dl-mm-discord database
+  hosts: draftbot
+  become: true
+  tasks:
+    - name: Take a backup
+      ansible.builtin.include_role:
+        name: backups
+        tasks_from: run.yml

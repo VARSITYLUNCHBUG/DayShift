@@ -30,7 +30,7 @@ from league.models import Community, Match, Player, QueueEntry, ResultSubmission
 from league.models.permissions import Area
 from league.services import community, integrity, permissions, queue
 from league.services.common import captain_of, open_season
-from tests.conftest import make_player, publish_presets
+from tests.conftest import make_player
 from tests.helpers import (
     acting_captain,
     fail_api_lobby,
@@ -52,7 +52,6 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 @pytest.fixture
 def wired(transactional_db: None) -> Iterator[Community]:
-    publish_presets()
     row = community.ensure(guild_id=GUILD_ID, name="Test")
     community.save_wiring(row.pk, archive_channel_id=ARCHIVE_CHANNEL)
     row.refresh_from_db()

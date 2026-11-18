@@ -1,0 +1,389 @@
+# Every check that gates a merge, as parallel jobs, and the image publish once they all pass on
+# main or a version tag, the browser suite (e2e.yml) included. `CI OK` sums them up: it is the one
+# check branch protection needs to require. The Ansible checks are deploy-lint.yml.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a pull request cancels its older run. Runs on main and tags are never cancelled:
+# they queue and finish in order, so an older build never moves `latest` after a newer one. When
+# several pushes queue up behind a running one, only the newest of them runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+env:
+  UV_VERSION: "0.13.7"
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  python-lint:
+    name: Python lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      DEBUG: "true"
+      DJANGO_SECRET_KEY: ci-only-not-secret
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      # The root config covers services/discord-sim too, with that package's own ruff settings.
+      - run: uv run --frozen ruff check --output-format=github .
+      - run: uv run --frozen ruff format --check .
+      - run: uv run --frozen mypy bot league config devtools
+      # The browser suite runs in its own image (tests/e2e/Dockerfile): its Python and its locked
+      # requirements, not the root project's. There, tests/e2e is the top folder, so `support` is
+      # a package of its own; MYPYPATH and --explicit-package-bases name its modules the same way.
+      - name: mypy --strict, tests/e2e
+        env:
+          MYPYPATH: tests/e2e
+        run: >-
+          uv run --no-project --python 3.12 --with-requirements tests/e2e/requirements.txt
+          --with mypy==2.4.1 mypy --config-file= --strict --python-version 3.12
+          --explicit-package-bases tests/e2e
+
+  infra-lint:
+    name: Infra lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      ACTIONLINT_IMAGE: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+      HADOLINT_IMAGE: hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
+      SHELLCHECK_IMAGE: koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
+      PROMETHEUS_IMAGE: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+      ALERTMANAGER_IMAGE: prom/alertmanager:v0.34.2@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+      # .pre-commit-config.yaml's other hooks: JSON (the Grafana dashboards) and TOML syntax,
+      # committed private keys, mixed line endings, whitespace, merge markers, large files. The
+      # skipped ones have steps of their own here or in python-lint.
+      - name: pre-commit, the hooks without a step of their own
+        env:
+          SKIP: ruff-check,ruff-format,yamllint,shellcheck,actionlint-docker,hadolint
+        run: uvx pre-commit@4.7.0 run --all-files --show-diff-on-failure
+      - name: yamllint
+        run: uvx yamllint@1.38.0 -c .github/linters/.yamllint.yaml -f github .
+      - name: shellcheck
+        run: git ls-files -z '*.sh' | xargs -0 docker run --rm -v "$PWD:/repo:ro" -w /repo "$SHELLCHECK_IMAGE"
+      - name: hadolint, every Dockerfile
+        run: |
+          git ls-files -z ':(glob)**/Dockerfile' ':(glob)**/*.Dockerfile' \
+            | xargs -0 docker run --rm -v "$PWD:/repo:ro" -w /repo "$HADOLINT_IMAGE" \
+                hadolint --config .github/linters/.hadolint.yaml
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo "$ACTIONLINT_IMAGE" -color
+      - name: Prometheus config and alert rule tests
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/infra/observability/prometheus:/etc/prometheus:ro" \
+            "$PROMETHEUS_IMAGE" check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint promtool -w /etc/prometheus/tests \
+            -v "$PWD/infra/observability/prometheus:/etc/prometheus:ro" "$PROMETHEUS_IMAGE" test rules rules_test.yml
+      - name: Alertmanager config
+        run: |
+          docker run --rm --entrypoint amtool -v "$PWD/infra/observability/alertmanager:/etc/alertmanager:ro" \
+            "$ALERTMANAGER_IMAGE" check-config /etc/alertmanager/alertmanager.yml /etc/alertmanager/quiet.yml
+
+  # `scripts/test.sh --local`, as on your machine: pytest on the runner against compose.test.yaml's
+  # Postgres (compose.yaml's image pin, tmpfs, max_connections=300 for every xdist worker,
+  # fsync off, UTC), not a service container with the image's defaults.
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-secret
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache-dependency-glob: uv.lock
+      # The OCR group is optional and large; its tests skip without it.
+      - run: uv sync --frozen
+      # A model change without its migration fails here, not on the server's migrate job. The dev
+      # control API loads the devtools app, so its models are checked too. Comparing the models
+      # with the migrations needs no server: an in-memory SQLite database stands in.
+      - name: Migrations match the models
+        env:
+          DEBUG: "true"
+          DEV_CONTROL: "true"
+          DATABASE_URL: "sqlite:///:memory:"
+        run: uv run --frozen python manage.py makemigrations --check --dry-run
+      - run: sh scripts/test.sh --local -- -p no:cacheprovider --durations=25
+
+  sim:
+    name: Discord simulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: services/discord-sim
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          working-directory: services/discord-sim
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - run: uv run --frozen mypy
+      - run: uv run --frozen pytest -p no:cacheprovider --durations=10
+
+  panel:
+    name: Control panel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: services/control-panel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # The same Node as the image's build stage.
+          node-version: "22.23.5"
+          cache: npm
+          cache-dependency-path: services/control-panel/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
+
+  compose:
+    name: Compose files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: cp .env.example .env
+      - run: sh .github/scripts/check-compose.sh
+
+  # The app image, built once: the release build (labels, SBOM, provenance) as an OCI image
+  # layout, which Trivy scans. On a push, publish.yml pushes this same layout, byte for byte, once
+  # every other check has passed.
+  app-image:
+    name: App image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # The tags publish.yml pushes it under:
+      #   latest, main   follow main
+      #   sha-<commit>   one build, by short commit (what a deploy pins): main's only. A v1.2.3 tag
+      #                  on the same commit is a build of its own (its VERSION and date differ),
+      #                  so it never pushes sha-<commit>, which would move a pinned tag to another
+      #                  digest and race main's publish of it.
+      #   1.2.3, 1.2     from a v1.2.3 tag
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          # The description and source on the image index too, which is what GHCR shows.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ghcr.io/varsitylunchbug/dl-mm-discord
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha,prefix=sha-,enable=${{ github.ref_type == 'branch' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          # A folder, not a tarball: Trivy reads an OCI layout from a folder only.
+          outputs: type=oci,dest=${{ runner.temp }}/app-image,tar=false
+          tags: ${{ steps.meta.outputs.tags }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          # The Dockerfile writes its own OCI labels from these.
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app,ignore-error=true
+      # Fails on a HIGH or CRITICAL vulnerability that has a fixed version to move to.
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          input: ${{ runner.temp }}/app-image
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Keep the scanned image for publish.yml
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-image
+          path: ${{ runner.temp }}/app-image
+          if-no-files-found: error
+          retention-days: 1
+          # Its layers are compressed already.
+          compression-level: 0
+
+  # The dev and test images: they must build, but never ship, so they aren't scanned.
+  images:
+    name: Image ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: tests
+            context: .
+            file: scripts/docker/tests.Dockerfile
+          - name: discord-sim
+            context: services/discord-sim
+            file: services/discord-sim/Dockerfile
+          - name: control-panel
+            context: services/control-panel
+            file: services/control-panel/Dockerfile
+          # Builds the chrome stage on the way.
+          - name: e2e
+            context: tests/e2e
+            file: tests/e2e/Dockerfile
+            target: e2e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }},ignore-error=true
+
+  # Whether a pull request touches what the browser suite's stack is built from. The list follows
+  # the app image's build context (.dockerignore's allowlist), the services and their images, the
+  # compose files the suite runs (compose.test.yaml extends compose.dev.yaml), the script, the
+  # suite, and these workflows: keep it in step with them.
+  changes:
+    name: Changed paths
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      e2e: ${{ steps.paths.outputs.e2e }}
+    steps:
+      # The pull request's merge commit and its first parent, the base branch's head.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - id: paths
+        env:
+          E2E_PATHS: >-
+            ^(bot|config|devtools|fixtures|frontend|infra|league|presets|scoreocr|services|tests/e2e)/|^(manage\.py|pyproject\.toml|uv\.lock|Dockerfile|\.dockerignore|compose\.yaml|compose\.dev\.yaml|compose\.test\.yaml|scripts/test\.sh|\.github/workflows/(ci|e2e)\.yml)$
+        run: |
+          set -eu
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed"
+          if grep -Eq "$E2E_PATHS" "$RUNNER_TEMP/changed"; then e2e=true; else e2e=false; fi
+          echo "Browser suite needed: $e2e"
+          echo "e2e=$e2e" >> "$GITHUB_OUTPUT"
+
+  # The browser suite (e2e.yml): on every push, where it gates the publish, and on a pull request
+  # that touches the stack.
+  e2e:
+    name: E2E
+    needs: [changes]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e == 'true') }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/e2e.yml
+
+  # The one required status check: every job above passed, or was skipped because it doesn't
+  # apply (the path check off pull requests, the browser suite on a pull request that doesn't touch
+  # the stack). Branch protection then never needs a job's name, and a skipped workflow never
+  # leaves a required check pending.
+  ok:
+    name: CI OK
+    if: always()
+    needs: [python-lint, infra-lint, unit, sim, panel, compose, app-image, images, changes, e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'to_entries | all(
+            .value.result == "success"
+            or (.value.result == "skipped" and (.key == "changes" or .key == "e2e")))' > /dev/null
+
+  # Once `CI OK` passed. Its condition is spelled out: with `changes` skipped on a push, the
+  # implicit success() would skip this job too.
+  publish:
+    name: Publish
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.ok.result == 'success' }}
+    needs: [app-image, ok]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      tags: ${{ needs.app-image.outputs.tags }}
+      digest: ${{ needs.app-image.outputs.digest }}

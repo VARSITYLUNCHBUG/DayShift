@@ -1,0 +1,39 @@
+---
+- name: Read the names on the current certificate
+  ansible.builtin.command:
+    argv: [openssl, x509, -in, "{{ edge_live_dir }}/fullchain.pem", -noout, -ext, subjectAltName]
+  register: edge_cert_san
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read which ACME server issued it
+  ansible.builtin.command:
+    argv: [sed, -n, 's/^server = //p', "{{ edge_letsencrypt_dir }}/renewal/{{ edge_domain }}.conf"]
+  register: edge_cert_server
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# Nothing renews a self-signed certificate, so every run checks it has 30 days left.
+- name: Check the certificate is good for another 30 days
+  ansible.builtin.command:
+    argv: [openssl, x509, -in, "{{ edge_live_dir }}/fullchain.pem", -noout, -checkend, "2592000"]
+  register: edge_cert_lasts
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# A new certificate when there is none, when a name was added or removed (Grafana's vhost), when
+# Let's Encrypt should issue it and didn't (a self-signed one, or the staging server's), or when
+# a self-signed one is about to expire.
+- name: Decide whether the certificate is the one this host should have
+  ansible.builtin.set_fact:
+    edge_cert_needed: >-
+      {{ edge_cert_san.stdout | regex_findall('DNS:([^,\s]+)') | sort != edge_cert_names | sort
+         or (edge_certificate == 'letsencrypt' and edge_cert_server.stdout | trim != edge_acme_server)
+         or (edge_certificate == 'selfsigned' and edge_cert_lasts.rc != 0) }}
+
+- name: Get a new certificate
+  ansible.builtin.include_tasks: "certificate_{{ edge_certificate }}.yml"
+  when: edge_cert_needed
