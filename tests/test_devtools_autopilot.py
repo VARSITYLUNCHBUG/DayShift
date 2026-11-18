@@ -21,6 +21,7 @@ from league.models import (
     Match,
     MatchResource,
     MatchResult,
+    Player,
     PlayerRating,
     PlayerSwap,
     SubOffer,
@@ -29,7 +30,6 @@ from league.models import (
 from league.models.matches import ResourceKind
 from league.models.subs import UNRESOLVED, OfferStatus
 from league.services import draft, lobby, queue, results, subs, swaps
-from league.services.common import captain_of, get_or_create_player
 from league.services.results import ImageRef
 
 pytestmark = pytest.mark.django_db
@@ -143,10 +143,10 @@ def test_a_teams_champion_preferences_are_picked_and_banned(popped: Match) -> No
     second = "B" if first == "A" else "A"
     ok(
         "PUT",
-        f"players/{captain_of(match, first).player_id}/picks",
+        f"players/{match.captain_of(first).player_id}/picks",
         {"prefer": ["mirage"], "ban": ["lash"]},
     )
-    ok("PUT", f"players/{captain_of(match, second).player_id}/picks", {"ban": ["lash", "warden"]})
+    ok("PUT", f"players/{match.captain_of(second).player_id}/picks", {"ban": ["lash", "warden"]})
     ok("POST", "matches/latest/advance", {"via": "service"})
     rows = list(
         DraftAction.objects.filter(match=match)
@@ -444,7 +444,7 @@ class BotLikeSim:
             self.answers["0"] = {"interaction_id": "0", "modal": None}
             return httpx.Response(200, json=self.answers["0"])
         user_id = int(body["user_id"])
-        user = get_or_create_player(user_id, "Owner" if user_id == self.OWNER else "?")
+        user = Player.objects.from_discord(user_id, "Owner" if user_id == self.OWNER else "?")
         answer: dict[str, Any] = {"interaction_id": str(next(self.ids)), "modal": None}
         try:
             if path == "/_sim/interactions/component":

@@ -17,13 +17,9 @@ from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.models import Match, MatchParticipant, Player, PlayerSwap
 from league.models.swaps import SwapStatus
 from league.services.common import (
-    active_participants,
     add_effect,
-    bump,
-    lock_match,
     now,
     render_board,
-    require_not_on_hold,
 )
 
 # The player draft is over and the game hasn't started: teams can still change.
@@ -45,7 +41,7 @@ def _require_swappable(match: Match) -> None:
 
 
 def _captain(match: Match, player: Player) -> MatchParticipant:
-    row = active_participants(match).filter(player=player, is_captain=True).first()
+    row = match.participants.active().filter(player=player, is_captain=True).first()
     if row is None:
         raise NotAllowed("Only a captain can swap players.")
     return row
@@ -62,7 +58,7 @@ class SwapChoice:
 
 
 def _choices(match: Match, team: str) -> list[SwapChoice]:
-    rows = active_participants(match).filter(team=team, is_captain=False).order_by("id")
+    rows = match.participants.active().filter(team=team, is_captain=False).order_by("id")
     return [SwapChoice(row.player_id, row.player.display_name) for row in rows]
 
 
@@ -84,14 +80,14 @@ def their_options(match_id: int, captain: Player) -> list[SwapChoice]:
 
 @transaction.atomic
 def propose(match_id: int, captain: Player, give_id: int, take_id: int) -> PlayerSwap:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     _require_swappable(match)
-    require_not_on_hold(match)
+    match.require_not_on_hold()
     own = _captain(match, captain)
     if pending(match) is not None:
         raise InvalidAction("A swap is already waiting for an answer.")
-    give = active_participants(match).filter(player_id=give_id, team=own.team).first()
-    take = active_participants(match).filter(player_id=take_id, team=_other(own.team)).first()
+    give = match.participants.active().filter(player_id=give_id, team=own.team).first()
+    take = match.participants.active().filter(player_id=take_id, team=_other(own.team)).first()
     if give is None or take is None or give.is_captain or take.is_captain:
         raise InvalidAction("Choose one of your players and one of theirs. Captains stay put.")
     moment = now()
@@ -103,7 +99,7 @@ def propose(match_id: int, captain: Player, give_id: int, take_id: int) -> Playe
         deadline_at=moment + timedelta(seconds=ANSWER_SECONDS),
         created_at=moment,
     )
-    other = active_participants(match).filter(team=_other(own.team), is_captain=True).first()
+    other = match.participants.active().filter(team=_other(own.team), is_captain=True).first()
     if other is not None:
         add_effect(
             match.community,
@@ -115,7 +111,7 @@ def propose(match_id: int, captain: Player, give_id: int, take_id: int) -> Playe
             },
             match=match,
         )
-    bump(match)
+    match.bump()
     render_board(match)
     return swap
 
@@ -124,7 +120,7 @@ def propose(match_id: int, captain: Player, give_id: int, take_id: int) -> Playe
 def answer(match_id: int, captain: Player, swap_id: int, accept: bool) -> PlayerSwap:
     """The other captain accepts or declines. Either captain can decline, so the one who asked
     can also withdraw it."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     swap = pending(match)
     if swap is None or swap.pk != swap_id:
         raise StaleAction("That swap has already been answered.")
@@ -132,17 +128,17 @@ def answer(match_id: int, captain: Player, swap_id: int, accept: bool) -> Player
     _captain(match, captain)
     if not accept:
         _close(swap, SwapStatus.DECLINED, captain)
-        bump(match)
+        match.bump()
         render_board(match)
         return swap
     if captain.pk == swap.requested_by_id:
         raise NotAllowed("The other captain has to accept this.")
-    require_not_on_hold(match)
-    give = active_participants(match).filter(player=swap.give).first()
-    take = active_participants(match).filter(player=swap.take).first()
+    match.require_not_on_hold()
+    give = match.participants.active().filter(player=swap.give).first()
+    take = match.participants.active().filter(player=swap.take).first()
     if give is None or take is None or give.team == take.team or not give.team:
         _close(swap, SwapStatus.EXPIRED, None)
-        bump(match)
+        match.bump()
         render_board(match)
         raise StaleAction("Those players aren't on opposite teams any more.")
     give.team, take.team = take.team, give.team
@@ -169,7 +165,7 @@ def answer(match_id: int, captain: Player, swap_id: int, accept: bool) -> Player
         },
         match=match,
     )
-    bump(match)
+    match.bump()
     render_board(match)
     return swap
 
@@ -187,12 +183,12 @@ def tick(moment: datetime) -> int:
     due = PlayerSwap.objects.filter(status=SwapStatus.PENDING, deadline_at__lte=moment)
     for swap_id, match_id in due.values_list("pk", "match_id"):
         with transaction.atomic():
-            match = lock_match(match_id)
+            match = Match.objects.lock(match_id)
             swap = PlayerSwap.objects.get(pk=swap_id)
             if swap.status != SwapStatus.PENDING:
                 continue
             _close(swap, SwapStatus.EXPIRED, None)
-            bump(match)
+            match.bump()
             render_board(match)
             fired += 1
     return fired

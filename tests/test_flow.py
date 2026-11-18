@@ -44,7 +44,6 @@ from league.services import (
     runtime,
     subs,
 )
-from league.services.common import captain_of, mode_of
 from tests.conftest import PRESETS, Clock, activate, make_player
 from tests.helpers import (
     acting_captain,
@@ -195,7 +194,7 @@ def test_ready_timeout_without_replacements_voids_and_requeues(
     clock.advance(181)
     deadlines.tick()
     assert fresh(popped).status == Status.READY_CHECK  # The spot is offered for 2 minutes.
-    clock.advance(mode_of(popped).ready_check.refill_seconds + 1)
+    clock.advance(popped.mode.ready_check.refill_seconds + 1)
     deadlines.tick()
 
     match = fresh(popped)
@@ -298,8 +297,8 @@ def test_an_empty_vote_makes_the_highest_elo_captains(
     deadlines.tick()
     match = fresh(voting)
     assert match.status == Status.CAPTAIN_CHECKIN
-    assert captain_of(match, "A").player == players[4]
-    assert captain_of(match, "B").player == players[7]
+    assert match.captain_of("A").player == players[4]
+    assert match.captain_of("B").player == players[7]
 
 
 def test_vote_timeout_counts_votes_and_elo_fills_the_gap(
@@ -312,8 +311,8 @@ def test_vote_timeout_counts_votes_and_elo_fills_the_gap(
     deadlines.tick()
     match = fresh(voting)
     assert match.status == Status.CAPTAIN_CHECKIN
-    assert captain_of(match, "A").player_id == players[2].pk
-    assert captain_of(match, "B").player_id == players[9].pk
+    assert match.captain_of("A").player_id == players[2].pk
+    assert match.captain_of("B").player_id == players[9].pk
 
 
 def test_the_player_draft_starts_without_a_message(voting: Match) -> None:
@@ -332,7 +331,7 @@ def test_lower_rated_captain_gets_first_pick(popped: Match, players: list[Player
     seed(popped, players[0], 1500)
     seed(popped, players[1], 1400)
     match = vote_captains(ready_all(popped))
-    assert captain_of(match, "B").player == players[1]
+    assert match.captain_of("B").player == players[1]
     assert match.player_first_pick == "B"
 
 
@@ -364,12 +363,12 @@ def test_wrong_captain_cannot_pick(popped: Match) -> None:
     second = "B" if match.player_first_pick == "A" else "A"
     target = match.participants.filter(team="").first()
     with pytest.raises(NotAllowed):
-        draft.pick_player(match.pk, captain_of(match, second).player, 0, target.player_id)
+        draft.pick_player(match.pk, match.captain_of(second).player, 0, target.player_id)
 
 
 def test_double_click_is_stale_and_changes_nothing(popped: Match) -> None:
     match = vote_captains(ready_all(popped))
-    captain = captain_of(match, match.player_first_pick).player
+    captain = match.captain_of(match.player_first_pick).player
     target = match.participants.filter(team="").first()
     draft.pick_player(match.pk, captain, 0, target.player_id, interaction_id=1)
     other = match.participants.filter(team="").first()
@@ -381,13 +380,13 @@ def test_double_click_is_stale_and_changes_nothing(popped: Match) -> None:
 
 def test_cannot_pick_already_drafted_player(popped: Match) -> None:
     match = vote_captains(ready_all(popped))
-    captain = captain_of(match, match.player_first_pick).player
+    captain = match.captain_of(match.player_first_pick).player
     target = match.participants.filter(team="").first()
     draft.pick_player(match.pk, captain, 0, target.player_id)
     match = fresh(match)
     second = "B" if match.player_first_pick == "A" else "A"
     with pytest.raises(InvalidAction, match="already been picked"):
-        draft.pick_player(match.pk, captain_of(match, second).player, 1, target.player_id)
+        draft.pick_player(match.pk, match.captain_of(second).player, 1, target.player_id)
 
 
 def test_player_pick_timeout_takes_highest_rated(
@@ -413,7 +412,7 @@ def at_coinflip(voting: Match) -> Match:
 
 def _coin_captains(match: Match) -> tuple[Player, Player]:
     winner = match.coinflip_winner
-    return captain_of(match, winner).player, captain_of(match, "B" if winner == "A" else "A").player
+    return match.captain_of(winner).player, match.captain_of("B" if winner == "A" else "A").player
 
 
 def test_player_draft_ends_at_the_captain_coinflip(voting: Match) -> None:
@@ -479,7 +478,7 @@ def test_every_preset_runs_the_same_flow(
     opened = match.transitions.get(to_status=Status.CHAMPION_DRAFT).created_at
     assert seconds - 1 <= (match.deadline_at - opened).total_seconds() <= seconds + 1
     hidden_king = match.hidden_king_team
-    assert acting_captain(match) == captain_of(match, hidden_king).player
+    assert acting_captain(match) == match.captain_of(hidden_king).player
     draft.choose_random_champion(match.pk, acting_captain(match), match.step_index)
     match = run_champion_draft(match)
     assert match.status == Status.LOBBY_CODE
@@ -551,7 +550,7 @@ def test_random_button_takes_an_available_champion(popped: Match) -> None:
 
 def test_random_button_refuses_the_wrong_captain_and_a_stale_step(popped: Match) -> None:
     match = to_champion_draft(popped)
-    waiting = captain_of(match, "B" if match.champion_first_pick == "A" else "A").player
+    waiting = match.captain_of("B" if match.champion_first_pick == "A" else "A").player
     with pytest.raises(NotAllowed):
         draft.choose_random_champion(match.pk, waiting, match.step_index)
     draft.choose_random_champion(match.pk, acting_captain(match), match.step_index)
@@ -654,7 +653,7 @@ def test_code_starts_match_and_schedules_reminder(popped: Match) -> None:
 
 def test_one_report_then_silence_finalises(popped: Match, clock: Clock) -> None:
     match = to_in_progress(popped)
-    results.submit_report(match.pk, captain_of(match, "A").player, "A", image())
+    results.submit_report(match.pk, match.captain_of("A").player, "A", image())
     assert fresh(match).status == Status.AWAITING_CONFIRMATION
     clock.advance(901)
     deadlines.tick()
@@ -687,8 +686,8 @@ def test_participants_are_free_to_queue_after_finish(popped: Match, players: lis
 
 def test_conflicting_report_goes_to_dispute_unrated(popped: Match) -> None:
     match = to_in_progress(popped)
-    results.submit_report(match.pk, captain_of(match, "A").player, "A", image(1))
-    results.submit_report(match.pk, captain_of(match, "B").player, "B", image(2))
+    results.submit_report(match.pk, match.captain_of("A").player, "A", image(1))
+    results.submit_report(match.pk, match.captain_of("B").player, "B", image(2))
     match = fresh(match)
     assert match.status == Status.DISPUTED
     assert RatingEvent.objects.count() == 0
@@ -697,8 +696,8 @@ def test_conflicting_report_goes_to_dispute_unrated(popped: Match) -> None:
 
 def test_second_matching_screenshot_is_kept(popped: Match) -> None:
     match = to_in_progress(popped)
-    results.submit_report(match.pk, captain_of(match, "A").player, "A", image(1))
-    results.submit_report(match.pk, captain_of(match, "B").player, "A", image(2))
+    results.submit_report(match.pk, match.captain_of("A").player, "A", image(1))
+    results.submit_report(match.pk, match.captain_of("B").player, "A", image(2))
     match = fresh(match)
     assert match.status == Status.COMPLETED
     stored = ResultSubmission.objects.filter(match=match, archive_message_id__isnull=False)
@@ -707,8 +706,8 @@ def test_second_matching_screenshot_is_kept(popped: Match) -> None:
 
 def test_dispute_button_then_staff_resolves(popped: Match) -> None:
     match = to_in_progress(popped)
-    results.submit_report(match.pk, captain_of(match, "A").player, "A", image())
-    results.dispute(match.pk, captain_of(match, "B").player, "We won that")
+    results.submit_report(match.pk, match.captain_of("A").player, "A", image())
+    results.dispute(match.pk, match.captain_of("B").player, "We won that")
     assert fresh(match).status == Status.DISPUTED
     results.resolve_dispute(match.pk, "B", actor=None, reason="Checked the VOD")
     match = fresh(match)
@@ -719,8 +718,8 @@ def test_dispute_button_then_staff_resolves(popped: Match) -> None:
 
 def test_staff_can_void_a_dispute_with_no_rating_change(popped: Match) -> None:
     match = to_in_progress(popped)
-    results.submit_report(match.pk, captain_of(match, "A").player, "A", image())
-    results.dispute(match.pk, captain_of(match, "B").player, "Crash")
+    results.submit_report(match.pk, match.captain_of("A").player, "A", image())
+    results.dispute(match.pk, match.captain_of("B").player, "Crash")
     results.resolve_dispute(match.pk, "void", actor=None)
     assert fresh(match).status == Status.VOIDED
     assert RatingEvent.objects.count() == 0
@@ -744,7 +743,7 @@ def test_non_captain_cannot_report(popped: Match) -> None:
 
 def test_same_captain_cannot_respond_twice(popped: Match) -> None:
     match = to_in_progress(popped)
-    captain = captain_of(match, "A").player
+    captain = match.captain_of("A").player
     results.submit_report(match.pk, captain, "A", image())
     with pytest.raises(InvalidAction, match="already responded"):
         results.confirm(match.pk, captain)
@@ -786,11 +785,11 @@ def test_staff_void_ends_live_match(popped: Match) -> None:
 
 def test_live_substitute_inherits_captaincy_and_result(popped: Match) -> None:
     match = to_in_progress(popped)
-    leaving = captain_of(match, "A").player
+    leaving = match.captain_of("A").player
     sub = make_player(77)
     lobby.substitute_live(match.pk, leaving, sub, actor=None)
     match = fresh(match)
-    assert captain_of(match, "A").player == sub
+    assert match.captain_of("A").player == sub
     finish(match, "A")
     assert RatingEvent.objects.get(player=sub).mu_delta > 0  # The sub takes the win.
     assert not RatingEvent.objects.filter(player=leaving).exists()

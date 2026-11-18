@@ -30,7 +30,6 @@ from league.services import (
     runtime,
     steam,
 )
-from league.services.common import captain_of
 from tests.conftest import make_player
 from tests.helpers import (
     fresh,
@@ -177,7 +176,7 @@ def _player_for(account: int) -> Player:
 
 
 def _report(match: Match, winner: str, deadlock_id: int | None = DEADLOCK_ID) -> None:
-    results.submit_report(match.pk, captain_of(match, winner).player, winner, image(1), deadlock_id)
+    results.submit_report(match.pk, match.captain_of(winner).player, winner, image(1), deadlock_id)
 
 
 def test_a_report_with_a_match_id_queues_a_check(live: Match) -> None:
@@ -199,7 +198,7 @@ def test_an_agreeing_match_verifies_links_and_sets_awards(live: Match) -> None:
         _player_for(100000103).pk: "key",
         _player_for(100000106).pk: "key",
     }
-    results.confirm(live.pk, captain_of(live, "B" if hk == "A" else "A").player)
+    results.confirm(live.pk, live.captain_of("B" if hk == "A" else "A").player)
     assert integrity.check_all() == []
 
 
@@ -313,7 +312,7 @@ def test_only_a_captain_starts_the_api_lobby_and_only_once(
     outsider = match.participants.filter(is_captain=False).first().player
     with pytest.raises(NotAllowed):
         draft.check_can_start_api(match.pk, outsider)
-    captain = captain_of(match, "A").player
+    captain = match.captain_of("A").player
     assert draft.check_can_start_api(match.pk, captain) == "1234"
     draft.mark_api_started(match.pk, captain)
     with pytest.raises(StaleAction):
@@ -326,7 +325,7 @@ def test_the_started_lobby_match_id_is_kept_and_checked_after_the_report(
 ) -> None:
     match = _to_lobby_code(auto, players)
     draft.accept_api_lobby(match.pk, "1234", "ABCD-EF")
-    draft.mark_api_started(match.pk, captain_of(fresh(match), "A").player)
+    draft.mark_api_started(match.pk, fresh(match).captain_of("A").player)
     draft.record_api_match_id(match.pk, None, 1)  # Not known yet: tries again.
     assert OutboxEffect.objects.filter(kind="fetch_api_match_id", payload__attempt=2).exists()
     draft.record_api_match_id(match.pk, DEADLOCK_ID, 2)
@@ -358,7 +357,7 @@ def test_the_dashboard_needs_staff(league: Community) -> None:
 def test_the_dashboard_shows_the_season(staff_client: Client, live: Match) -> None:
     hk = live.hidden_king_team
     _report(live, hk)
-    results.confirm(live.pk, captain_of(live, "B" if hk == "A" else "A").player)
+    results.confirm(live.pk, live.captain_of("B" if hk == "A" else "A").player)
     response = staff_client.get("/admin/calibration/")
     body = response.content.decode()
     assert response.status_code == 200

@@ -15,8 +15,8 @@ from bot.routing import guarded, reply
 from league.domain import steam as steam_ids
 from league.domain.errors import InvalidAction, NotAllowed
 from league.integrations import deadlock_api
-from league.models import Community, MatchParticipant, Player
-from league.services import boards, common, leaderboards, queue, steam
+from league.models import Community, MatchParticipant, Player, Season
+from league.services import boards, leaderboards, queue, steam
 
 TeamChoice = app_commands.Choice[str]
 # Relative to the captain submitting, because a fixed list can't carry captains' names.
@@ -28,14 +28,14 @@ TEAM_CHOICES = [
 
 def _leaderboard(community: Community, player: Player) -> str:
     """Your own line of the leaderboard. Everyone's is in the leaderboard channel."""
-    season = common.open_season(community)
+    season = Season.objects.open_for(community)
     row, total = leaderboards.player_row(season, player)
     label = leaderboards.label(community)
     return own_text(row, total, label, community.leaderboard_channel_id)
 
 
 def _stats_text(community: Community, player: Player) -> str:
-    stats = boards.player_stats(common.open_season(community), player)
+    stats = boards.player_stats(Season.objects.open_for(community), player)
     rank = f"#{stats.rank}" if stats.rank else "unranked"
     tier = f" · {stats.tier}" if stats.tier else ""
     lines = [
@@ -96,7 +96,7 @@ async def leaderboard_command(interaction: Interaction[Any]) -> None:
 async def _resolve_target(interaction: Interaction[Any], user: discord.abc.User | None) -> Player:
     if user is None:
         return await actor(interaction)
-    return await db(common.get_or_create_player, user.id, user.display_name)
+    return await db(Player.objects.from_discord, user.id, user.display_name)
 
 
 @app_commands.command(

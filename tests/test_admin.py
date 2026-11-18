@@ -21,7 +21,6 @@ from league.models import (
     Season,
 )
 from league.services import champions, interim, modes, ocr, runtime
-from league.services.common import open_season
 from tests.helpers import play_full_match
 
 pytestmark = pytest.mark.django_db
@@ -105,7 +104,7 @@ def test_turning_the_interim_on_rebuilds_points_and_redraws(
 
     assert response.status_code == 302
     assert runtime.of(league).interim_points
-    season = open_season(league)
+    season = Season.objects.open_for(league)
     points = {row.points for row in InterimRating.objects.filter(season=season)}
     assert len(points) == 2 and 1000 not in points  # Winners up, losers down.
     assert {"render_leaderboard", "render_queue"} <= _kinds()
@@ -235,7 +234,7 @@ def test_settings_saved_on_the_server_page_follow_through(
 
 
 def test_seasons_start_through_the_server_action(host: Client, league: Community) -> None:
-    first = open_season(league)
+    first = Season.objects.open_for(league)
     assert host.get("/admin/league/season/add/").status_code == 403
     action = {"action": "start_next_season", "_selected_action": [league.pk]}
 
@@ -249,13 +248,13 @@ def test_seasons_start_through_the_server_action(host: Client, league: Community
         "/admin/league/community/", {**action, "confirm": "yes", "params": '{"nope": 1}'}
     )
     assert "Unknown rating parameters: nope" in unknown.content.decode()
-    assert open_season(league).pk == first.pk
+    assert Season.objects.open_for(league).pk == first.pk
 
     done = host.post(
         "/admin/league/community/", {**action, "confirm": "yes", "params": '{"beta": 3.5}'}
     )
     assert done.status_code == 302
-    second = open_season(league)
+    second = Season.objects.open_for(league)
     assert second.number == 2 and second.rating_params == {"beta": 3.5}
     first.refresh_from_db()
     assert first.ended_at is not None
@@ -327,7 +326,7 @@ def test_the_import_previews_then_confirms_exactly_what_was_shown(
     )
     assert "Imported 2 players" in done.content.decode()
     assert runtime.of(league).interim_points
-    season = open_season(league)
+    season = Season.objects.open_for(league)
     standings = interim.standings(season)
     kestrel = Player.objects.get(discord_user_id=111)
     assert standings[kestrel.pk] == interim.Standing(1240, 40, 22)

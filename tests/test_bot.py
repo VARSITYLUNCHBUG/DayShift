@@ -43,7 +43,7 @@ from league.models.outbox import EffectStatus
 from league.services import boards, common, community, effects, integrity, lobby, queue
 from league.services import draft as draft_service
 from league.services.boards import ResultRow
-from league.services.common import add_effect, captain_of, get_or_create_player, mode_of
+from league.services.common import add_effect
 from league.services.common import render_queue as request_queue
 from tests.conftest import Clock, make_player
 from tests.helpers import (
@@ -194,10 +194,10 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
     check(match)
     from tests.helpers import image
 
-    results.submit_report(match.pk, captain_of(match, "A").player, "A", image())
+    results.submit_report(match.pk, match.captain_of("A").player, "A", image())
     match = fresh(match)
     check(match)
-    results.dispute(match.pk, captain_of(match, "B").player, "No")
+    results.dispute(match.pk, match.captain_of("B").player, "No")
     match = fresh(match)
     check(match)
     results.resolve_dispute(match.pk, "A", None)
@@ -258,8 +258,8 @@ def test_a_taken_champion_stays_in_place_greyed_out(popped: Match) -> None:
     before = grid_buttons(boards.board_state(match.pk))
     assert {button["style"] for button in before} == {discord.ButtonStyle.danger.value}  # Bans.
 
-    step = build_plan(mode_of(match))[match.step_index]
-    captain = captain_of(match, team_for_role(step.role, match.champion_first_pick)).player
+    step = build_plan(match.mode)[match.step_index]
+    captain = match.captain_of(team_for_role(step.role, match.champion_first_pick)).player
     target = boards.board_state(match.pk).champions[3]
     draft_service.choose_champion(match.pk, captain, match.step_index, target.id)
 
@@ -275,10 +275,10 @@ def test_a_taken_champion_stays_in_place_greyed_out(popped: Match) -> None:
 @pytest.mark.django_db
 def test_champion_buttons_turn_green_on_a_pick(popped: Match) -> None:
     match = to_champion_draft(popped)
-    plan = build_plan(mode_of(match))
+    plan = build_plan(match.mode)
     while plan[match.step_index].action != "pick":
         step = plan[match.step_index]
-        captain = captain_of(match, team_for_role(step.role, match.champion_first_pick)).player
+        captain = match.captain_of(team_for_role(step.role, match.champion_first_pick)).player
         champion = draft_service.available_champions(match)[0]
         draft_service.choose_champion(match.pk, captain, match.step_index, champion)
         match = fresh(match)
@@ -333,8 +333,8 @@ def test_player_draft_shows_everyone_as_buttons_and_never_reflows(popped: Match)
     assert len(before) == 10
     assert not all_selects(render_board(boards.board_state(match.pk)).to_components())
 
-    step = build_plan(mode_of(match))[match.step_index]
-    captain = captain_of(match, team_for_role(step.role, match.player_first_pick)).player
+    step = build_plan(match.mode)[match.step_index]
+    captain = match.captain_of(team_for_role(step.role, match.player_first_pick)).player
     target = match.participants.filter(is_active=True, team="").order_by("id").first()
     draft_service.pick_player(match.pk, captain, match.step_index, target.player_id)
 
@@ -346,8 +346,8 @@ def test_player_draft_shows_everyone_as_buttons_and_never_reflows(popped: Match)
 @pytest.mark.django_db
 def test_player_draft_says_which_pick_of_a_double_turn_it_is(popped: Match) -> None:
     match = vote_captains(ready_all(popped))
-    step = build_plan(mode_of(match))[match.step_index]
-    captain = captain_of(match, team_for_role(step.role, match.player_first_pick)).player
+    step = build_plan(match.mode)[match.step_index]
+    captain = match.captain_of(team_for_role(step.role, match.player_first_pick)).player
     target = match.participants.filter(is_active=True, team="").order_by("id").first()
     draft_service.pick_player(match.pk, captain, match.step_index, target.player_id)
     state = boards.board_state(match.pk)
@@ -1193,8 +1193,8 @@ def test_route_button_builds_on_real_discord_py() -> None:
 
 
 def test_player_helper_updates_display_name(db: None) -> None:
-    get_or_create_player(10_000_500, "Old")
-    assert get_or_create_player(10_000_500, "New").display_name == "New"
+    Player.objects.from_discord(10_000_500, "Old")
+    assert Player.objects.from_discord(10_000_500, "New").display_name == "New"
 
 
 # --- The match channel: chat is free, and the flow stays in view -------------------------------
@@ -1383,8 +1383,8 @@ def test_champion_grid_follows_the_board_and_goes_when_the_draft_ends(wired: Com
 
     # A step with no chat below edits the board in place, and posts the grid afresh: an edited
     # grid message would carry an "(edited)" tag that splits the grid.
-    step = build_plan(mode_of(match))[match.step_index]
-    captain = captain_of(match, team_for_role(step.role, match.champion_first_pick)).player
+    step = build_plan(match.mode)[match.step_index]
+    captain = match.captain_of(team_for_role(step.role, match.champion_first_pick)).player
     champion = boards.board_state(match.pk).champions[-1].id  # Alphabetically last.
     draft_service.choose_champion(match.pk, captain, match.step_index, champion)
     drain(gateway)
@@ -1431,8 +1431,8 @@ def test_a_deleted_board_comes_back_above_the_picker(wired: Community) -> None:
     old_picker = resource(match, ResourceKind.PICKER_MESSAGE)
     gateway.messages[text_id].remove(resource(match, ResourceKind.BOARD_MESSAGE))
 
-    step = build_plan(mode_of(match))[match.step_index]
-    captain = captain_of(match, team_for_role(step.role, match.champion_first_pick)).player
+    step = build_plan(match.mode)[match.step_index]
+    captain = match.captain_of(team_for_role(step.role, match.champion_first_pick)).player
     champion = draft_service.available_champions(match)[0]
     draft_service.choose_champion(match.pk, captain, match.step_index, champion)
     drain(gateway)
@@ -1554,7 +1554,7 @@ def test_paused_board_drops_the_grid_and_fits_with_two_sub_requests(popped: Matc
     match = to_champion_draft(popped)
     leaving = match.participants.filter(team="A", is_captain=False).first().player
     other = match.participants.filter(team="B", is_captain=False).first().player
-    subs.request_sub_out(match.pk, captain_of(match, "B").player, other.pk)
+    subs.request_sub_out(match.pk, match.captain_of("B").player, other.pk)
     subs.request_sub_out(match.pk, leaving, leaving.pk)
     state = boards.board_state(match.pk)
     view = render_board(state)
@@ -1761,12 +1761,12 @@ def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_waiting_ro
     drain(gateway)
     text = resource(match, ResourceKind.TEXT)
     team_voice = resource(match, ResourceKind.TEAM_A_VOICE)
-    sitting = captain_of(match, "A").player.discord_user_id
+    sitting = match.captain_of("A").player.discord_user_id
     gateway.voice[team_voice] = {sitting}
     leaving = match.participants.filter(is_active=True, is_captain=False).first().player
     subs.request_sub_out(match.pk, leaving, leaving.pk)
     drain(gateway)
-    clock.advance(mode_of(match).subs.max_wait_seconds + 1)
+    clock.advance(match.mode.subs.max_wait_seconds + 1)
     deadlines.tick()
     drain(gateway)
     successor = Match.objects.get(restarted_from=match)
@@ -1822,7 +1822,7 @@ def test_board_fits_with_the_most_sub_requests_allowed(popped: Match, phase: str
     if phase == "in_progress":
         match = to_in_progress(match)
     team_a = list(match.participants.filter(team="A", is_captain=False).order_by("id"))
-    captain_a = captain_of(match, "A").player
+    captain_a = match.captain_of("A").player
     subs.request_sub_out(match.pk, captain_a, team_a[0].player_id)  # Waiting on approval.
     for row in team_a[1:4]:
         subs.request_sub_out(match.pk, row.player, row.player_id)
@@ -1870,7 +1870,7 @@ def test_coinflip_board_offers_the_winner_a_side(voting: Match) -> None:
     labels = [b["label"] for b in buttons if ":coin_choice:" in b.get("custom_id", "")]
     assert labels == ["Hidden King", "Archmother"]
     draft_service.choose_coinflip(
-        match.pk, captain_of(match, match.coinflip_winner).player, "archmother"
+        match.pk, match.captain_of(match.coinflip_winner).player, "archmother"
     )
     assert fresh(match).status == Status.CHAMPION_DRAFT
 

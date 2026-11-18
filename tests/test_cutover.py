@@ -9,7 +9,7 @@ from bot.renderers.board import render_board
 from bot.renderers.leaderboard import PAGE_CHARS, own_text, pages
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
-from league.models import Community, InterimRating, Match, OutboxEffect, Player, PlayerSwap
+from league.models import Community, InterimRating, Match, OutboxEffect, Player, PlayerSwap, Season
 from league.models.swaps import SwapStatus
 from league.services import (
     boards,
@@ -22,7 +22,6 @@ from league.services import (
     runtime,
     swaps,
 )
-from league.services.common import captain_of, open_season
 from tests.conftest import Clock, make_player
 from tests.helpers import (
     check_in_captains,
@@ -87,12 +86,12 @@ def test_the_vote_leads_to_a_check_in_not_the_draft(voting: Match) -> None:
 
 def test_both_captains_checking_in_starts_the_player_draft(voting: Match) -> None:
     match = vote_only(voting)
-    first = captain_of(match, "A").player
+    first = match.captain_of("A").player
     lobby.check_in(match.pk, first)
     assert fresh(match).status == Status.CAPTAIN_CHECKIN
     with pytest.raises(InvalidAction):
         lobby.check_in(match.pk, first)
-    lobby.check_in(match.pk, captain_of(match, "B").player)
+    lobby.check_in(match.pk, match.captain_of("B").player)
     assert fresh(match).status == Status.PLAYER_DRAFT
 
 
@@ -105,18 +104,18 @@ def test_only_a_captain_can_check_in(voting: Match) -> None:
 
 def test_a_captain_who_misses_check_in_is_replaced(voting: Match, clock: Clock) -> None:
     match = vote_only(voting)
-    stays = captain_of(match, "A")
-    gone = captain_of(match, "B")
+    stays = match.captain_of("A")
+    gone = match.captain_of("B")
     lobby.check_in(match.pk, stays.player)
     clock.advance(61)
     deadlines.tick()
     match = fresh(match)
     assert match.status == Status.CAPTAIN_CHECKIN
-    heir = captain_of(match, "B")
+    heir = match.captain_of("B")
     assert heir.player_id != gone.player_id
     gone.refresh_from_db()
     assert gone.missed_checkin and not gone.is_captain and gone.team == ""
-    assert captain_of(match, "A").checked_in_at is not None
+    assert match.captain_of("A").checked_in_at is not None
     lobby.check_in(match.pk, heir.player)
     assert fresh(match).status == Status.PLAYER_DRAFT
 
@@ -132,7 +131,7 @@ def test_with_nobody_left_to_ask_the_draft_starts(voting: Match, clock: Clock) -
 
 def test_the_board_shows_the_check_in(voting: Match) -> None:
     match = vote_only(voting)
-    lobby.check_in(match.pk, captain_of(match, "A").player)
+    lobby.check_in(match.pk, match.captain_of("A").player)
     view = render_board(boards.board_state(match.pk))
     text = _texts(view)
     assert "I'm here" in text and "✅" in text and "⏳" in text
@@ -210,7 +209,7 @@ def _non_captain(match: Match, team: str) -> Player:
 
 def test_captains_can_swap_two_players(popped: Match) -> None:
     match = _at_champion_draft(popped)
-    a, b = captain_of(match, "A").player, captain_of(match, "B").player
+    a, b = match.captain_of("A").player, match.captain_of("B").player
     give, take = _non_captain(match, "A"), _non_captain(match, "B")
     swap = swaps.propose(match.pk, a, give.pk, take.pk)
     with pytest.raises(NotAllowed):
@@ -224,7 +223,7 @@ def test_captains_can_swap_two_players(popped: Match) -> None:
 
 def test_a_swap_can_be_declined_and_lapses(popped: Match, clock: Clock) -> None:
     match = _at_champion_draft(popped)
-    a, b = captain_of(match, "A").player, captain_of(match, "B").player
+    a, b = match.captain_of("A").player, match.captain_of("B").player
     give, take = _non_captain(match, "A"), _non_captain(match, "B")
     first = swaps.propose(match.pk, a, give.pk, take.pk)
     with pytest.raises(InvalidAction):
@@ -240,9 +239,9 @@ def test_a_swap_can_be_declined_and_lapses(popped: Match, clock: Clock) -> None:
 
 def test_captains_and_strangers_cant_be_swapped(popped: Match) -> None:
     match = _at_champion_draft(popped)
-    a = captain_of(match, "A").player
+    a = match.captain_of("A").player
     with pytest.raises(InvalidAction):
-        swaps.propose(match.pk, a, _non_captain(match, "A").pk, captain_of(match, "B").player_id)
+        swaps.propose(match.pk, a, _non_captain(match, "A").pk, match.captain_of("B").player_id)
     with pytest.raises(NotAllowed):
         swaps.propose(match.pk, _non_captain(match, "A"), 1, 2)
 
@@ -250,7 +249,7 @@ def test_captains_and_strangers_cant_be_swapped(popped: Match) -> None:
 def test_swaps_close_once_the_game_starts(popped: Match) -> None:
     match = to_in_progress(popped)
     with pytest.raises(StaleAction):
-        swaps.own_options(match.pk, captain_of(match, "A").player)
+        swaps.own_options(match.pk, match.captain_of("A").player)
     assert not boards.board_state(match.pk).can_swap
 
 
@@ -259,7 +258,7 @@ def test_the_board_offers_and_shows_a_swap(popped: Match) -> None:
     assert any(":swap_open:" in i for i in _custom_ids(render_board(boards.board_state(match.pk))))
     swaps.propose(
         match.pk,
-        captain_of(match, "A").player,
+        match.captain_of("A").player,
         _non_captain(match, "A").pk,
         _non_captain(match, "B").pk,
     )
@@ -297,7 +296,7 @@ def test_import_carries_points_and_matches_move_them(
     rows = [interim.ImportRow(p.discord_user_id, 1500, 10, 5) for p in players[:6]]
     assert interim.apply_import(league, rows) == 6
     assert runtime.of(league).interim_points
-    season = open_season(league)
+    season = Season.objects.open_for(league)
     assert interim.standings(season)[players[0].pk] == interim.Standing(1500, 10, 5)
 
     match = play_full_match(league, players, "A", 1)
@@ -319,7 +318,7 @@ def test_a_rescore_rebuilds_the_points(league: Community, players: list[Player])
     interim.set_enabled(league, True)
     match = play_full_match(league, players, "A", 1)
     winner = match.participants.filter(team="A").first().player_id
-    season = open_season(league)
+    season = Season.objects.open_for(league)
     assert interim.standings(season)[winner].points > 1000
     corrections.apply_outcome_correction(match.pk, "B", None, "wrong team")
     assert interim.standings(season)[winner].points < 1000
@@ -327,7 +326,7 @@ def test_a_rescore_rebuilds_the_points(league: Community, players: list[Player])
 
 def test_the_interim_off_shows_openskill(league: Community, players: list[Player]) -> None:
     interim.apply_import(league, [interim.ImportRow(players[0].discord_user_id, 1500, 1, 1)])
-    season = open_season(league)
+    season = Season.objects.open_for(league)
     assert leaderboards.shown(season, [players[0].pk])[players[0].pk].rating == 1500
     interim.set_enabled(league, False)
     assert leaderboards.shown(season, [players[0].pk])[players[0].pk].rating == season.start_rating
@@ -340,7 +339,7 @@ def test_the_leaderboard_lists_everyone_with_a_record(
     league: Community, players: list[Player]
 ) -> None:
     play_full_match(league, players, "A", 1)
-    season = open_season(league)
+    season = Season.objects.open_for(league)
     rows = leaderboards.table(season)
     assert len(rows) == 12
     assert [row.rank for row in rows] == list(range(1, 13))

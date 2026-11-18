@@ -29,7 +29,6 @@ from league.models import (
 from league.models.ratings import RunKind
 from league.models.scoreboards import AwardSource, ReadStatus
 from league.services import awards, integrity, ocr, queue, ratings, results, runtime
-from league.services.common import captain_of
 from league.services.community import start_season
 from tests.helpers import fresh, image, to_in_progress
 
@@ -96,7 +95,7 @@ def _live_match(league: Community, players: list[Player]) -> Match:
 
 
 def _report(match: Match, winner: str) -> ResultSubmission:
-    results.submit_report(match.pk, captain_of(match, winner).player, winner, image(1))
+    results.submit_report(match.pk, match.captain_of(winner).player, winner, image(1))
     return ResultSubmission.objects.filter(match=match).order_by("id").first()
 
 
@@ -124,7 +123,7 @@ def test_a_clean_read_stores_stats_and_sets_the_awards(
     assert submission.deadlock_match_id == 131887902
     # The awards are in the rating once the other captain confirms.
     other = "B" if match.hidden_king_team == "A" else "A"
-    results.confirm(match.pk, captain_of(match, other).player)
+    results.confirm(match.pk, match.captain_of(other).player)
     mvp_event = RatingEvent.objects.get(match=match, player=_player("Nevermore"))
     assert mvp_event.award_adj is not None and mvp_event.award_adj > 0
     assert integrity.check_season(season) == []
@@ -145,7 +144,7 @@ def test_a_typed_match_id_is_never_overwritten(
 ) -> None:
     match = _live_match(league, players)
     hk = match.hidden_king_team
-    results.submit_report(match.pk, captain_of(match, hk).player, hk, image(1), 42)
+    results.submit_report(match.pk, match.captain_of(hk).player, hk, image(1), 42)
     submission = ResultSubmission.objects.get(match=match)
     ocr.ingest(submission.pk, scoreboard(1))
     submission.refresh_from_db()
@@ -159,7 +158,7 @@ def test_a_read_after_the_result_corrects_the_ledger(
     hk = match.hidden_king_team
     other = "B" if hk == "A" else "A"
     submission = _report(match, hk)
-    results.confirm(match.pk, captain_of(match, other).player)
+    results.confirm(match.pk, match.captain_of(other).player)
     assert fresh(match).status == Status.COMPLETED
     ocr.ingest(submission.pk, scoreboard(1))
     assert RatingRun.objects.filter(match=match, kind=RunKind.CORRECTION).count() == 1
@@ -204,7 +203,7 @@ def test_unmatched_names_ask_a_captain_and_are_remembered(
     assert OutboxEffect.objects.filter(kind="scoreboard_notice", match=match).exists()
     assert ratings.current_awards(match) == {}  # The MVP is on the unmatched team.
 
-    captain = captain_of(match, hk).player
+    captain = match.captain_of(hk).player
     rows = ocr.unmapped_rows(read.pk)
     assert len(rows) == 6
     hk_players = list(match.participants.filter(team=hk).order_by("id"))
@@ -238,7 +237,7 @@ def test_a_player_can_only_be_matched_to_their_own_team(
     other = "B" if hk == "A" else "A"
     wrong = match.participants.filter(team=other).first()
     with pytest.raises(InvalidAction):
-        ocr.map_row(read.pk, row.row, wrong.player_id, captain_of(match, hk).player, is_staff=True)
+        ocr.map_row(read.pk, row.row, wrong.player_id, match.captain_of(hk).player, is_staff=True)
 
 
 def test_reports_queue_a_read_only_when_ocr_is_on(league: Community, players: list[Player]) -> None:
@@ -287,6 +286,6 @@ def test_a_real_read_goes_all_the_way_into_the_rating(
     assert read.stats.filter(player__isnull=False).count() == 12
     assert ratings.current_awards(match)[_player("Nevermore").pk] == "mvp"
     other = "B" if hk == "A" else "A"
-    results.confirm(match.pk, captain_of(match, other).player)
+    results.confirm(match.pk, match.captain_of(other).player)
     assert RatingEvent.objects.get(match=match, player=_player("Nevermore")).award_adj > 0
     assert integrity.check_season(season) == []

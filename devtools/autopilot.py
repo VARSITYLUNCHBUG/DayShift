@@ -41,7 +41,6 @@ from league.models import (
 from league.models.matches import MatchKind, ResourceKind
 from league.models.subs import UNRESOLVED, OfferStatus, SubStatus
 from league.services import draft, lobby, results, standing, subs, swaps
-from league.services.common import active_participants, captain_of, mode_of, strength_of
 from league.services.results import ImageRef
 
 # The main path of a ranked match, in order. `advance` can stop at any of these.
@@ -146,13 +145,13 @@ def _by_strength(match: Match, player_ids: list[int]) -> list[int]:
     """Strongest first, as the league compares them (mu), then lowest id."""
     rated = PlayerRating.objects.filter(season=match.season, player_id__in=player_ids)
     mus = {pk: int(mu * 1000) for pk, mu in rated.values_list("player_id", "mu")}
-    strength = {pk: mus[pk] if pk in mus else strength_of(match.season, pk) for pk in player_ids}
+    strength = {pk: mus[pk] if pk in mus else match.season.strength_of(pk) for pk in player_ids}
     return sorted(player_ids, key=lambda pk: (-strength[pk], pk))
 
 
 def default_votes(match: Match) -> list[int]:
-    ids = list(active_participants(match).values_list("player_id", flat=True))
-    rows = standing.eligibility(match.community, mode_of(match), ids)
+    ids = list(match.participants.active().values_list("player_id", flat=True))
+    rows = standing.eligibility(match.community, match.mode, ids)
     eligible = [pk for pk in ids if rows[pk].eligibility.ok]
     return _by_strength(match, eligible)[:2]
 
@@ -167,7 +166,9 @@ def choose_votes(match: Match, voter: Player, default: list[int] | None = None) 
 
 
 def choose_player_pick(match: Match) -> int:
-    undrafted = list(active_participants(match).filter(team="").values_list("player_id", flat=True))
+    undrafted = list(
+        match.participants.active().filter(team="").values_list("player_id", flat=True)
+    )
     if not undrafted:
         raise Conflict("Nobody is left to draft.")
     for pk in script_of(match).get("draft", []):
@@ -178,7 +179,7 @@ def choose_player_pick(match: Match) -> int:
 
 def _step(match: Match) -> tuple[str, str]:
     """(ban, pick or player_pick; acting team) for the current draft step."""
-    step = build_plan(mode_of(match))[match.step_index]
+    step = build_plan(match.mode)[match.step_index]
     first = match.player_first_pick if step.action == "player_pick" else match.champion_first_pick
     return step.action, team_for_role(step.role, first)
 
@@ -188,7 +189,7 @@ def choose_champion(match: Match) -> int:
     available = draft.available_champions(match)
     if not available:
         raise Conflict("No champions are left.")
-    champion_step = match.step_index - player_draft_length(mode_of(match))
+    champion_step = match.step_index - player_draft_length(match.mode)
     for entry in script_of(match).get("champions", []):
         wanted = entry["step"] == champion_step and entry.get("team") in {None, team}
         if wanted and entry["champion"] in available:
@@ -231,14 +232,14 @@ def placeholder_image(match: Match, player: Player) -> ImageRef:
 
 
 def _first_of_team(match: Match, team: str) -> int:
-    row = active_participants(match).filter(team=team, is_captain=False).order_by("pk").first()
+    row = match.participants.active().filter(team=team, is_captain=False).order_by("pk").first()
     if row is None:
         raise Conflict(f"Team {team} has nobody to swap but its captain.")
     return row.player_id
 
 
 def _team_of(match: Match, player: Player) -> str:
-    row = active_participants(match).filter(player=player).first()
+    row = match.participants.active().filter(player=player).first()
     if row is None or not row.team:
         raise Conflict(f"{player.display_name} isn't on a team in match #{match.pk}.")
     return row.team
@@ -260,7 +261,7 @@ def next_moves(match: Match) -> list[Move]:
     status = match.status
     if match.held_seconds is not None:
         raise Conflict(f"Match #{match.pk} is on hold for a sub. Settle the sub first.")
-    active = active_participants(match)
+    active = match.participants.active()
     if status == Status.READY_CHECK:
         return [Move(p.player, "ready") for p in active.filter(ready_at__isnull=True)]
     if status == Status.CAPTAIN_PHASE:
@@ -281,7 +282,7 @@ def next_moves(match: Match) -> list[Move]:
     if status == Status.COINFLIP:
         team, _ = draft.coinflip_turn(match)
         choice = str(script_of(match).get("coinflip", HIDDEN_KING))
-        return [Move(captain_of(match, team).player, "coinflip", {"choice": choice})]
+        return [Move(match.captain_of(team).player, "coinflip", {"choice": choice})]
     if status == Status.CHAMPION_DRAFT:
         action, _ = _step(match)
         return [Move(lookup.acting_captain(match), action, {"champion": choose_champion(match)})]
@@ -290,7 +291,7 @@ def next_moves(match: Match) -> list[Move]:
             return [Move(None, "api_lobby", {"create": control.lobbies() == control.CREATE})]
         return [Move(match.lobby_code_host, "lobby_code", {"code": lobby_code_of(match)})]
     if status == Status.IN_PROGRESS:
-        captain = captain_of(match, "A").player
+        captain = match.captain_of("A").player
         if match.api_party_id and match.api_started_at is None:
             return [Move(captain, "start_match")]
         return [Move(captain, "report", {"winner": winner_of(match)})]
@@ -885,11 +886,11 @@ def _default_args(
 def _default_player(match: Match, action: str) -> Player:
     """Who does an action nobody is due to: a captain, for the captains' own buttons."""
     if action in {"swap", "start_match"}:
-        return captain_of(match, "A").player
+        return match.captain_of("A").player
     if action in {"accept_swap", "decline_swap"}:
         swap = pending_swap(match)
         team = "B" if _team_of(match, swap.requested_by) == "A" else "A"
-        return captain_of(match, team).player
+        return match.captain_of(team).player
     waiting = [move.player for move in _safe_moves(match) if move.action == action and move.player]
     if not waiting:
         raise BadRequest(f"Nobody is due to {action} now: say which player does it.")
@@ -919,9 +920,9 @@ def act(
 
 def _offer_open_seats(match: Match) -> None:
     """Before acting as `offered`: an open seat nobody has been asked for yet, with someone
-    waiting in the queue, is offered to them on the scheduler's next pass (`subs.tick`, every
+    waiting in the queue, is offered to them on the deadline loop's next pass (`subs.tick`, every
     second). Run that pass now, as `fire` does, so the offer is there whichever comes first: the
-    league locks the request and checks again, so the scheduler's own pass can't offer twice."""
+    league locks the request and checks again, so the loop's own pass can't offer twice."""
     if SubOffer.objects.filter(request__match=match, status=OfferStatus.PENDING).exists():
         return
     unasked = (

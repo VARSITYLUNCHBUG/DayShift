@@ -10,7 +10,6 @@ from bot.renderers.results import render_results, render_scoreboard_notice, team
 from league.models import Community, Player, Season
 from league.models.scoreboards import AwardSource
 from league.services import boards, corrections, integrity
-from league.services.common import captain_of
 from league.services.community import start_season
 from tests.helpers import play_full_match
 
@@ -49,7 +48,7 @@ def test_random_histories_keep_the_ledger_equal_to_a_replay(
 def test_results_show_awards_and_scoreboard_stats(league: Community, players: list[Player]) -> None:
     start_season(league, {"placement_games": 0})
     match = play_full_match(league, players, "A", 1)
-    mvp = captain_of(match, "A").player
+    mvp = match.captain_of("A").player
     corrections.apply_award_correction(match.pk, {mvp.pk: "mvp"}, AwardSource.STAFF, None, "x")
     model = boards.results_view(match.pk)
     assert "🏅" in team_table(model.team_a)

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from django.db import transaction
 
+from league.domain.engine import Status
 from league.domain.errors import InvalidAction
 from league.models import (
     Community,
@@ -32,7 +33,7 @@ from league.models import (
 )
 from league.models.matches import MatchKind
 from league.services import runtime
-from league.services.common import lock_community, now, open_season
+from league.services.common import lock_community, now
 
 
 def enabled(community: Community | int) -> bool:
@@ -78,7 +79,7 @@ def rebuild(season: Season) -> int:
 
     matches = list(
         Match.objects.filter(
-            season=season, kind=MatchKind.RANKED, status="completed", winner__in=("A", "B")
+            season=season, kind=MatchKind.RANKED, status=Status.COMPLETED, winner__in=("A", "B")
         )
         .order_by("ended_at", "id")
         .values_list("pk", "winner")
@@ -293,7 +294,7 @@ def apply_import(community: Community, rows: list[ImportRow]) -> int:
     """Replace the season's imported NeatQueue values with these, turn the interim on and
     rebuild the points. Players not listed start at the default. Returns players imported."""
     lock_community(community.pk)
-    season = open_season(community)
+    season = Season.objects.open_for(community)
     moment = now()
     InterimRating.objects.filter(season=season).update(
         imported_points=None, imported_wins=0, imported_losses=0, imported_at=None
@@ -327,7 +328,7 @@ def set_enabled(community: Community, on: bool) -> None:
     lock_community(community.pk)
     runtime.update(community, interim_points=on)
     if on:
-        rebuild(open_season(community))
+        rebuild(Season.objects.open_for(community))
     from league.services import leaderboards
 
     leaderboards.request(community)

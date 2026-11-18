@@ -24,7 +24,7 @@ from league.services import (
     subs,
     swaps,
 )
-from league.services.common import lock_match, now
+from league.services.common import now
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ _HANDLERS = {
 def fire_match_deadline(match_id: int) -> bool:
     """Apply one match's timeout if it is still due. Returns whether anything happened."""
     with transaction.atomic():
-        match = lock_match(match_id)
+        match = Match.objects.lock(match_id)
         # Re-check under the lock: a click may have got here first.
         if match.deadline_at is None or match.deadline_at > now() or match.status not in TIMED:
             return False

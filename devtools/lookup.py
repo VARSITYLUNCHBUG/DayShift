@@ -9,7 +9,6 @@ from league.domain.draft_plan import build_plan, team_for_role
 from league.domain.engine import Status
 from league.models import Champion, Community, Match, Player, QueueEntry, Season, SubOffer
 from league.models.subs import UNRESOLVED, OfferStatus
-from league.services.common import captain_of, mode_of
 
 
 def community_or_none() -> Community | None:
@@ -67,9 +66,9 @@ def champion(ref: str | int) -> Champion:
 
 def acting_captain(row: Match) -> Player:
     """The captain whose turn it is in the player draft or the champion draft."""
-    step = build_plan(mode_of(row))[row.step_index]
+    step = build_plan(row.mode)[row.step_index]
     first = row.player_first_pick if step.action == "player_pick" else row.champion_first_pick
-    return captain_of(row, team_for_role(step.role, first)).player
+    return row.captain_of(team_for_role(step.role, first)).player
 
 
 def _nth(players: list[Player], index: str, what: str) -> Player:
@@ -91,9 +90,9 @@ def select_player(row: Match, ref: int | str) -> Player:
     if isinstance(ref, int) or str(ref).isdigit():
         return player(ref)
     kind, _, arg = str(ref).partition(":")
-    active = [p.player for p in row.participants.filter(is_active=True).select_related("player")]
+    active = [p.player for p in row.participants.active()]
     if kind == "captain" and arg in {"A", "B"}:
-        return captain_of(row, arg).player
+        return row.captain_of(arg).player
     if kind == "acting":
         if row.status not in {Status.PLAYER_DRAFT, Status.CHAMPION_DRAFT}:
             raise Conflict(f"Nobody is drafting: the match is {row.status}.")
@@ -105,7 +104,7 @@ def select_player(row: Match, ref: int | str) -> Player:
     if kind == "other_captain":
         reported = _reported(row)
         for team in ("A", "B"):
-            captain = captain_of(row, team).player
+            captain = row.captain_of(team).player
             if captain.pk not in reported:
                 return captain
         raise Conflict("Both captains have already reported.")

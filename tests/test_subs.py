@@ -22,7 +22,6 @@ from league.models import (
 from league.models.moderation import PenaltyKind
 from league.models.subs import OfferSource, OfferStatus, SubStatus
 from league.services import boards, deadlines, draft, lobby, queue, results, subs
-from league.services.common import captain_of, mode_of
 from tests.conftest import Clock, make_player
 from tests.helpers import (
     finish,
@@ -110,8 +109,8 @@ def test_nobody_but_a_captain_can_sub_out_someone_else(
 
 def test_captain_request_needs_the_other_captain(popped: Match) -> None:
     match = in_draft(popped)
-    captain_a = captain_of(match, "A").player
-    captain_b = captain_of(match, "B").player
+    captain_a = match.captain_of("A").player
+    captain_b = match.captain_of("B").player
     target = non_captain(match)
     request = subs.request_sub_out(match.pk, captain_a, target.pk)
     assert request.status == SubStatus.AWAITING_APPROVAL
@@ -127,8 +126,8 @@ def test_captain_request_needs_the_other_captain(popped: Match) -> None:
 def test_other_captain_can_refuse(popped: Match) -> None:
     match = in_draft(popped)
     target = non_captain(match)
-    request = subs.request_sub_out(match.pk, captain_of(match, "A").player, target.pk)
-    subs.answer_sub_out(request.pk, captain_of(match, "B").player, False)
+    request = subs.request_sub_out(match.pk, match.captain_of("A").player, target.pk)
+    subs.answer_sub_out(request.pk, match.captain_of("B").player, False)
     request.refresh_from_db()
     assert request.status == SubStatus.REJECTED
     match = fresh(match)
@@ -139,8 +138,8 @@ def test_other_captain_can_refuse(popped: Match) -> None:
 
 def test_unanswered_captain_request_lapses(popped: Match, clock: Clock) -> None:
     match = in_draft(popped)
-    request = subs.request_sub_out(match.pk, captain_of(match, "A").player, non_captain(match).pk)
-    clock.advance(mode_of(match).subs.approve_seconds + 1)
+    request = subs.request_sub_out(match.pk, match.captain_of("A").player, non_captain(match).pk)
+    clock.advance(match.mode.subs.approve_seconds + 1)
     deadlines.tick()
     request.refresh_from_db()
     assert request.status == SubStatus.REJECTED
@@ -157,10 +156,10 @@ def test_at_most_four_requests_pending_at_once(popped: Match, players: list[Play
 def test_captain_cannot_sub_out_the_other_teams_players(popped: Match) -> None:
     match = run_player_draft(in_draft(popped))
     with pytest.raises(NotAllowed):
-        subs.request_sub_out(match.pk, captain_of(match, "A").player, non_captain(match, "B").pk)
+        subs.request_sub_out(match.pk, match.captain_of("A").player, non_captain(match, "B").pk)
     with pytest.raises(NotAllowed):
         subs.request_sub_out(
-            match.pk, captain_of(match, "A").player, captain_of(match, "B").player.pk
+            match.pk, match.captain_of("A").player, match.captain_of("B").player.pk
         )
 
 
@@ -171,7 +170,7 @@ def test_no_captain_requests_during_the_ready_check(popped: Match, players: list
 
 def test_captain_sees_teammates_and_undrafted_players(popped: Match) -> None:
     match = in_draft(popped)
-    options = subs.sub_out_options(match.pk, captain_of(match, "A").player)
+    options = subs.sub_out_options(match.pk, match.captain_of("A").player)
     assert options.choices[0].is_self
     assert len(options.choices) == 11  # Themself and the ten still to be drafted.
 
@@ -259,9 +258,9 @@ def test_only_the_leaver_or_their_captain_can_name_a_sub(popped: Match) -> None:
     leaving = non_captain(match, "A")
     request = self_sub(match, leaving)
     with pytest.raises(NotAllowed):
-        invite(request, captain_of(match, "B").player, make_player(77))
-    offer = invite(request, captain_of(match, "A").player, make_player(77))
-    assert offer.invited_by == captain_of(match, "A").player
+        invite(request, match.captain_of("B").player, make_player(77))
+    offer = invite(request, match.captain_of("A").player, make_player(77))
+    assert offer.invited_by == match.captain_of("A").player
 
 
 def test_decline_falls_back_to_the_priority_list(
@@ -281,7 +280,7 @@ def test_queue_is_asked_when_nobody_is_named_in_time(
 ) -> None:
     waiting = queue_up(league, range(30, 33))
     request = self_sub(popped, players[3])
-    clock.advance(mode_of(popped).subs.name_seconds + 1)
+    clock.advance(popped.mode.subs.name_seconds + 1)
     deadlines.tick()
     pending = SubOffer.objects.get(request=request, status=OfferStatus.PENDING)
     assert pending.player == waiting[0]
@@ -293,7 +292,7 @@ def test_queue_offers_go_down_the_line_until_someone_accepts(
     waiting = queue_up(league, range(30, 33))
     request = self_sub(popped, players[3])
     subs.offer_to_queue(request.pk, players[3])
-    clock.advance(mode_of(popped).subs.offer_seconds + 1)
+    clock.advance(popped.mode.subs.offer_seconds + 1)
     deadlines.tick()  # The first in line didn't answer.
     second = SubOffer.objects.get(request=request, status=OfferStatus.PENDING)
     assert second.player == waiting[1]
@@ -324,7 +323,7 @@ def test_unfilled_slot_cancels_the_match_and_requeues_everyone_else(
     for player in players[:3] + players[4:]:
         lobby.mark_ready(popped.pk, player)
     request = self_sub(popped, players[3])
-    clock.advance(mode_of(popped).subs.max_wait_seconds + 1)
+    clock.advance(popped.mode.subs.max_wait_seconds + 1)
     deadlines.tick()
     request.refresh_from_db()
     assert request.status == SubStatus.EXPIRED
@@ -362,12 +361,12 @@ def test_timer_resumes_where_it_stopped(popped: Match, players: list[Player], cl
 
 def test_paused_draft_refuses_picks(popped: Match) -> None:
     match = in_draft(popped)
-    step = build_plan(mode_of(match))[match.step_index]
+    step = build_plan(match.mode)[match.step_index]
     team = team_for_role(step.role, match.player_first_pick)
     target = non_captain(match)
     self_sub(match, non_captain(match, ""))
     with pytest.raises(InvalidAction, match="paused"):
-        draft.pick_player(match.pk, captain_of(match, team).player, match.step_index, target.pk)
+        draft.pick_player(match.pk, match.captain_of(team).player, match.step_index, target.pk)
 
 
 def test_drafted_player_is_replaced_on_the_same_team(popped: Match) -> None:
@@ -394,12 +393,12 @@ def test_undrafted_sub_goes_into_the_pool(popped: Match) -> None:
 def test_captain_subbing_out_hands_the_role_to_the_sub(popped: Match) -> None:
     match = in_draft(popped)  # Captains exist once the vote has closed.
     assert match.status == Status.PLAYER_DRAFT
-    leaving = captain_of(match, "A").player
+    leaving = match.captain_of("A").player
     request = self_sub(match, leaving)
     sub = make_player(77)
     subs.answer_offer(invite(request, leaving, sub).pk, sub, True)
     match = fresh(match)
-    assert captain_of(match, "A").player == sub
+    assert match.captain_of("A").player == sub
     assert match.participants.get(player=sub, is_active=True).is_captain
     run_player_draft(match)
     assert fresh(match).status == Status.COINFLIP
@@ -477,7 +476,7 @@ def test_cancelling_mid_game_is_free(popped: Match) -> None:
 def test_a_result_closes_an_open_sub(popped: Match) -> None:
     match = to_in_progress(popped)
     request = self_sub(match, non_captain(match, "A"))
-    results.submit_report(match.pk, captain_of(match, "A").player, "A", image())
+    results.submit_report(match.pk, match.captain_of("A").player, "A", image())
     request.refresh_from_db()
     match = fresh(match)
     assert request.status == SubStatus.CANCELLED
@@ -487,7 +486,7 @@ def test_a_result_closes_an_open_sub(popped: Match) -> None:
 
 def test_subs_close_once_a_result_is_in(popped: Match) -> None:
     match = to_in_progress(popped)
-    results.submit_report(match.pk, captain_of(match, "A").player, "A", image())
+    results.submit_report(match.pk, match.captain_of("A").player, "A", image())
     with pytest.raises(StaleAction):
         self_sub(match, non_captain(match, "A"))
 
@@ -558,7 +557,7 @@ def test_a_ready_check_spot_is_never_penalised_twice(
         lobby.mark_ready(popped.pk, player)
     clock.advance(181)
     deadlines.tick()
-    clock.advance(mode_of(popped).ready_check.refill_seconds + 1)
+    clock.advance(popped.mode.ready_check.refill_seconds + 1)
     deadlines.tick()
     assert fresh(popped).status == Status.VOIDED
     assert Penalty.objects.filter(player=players[11]).count() == 1  # For missing it, only.
@@ -569,7 +568,7 @@ def test_a_ready_check_spot_is_never_penalised_twice(
 
 def _expire_sub_out(match: Match, leaving: Player, clock: Clock) -> Match:
     self_sub(match, leaving)
-    clock.advance(mode_of(match).subs.max_wait_seconds + 1)
+    clock.advance(match.mode.subs.max_wait_seconds + 1)
     deadlines.tick()
     return fresh(match)
 
@@ -578,7 +577,7 @@ def test_an_unfilled_sub_out_in_the_draft_restarts_the_lobby(
     popped: Match, players: list[Player], league: Community, clock: Clock
 ) -> None:
     match = in_draft(popped)
-    first = captain_of(match, match.player_first_pick).player
+    first = match.captain_of(match.player_first_pick).player
     target = match.participants.filter(is_active=True, team="").order_by("id").first()
     draft.pick_player(match.pk, first, match.step_index, target.player_id)
     picks_before = list(match.draft_actions.values_list("pk", "target_player_id"))
@@ -614,7 +613,7 @@ def test_a_restart_nobody_fills_is_cancelled_and_requeued(
     leaving = non_captain(match)
     old = _expire_sub_out(match, leaving, clock)
     successor = Match.objects.get(restarted_from=old)
-    clock.advance(mode_of(successor).ready_check.refill_seconds + 1)
+    clock.advance(successor.mode.ready_check.refill_seconds + 1)
     deadlines.tick()
     assert fresh(successor).status == Status.VOIDED
     assert QueueEntry.objects.count() == 11 and not QueueEntry.objects.filter(player=leaving)

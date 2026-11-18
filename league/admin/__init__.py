@@ -15,7 +15,6 @@ from django.contrib import admin, messages
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.template.response import TemplateResponse
@@ -65,15 +64,13 @@ from league.models import (
 from league.services import (
     api_results,
     champions,
-    common,
     integrity,
     interim,
-    leaderboards,
     modes,
     ocr,
     runtime,
 )
-from league.services.community import start_season
+from league.services import community as community_service
 
 # The header's "View site" link goes to the staff calibration dashboard.
 admin.site.site_url = "/admin/calibration/"
@@ -399,7 +396,6 @@ class CommunityAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
         if "active_mode" in form.changed_data:
             modes.activate(obj.pk, obj.active_mode_id)
-            common.render_queue(obj)
 
     def save_formset(self, request: HttpRequest, form: Any, formset: Any, change: bool) -> None:
         super().save_formset(request, form, formset, change)
@@ -418,11 +414,9 @@ class CommunityAdmin(admin.ModelAdmin):
         form = StartSeasonForm(request.POST if "confirm" in request.POST else None)
         if form.is_valid():
             try:
-                with transaction.atomic():
-                    common.lock_community(community.pk)
-                    season = start_season(community, form.cleaned_data["params"])
-                    common.render_queue(community)
-                    leaderboards.request(community)
+                season = community_service.start_next_season(
+                    community.pk, form.cleaned_data["params"]
+                )
             except DomainError as exc:
                 form.add_error("params", exc.message)
             else:

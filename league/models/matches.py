@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime
+from functools import cached_property
+from typing import TYPE_CHECKING
 
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.db.models import Q
 
-from league.domain.engine import TIMED
+from league.domain.engine import TIMED, can_transition
 from league.domain.engine import Status as S
+from league.domain.errors import InvalidAction, StaleAction
+from league.domain.mode_schema import DraftMode, parse_mode
+
+if TYPE_CHECKING:
+    from league.models.players import Player
 
 
 class Team(models.TextChoices):
@@ -54,6 +61,18 @@ class MatchQuerySet(models.QuerySet["Match"]):
     def overdue(self, before: datetime) -> MatchQuerySet:
         """Timed matches whose deadline passed before `before` without firing."""
         return self.timed().filter(deadline_at__lt=before)
+
+    def lock(self, match_id: int) -> Match:
+        """Take the row lock every state change goes through. Call inside transaction.atomic()."""
+        match = (
+            self.select_for_update(of=("self",))
+            .select_related("mode_version", "season", "community")
+            .filter(pk=match_id)
+            .first()
+        )
+        if match is None:
+            raise StaleAction("That match no longer exists.")
+        return match
 
 
 class Match(models.Model):
@@ -137,11 +156,78 @@ class Match(models.Model):
     def __str__(self) -> str:
         return f"Match #{self.pk} ({self.status})"
 
+    @cached_property
+    def mode(self) -> DraftMode:
+        """The draft mode this match runs: the version it was created with, which never changes."""
+        return parse_mode(self.mode_version.body)
+
+    @property
+    def on_hold(self) -> bool:
+        """A sub slot is open, so the match's timer is parked and its actions wait."""
+        return self.held_seconds is not None
+
+    def require_not_on_hold(self) -> None:
+        if self.on_hold:
+            raise InvalidAction("The match is paused until the sub arrives.")
+
+    def record_transition(
+        self,
+        target: str,
+        *,
+        source: str,
+        at: datetime,
+        actor: Player | None = None,
+        deadline_at: datetime | None = None,
+    ) -> None:
+        """Move this (locked) match to `target`, if its kind allows that move, and log it.
+
+        Saving is the caller's, with `save_transition`, alongside whatever else changed.
+        """
+        if not can_transition(self.status, target, self.kind):
+            raise StaleAction("This match has already moved on.")
+        MatchTransition.objects.create(
+            match=self, from_status=self.status, to_status=target, source=source, actor=actor,
+            created_at=at,
+        )  # fmt: skip
+        self.status = target
+        self.deadline_at = deadline_at
+        self.version += 1
+
+    def save_transition(self, *extra_fields: str) -> None:
+        """Persist a transition and any fields changed alongside it."""
+        self.save(update_fields=["status", "deadline_at", "version", *extra_fields])
+
+    def bump(self, *fields: str) -> None:
+        """Save changes to a locked match that stay within its current status."""
+        self.version += 1
+        self.save(update_fields=[*fields, "version"])
+
+    def captain_of(self, team: str) -> MatchParticipant:
+        return self.participants.select_related("player").get(
+            team=team, is_captain=True, removed_reason=""
+        )
+
+    def require_participant(self, player: Player) -> MatchParticipant:
+        participant = self.participants.filter(player=player, is_active=True).first()
+        if participant is None:
+            raise InvalidAction("You are not in this match.")
+        return participant
+
 
 class RemovedReason(models.TextChoices):
     MISSED_READY = "missed_ready", "Missed ready check"
     LEFT = "left", "Left"
     SUBBED_OUT = "subbed_out", "Subbed out"
+
+
+class ParticipantQuerySet(models.QuerySet["MatchParticipant"]):
+    def active(self) -> ParticipantQuerySet:
+        """Still in the match: from joining until it ends or they are removed."""
+        return self.filter(is_active=True).select_related("player")
+
+    def roster(self) -> ParticipantQuerySet:
+        """Everyone who counts for the result, including after the match has ended."""
+        return self.filter(removed_reason="").exclude(team="").select_related("player")
 
 
 class MatchParticipant(models.Model):
@@ -168,6 +254,8 @@ class MatchParticipant(models.Model):
     # Left the game while it was on: subbed out, voided as an early leaver, or abandoned per
     # deadlock-api.
     left_early = models.BooleanField(default=False)
+
+    objects = ParticipantQuerySet.as_manager()
 
     class Meta:
         db_table = "match_participants"

@@ -29,7 +29,7 @@ from bot.renderers.results import (
 )
 from league.domain.engine import Status
 from league.integrations import deadlock_api
-from league.models import Community, Match, OutboxEffect
+from league.models import Community, Match, OutboxEffect, Season
 from league.models.alerts import AlertStatus
 from league.models.matches import ResourceKind
 from league.services import (
@@ -449,10 +449,10 @@ async def render_queue_effect(env: Env) -> None:
 
 def _leaderboard_pages(community_id: int) -> tuple[int | None, list[int], list[str]]:
     from bot.renderers.leaderboard import pages
-    from league.services import common, leaderboards
+    from league.services import leaderboards
 
     community = Community.objects.get(pk=community_id)
-    season = common.open_season(community)
+    season = Season.objects.open_for(community)
     title = f"Leaderboard · {season.name}"
     rows = leaderboards.table(season)
     return (

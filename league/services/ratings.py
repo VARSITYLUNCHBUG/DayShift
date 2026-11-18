@@ -13,6 +13,7 @@ from typing import Any
 from django.db import transaction
 from django.db.models import Max, Sum
 
+from league.domain.engine import Status
 from league.domain.errors import InvalidAction
 from league.domain.openskill_v1 import (
     ALGO_VERSION,
@@ -33,7 +34,7 @@ from league.models import (
     Season,
 )
 from league.models.ratings import RunKind
-from league.services.common import now, roster
+from league.services.common import now
 
 ALGO = OpenSkillAlgo()
 
@@ -81,7 +82,7 @@ class RosterPair:
 
 
 def roster_pair(match: Match) -> RosterPair:
-    rows = list(roster(match).values_list("team", "player_id"))
+    rows = list(match.participants.roster().values_list("team", "player_id"))
     return RosterPair(
         team_a=sorted(player_id for team, player_id in rows if team == "A"),
         team_b=sorted(player_id for team, player_id in rows if team == "B"),
@@ -196,7 +197,7 @@ def mvp_history(
     if not awards:
         return {}
     earlier = list(
-        Match.objects.filter(season=match.season, status="completed")
+        Match.objects.filter(season=match.season, status=Status.COMPLETED)
         .exclude(pk=match.pk)
         .values_list("pk", flat=True)
     )

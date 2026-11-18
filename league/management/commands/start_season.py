@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from league.domain.errors import DomainError
 from league.models import Community
-from league.services.community import start_season
+from league.services.community import start_next_season
 
 
 class Command(BaseCommand):
@@ -27,7 +27,7 @@ class Command(BaseCommand):
             raise CommandError("Pass --guild: there isn't exactly one server to choose.")
         params = json.loads(options["params"]) if options["params"] else None
         try:
-            season = start_season(communities.get(), params)
+            season = start_next_season(communities.get().pk, params)
         except DomainError as exc:
             raise CommandError(exc.message) from exc
         self.stdout.write(f"Started {season}.")

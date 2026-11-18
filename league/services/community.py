@@ -66,6 +66,20 @@ def error_channel(guild_id: int) -> int | None:
 
 
 @transaction.atomic
+@transaction.atomic
+def start_next_season(community_id: int, params: dict[str, object] | None = None) -> Season:
+    """The admin's and `manage.py start_season`'s way in: a new season, then the queue panel and
+    the leaderboard redrawn for it."""
+    from league.services import leaderboards
+    from league.services.common import lock_community, render_queue
+
+    community = lock_community(community_id)
+    season = start_season(community, params)
+    render_queue(community)
+    leaderboards.request(community)
+    return season
+
+
 def start_season(community: Community, params: dict[str, object] | None = None) -> Season:
     """Close the open season and open the next. Ratings start fresh, with `params` over the
     OpenSkill defaults; they're fixed once the season rates a match."""

@@ -47,7 +47,7 @@ from league.models.alerts import AlertKind
 from league.models.permissions import Area
 from league.models.scoreboards import AwardSource, MapSource, ReadStatus
 from league.services import alerts, runtime
-from league.services.common import add_effect, lock_match, now, roster
+from league.services.common import add_effect, now
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +247,7 @@ def _team_letters(match: Match) -> dict[str, str]:
 
 
 def _candidates(match: Match) -> dict[str, list[Candidate]]:
-    rows = roster(match).select_related("player")
+    rows = match.participants.roster().select_related("player")
     by_team: dict[str, list[int]] = {"A": [], "B": []}
     names: dict[int, str] = {}
     confirmed: dict[int, set[str]] = {}
@@ -316,7 +316,7 @@ def ingest(
 ) -> ScoreboardRead:
     """Store a read and its rows, match names to players, then act on it if the mode is `on`."""
     submission = ResultSubmission.objects.get(pk=submission_id)
-    match = lock_match(submission.match_id)
+    match = Match.objects.lock(submission.match_id)
     letters = _team_letters(match)
     candidates = _candidates(match)
     heroes = {normalise(c.name): c for c in Champion.objects.all()}
@@ -484,7 +484,7 @@ def unmapped_rows(read_id: int) -> list[UnmappedRow]:
     stats = list(read.stats.all())
     taken = {stat.player_id for stat in stats if stat.player_id is not None}
     by_team: dict[str, list[tuple[int, str]]] = {}
-    for participant in roster(read.match).select_related("player"):
+    for participant in read.match.participants.roster().select_related("player"):
         if participant.player_id not in taken:
             by_team.setdefault(participant.team, []).append(
                 (participant.player_id, participant.player.display_name)
@@ -513,12 +513,12 @@ def can_map(read_id: int, player: Player, is_staff: bool) -> None:
 def map_row(read_id: int, row: int, player_id: int, actor: Player, *, is_staff: bool) -> int:
     """Match one scoreboard row to a player. Returns how many rows are still unmatched."""
     read = ScoreboardRead.objects.get(pk=read_id)
-    lock_match(read.match_id)
+    Match.objects.lock(read.match_id)
     can_map(read_id, actor, is_staff)
     stat = read.stats.filter(row=row).first()
     if stat is None:
         raise StaleAction("That name isn't on the scoreboard.")
-    on_team = roster(read.match).filter(player_id=player_id, team=stat.team).exists()
+    on_team = read.match.participants.roster().filter(player_id=player_id, team=stat.team).exists()
     if not on_team:
         raise InvalidAction("That player wasn't on that team.")
     if read.stats.filter(player_id=player_id).exclude(pk=stat.pk).exists():

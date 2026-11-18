@@ -13,7 +13,6 @@ from league.domain.engine import (
 from league.models import Community, Match, Player
 from league.models.matches import MatchKind
 from league.services import draft, lobby, queue, results
-from league.services.common import captain_of, mode_of
 from league.services.results import ImageRef
 
 
@@ -81,21 +80,21 @@ def settle_coinflip_for(match: Match, hk_team: str = "A") -> Match:
     if match.kind != MatchKind.SCRIM:
         # Ranked: the winner picks a side, and the Hidden King bans and picks first.
         choice = HIDDEN_KING if winner == hk_team else ARCHMOTHER
-        draft.choose_coinflip(match.pk, captain_of(match, winner).player, choice)
+        draft.choose_coinflip(match.pk, match.captain_of(winner).player, choice)
         return fresh(match)
     side = HIDDEN_KING if winner == hk_team else ARCHMOTHER
-    draft.choose_coinflip(match.pk, captain_of(match, winner).player, side)
+    draft.choose_coinflip(match.pk, match.captain_of(winner).player, side)
     order = FIRST_PICK if loser == hk_team else LAST_PICK
-    draft.choose_coinflip(match.pk, captain_of(match, loser).player, order)
+    draft.choose_coinflip(match.pk, match.captain_of(loser).player, order)
     return fresh(match)
 
 
 def run_player_draft(match: Match) -> Match:
     match = fresh(match)
     while match.status == Status.PLAYER_DRAFT:
-        step = build_plan(mode_of(match))[match.step_index]
+        step = build_plan(match.mode)[match.step_index]
         team = team_for_role(step.role, match.player_first_pick)
-        captain = captain_of(match, team).player
+        captain = match.captain_of(team).player
         target = match.participants.filter(is_active=True, team="").order_by("id").first()
         draft.pick_player(match.pk, captain, match.step_index, target.player_id)
         match = fresh(match)
@@ -105,9 +104,9 @@ def run_player_draft(match: Match) -> Match:
 def acting_captain(match: Match) -> Player:
     """The captain whose turn it is, in the player draft or the champion draft."""
     match = fresh(match)
-    step = build_plan(mode_of(match))[match.step_index]
+    step = build_plan(match.mode)[match.step_index]
     first = match.player_first_pick if step.action == "player_pick" else match.champion_first_pick
-    return captain_of(match, team_for_role(step.role, first)).player
+    return match.captain_of(team_for_role(step.role, first)).player
 
 
 def to_champion_draft(match: Match) -> Match:
@@ -118,9 +117,9 @@ def to_champion_draft(match: Match) -> Match:
 def run_champion_draft(match: Match) -> Match:
     match = settle_coinflip_for(match)
     while match.status == Status.CHAMPION_DRAFT:
-        step = build_plan(mode_of(match))[match.step_index]
+        step = build_plan(match.mode)[match.step_index]
         team = team_for_role(step.role, match.champion_first_pick)
-        captain = captain_of(match, team).player
+        captain = match.captain_of(team).player
         champion = draft.available_champions(match)[0]
         draft.choose_champion(match.pk, captain, match.step_index, champion)
         match = fresh(match)
@@ -144,8 +143,8 @@ def to_in_progress(match: Match) -> Match:
 def finish(match: Match, winner: str = "A", number: int = 1) -> Match:
     """Report and confirm a result, from a match already in progress."""
     match = fresh(match)
-    first = captain_of(match, "A").player
-    second = captain_of(match, "B").player
+    first = match.captain_of("A").player
+    second = match.captain_of("B").player
     results.submit_report(match.pk, first, winner, image(number))
     results.confirm(match.pk, second)
     return fresh(match)

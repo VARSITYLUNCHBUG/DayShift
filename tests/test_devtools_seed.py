@@ -323,7 +323,7 @@ def test_a_reset_doesnt_wait_out_an_effect_that_failed_into_a_retry(
 
 
 def _other_session() -> Any:
-    """A second database session, as the bot or the scheduler would hold."""
+    """A second database session, as the bot would hold."""
     import psycopg
     from django.db import connection
 
@@ -335,7 +335,7 @@ def test_a_reset_waits_for_a_table_another_session_holds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A reset takes every table before it empties any, retrying a try that would wait too long,
-    so it can't deadlock with the scheduler's or the bot's own locks."""
+    so it can't deadlock with the bot's own locks."""
     call_command("load_presets", stdout=StringIO())
     dev_seed()
     other = _other_session()

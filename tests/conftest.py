@@ -118,7 +118,7 @@ def league(db: None) -> Community:
 
 def make_player(number: int) -> Player:
     # A large number, like a real Discord ID.
-    return common.get_or_create_player(10_000_000 + number, f"P{number}")
+    return Player.objects.from_discord(10_000_000 + number, f"P{number}")
 
 
 @pytest.fixture
