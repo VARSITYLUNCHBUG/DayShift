@@ -1,4 +1,10 @@
-"""The bot process: gateway connection, startup recovery and the two background loops."""
+"""The bot process: gateway connection, startup recovery and the two background loops.
+
+It runs as one process (`all`), or split into a `gateway` (the Discord connection, clicks and the
+effect worker) and a `scheduler` (deadlines and the daily prune). The scheduler needs no Discord
+connection: deadlines only read and write the database, and the effects they queue are picked up
+by the gateway's effect loop, which polls the outbox every `EFFECT_IDLE_SECONDS`.
+"""
 
 from __future__ import annotations
 
@@ -7,11 +13,17 @@ import contextlib
 import logging
 import signal
 import time
+from collections.abc import Callable, Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import discord
+import yarl
 from discord import app_commands
+from discord.gateway import DiscordWebSocket
 from django.conf import settings
 
+from bot import metrics
 from bot.commands.registry import all_commands
 from bot.db import db
 from bot.effects.gateway import DiscordGateway
@@ -31,15 +43,114 @@ from league import log_context
 from league.services import community as community_service
 from league.services import deadlines, effects
 
+if TYPE_CHECKING:
+    from league.management.commands.runbot import Role
+
 logger = logging.getLogger(__name__)
 
 DEADLINE_INTERVAL_SECONDS = 1.0
 EFFECT_IDLE_SECONDS = 0.5
 PRUNE_INTERVAL_SECONDS = 24 * 3600
+# A loop that keeps failing logs the same kind of error with its traceback at most this often.
+ERROR_REPEAT_SECONDS = 60.0
+# Waits between attempts at the gateway's startup recovery; the last one repeats.
+STARTUP_RETRY_SECONDS = (1.0, 2.0, 5.0, 10.0, 30.0)
+# discord.py's own endpoints. Only a dev or test setup points the bot anywhere else.
+DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/"
+
+
+class Heartbeat:
+    """Touches the healthcheck's file each time every one of `loops` has gone round since the last
+    touch, so one stuck loop is enough to make the process unhealthy."""
+
+    def __init__(self, path: Path, loops: Iterable[str]) -> None:
+        self.path = path
+        self._loops = frozenset(loops)
+        self._waiting = set(self._loops)
+        # A series per loop from the start, so one that never goes round goes stale (and alerts)
+        # like one that stopped, instead of having no series at all.
+        for loop in self._loops:
+            metrics.LOOP_HEARTBEAT.labels(loop).set_to_current_time()
+
+    def beat(self, loop: str) -> None:
+        metrics.LOOP_HEARTBEAT.labels(loop).set_to_current_time()
+        self._waiting.discard(loop)
+        if not self._waiting:
+            self.path.touch()
+            self._waiting = set(self._loops)
+
+
+class LoopErrors:
+    """A background loop's errors, logged without flooding.
+
+    A database outage fails every pass, once a second. Logging each one would write a traceback
+    a second and rotate the start of the incident out of the logs, so each kind of error is
+    logged in full the first time and then at most every `ERROR_REPEAT_SECONDS`, and the
+    recovery is logged once, with how many passes failed."""
+
+    def __init__(self, message: str, recovered: str | None = None) -> None:
+        self.message = message
+        self.recovered = recovered or f"{message}: recovered"
+        self.failures = 0
+        self._since = 0.0
+        self._logged: dict[type[BaseException], float] = {}
+
+    def failed(self, error: BaseException) -> None:
+        now = time.monotonic()
+        if not self.failures:
+            self._since = now
+        self.failures += 1
+        last = self._logged.get(type(error))
+        if last is None or now - last >= ERROR_REPEAT_SECONDS:
+            self._logged[type(error)] = now
+            logger.error(self.message, exc_info=error, extra={"failures": self.failures})
+
+    def passed(self) -> None:
+        if self.failures:
+            logger.warning(
+                self.recovered,
+                extra={
+                    "failures": self.failures,
+                    "seconds": round(time.monotonic() - self._since, 1),
+                },
+            )
+            self.failures = 0
+            self._logged.clear()
+
+
+async def deadline_loop(
+    heartbeat: Heartbeat,
+    on_fired: Callable[[], None] | None = None,
+    stop: asyncio.Event | None = None,
+) -> None:
+    """Fire due deadlines every second and prune old effects daily, until `stop` is set.
+
+    A pass that is under way when `stop` is set finishes first."""
+    stop = stop or asyncio.Event()
+    last_prune = time.monotonic()
+    errors = LoopErrors("Deadline loop error")
+    while not stop.is_set():
+        try:
+            with metrics.TICK_DURATION.time():
+                fired = await db(deadlines.tick)
+            if fired:
+                metrics.DEADLINES_FIRED.inc(fired)
+                if on_fired is not None:
+                    on_fired()
+            heartbeat.beat("deadlines")
+            if time.monotonic() - last_prune > PRUNE_INTERVAL_SECONDS:
+                last_prune = time.monotonic()
+                await db(effects.prune_finished)
+            errors.passed()
+        except Exception as exc:
+            errors.failed(exc)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), DEADLINE_INTERVAL_SECONDS)
 
 
 class DraftBot(discord.Client):
-    def __init__(self) -> None:
+    def __init__(self, role: Role = "all", heartbeat_file: Path | None = None) -> None:
         # The bot moves members but never joins voice itself, so it has no use for voice libraries.
         discord.VoiceClient.warn_nacl = False
         discord.VoiceClient.warn_dave = False
@@ -60,6 +171,10 @@ class DraftBot(discord.Client):
         self._effects_wake = asyncio.Event()
         self._started = False
         self._tasks: list[asyncio.Task[None]] = []
+        # The gateway leaves deadlines to the scheduler process.
+        self.runs_deadlines = role == "all"
+        loops = ("deadlines", "effects") if self.runs_deadlines else ("effects",)
+        self.heartbeat = Heartbeat(heartbeat_file or settings.BOT_HEARTBEAT_FILE, loops)
         self.error_sink = ErrorSink(
             self, self._error_channel, settings.ERROR_LOG_CHANNEL_ID or None
         )
@@ -88,14 +203,33 @@ class DraftBot(discord.Client):
         queue = discord_error_handler.queue
         if queue is not None:
             self._tasks.append(asyncio.create_task(self.error_sink.run(queue), name="errors"))
-        extended = await db(deadlines.extend_past_due)
-        logger.info("Startup grace applied", extra={"extended": extended})
-        await db(effects.request_reconcile)
-        await self._sweep_stale_channels()
-        self._tasks += [
-            asyncio.create_task(self._deadline_loop(), name="deadlines"),
-            asyncio.create_task(self._effect_loop(), name="effects"),
-        ]
+        await self._recover()
+        if self.runs_deadlines:
+            self._tasks.append(asyncio.create_task(self._deadline_loop(), name="deadlines"))
+        self._tasks.append(asyncio.create_task(self._effect_loop(), name="effects"))
+
+    async def _recover(self) -> None:
+        """Startup recovery, retried until the database answers.
+
+        This runs once (on_ready returns early ever after), so giving up would leave a process
+        that stays connected to Discord but never starts its loops. A bot that connects while
+        Postgres or pgbouncer is still coming up (a reboot, a db restart) waits here instead,
+        unhealthy, and carries on when the database is back. Each step is safe to repeat."""
+        errors = LoopErrors(
+            "Startup recovery failed, retrying", recovered="Startup recovery done after retries"
+        )
+        while True:
+            try:
+                extended = await db(deadlines.extend_past_due)
+                logger.info("Startup grace applied", extra={"extended": extended})
+                await db(effects.request_reconcile)
+                await self._sweep_stale_channels()
+                errors.passed()
+                return
+            except Exception as exc:
+                errors.failed(exc)
+                retries = STARTUP_RETRY_SECONDS
+                await asyncio.sleep(retries[min(errors.failures, len(retries)) - 1])
 
     async def _error_channel(self, guild_id: int) -> int | None:
         return await db(community_service.error_channel, guild_id)
@@ -110,30 +244,24 @@ class DraftBot(discord.Client):
                 logger.exception("Sweep failed", extra={"match": match_id, "channel": channel_id})
 
     async def _deadline_loop(self) -> None:
-        last_prune = time.monotonic()
-        while True:
-            try:
-                fired = await db(deadlines.tick)
-                if fired:
-                    self.wake_effects()
-                settings.BOT_HEARTBEAT_FILE.touch()
-                if time.monotonic() - last_prune > PRUNE_INTERVAL_SECONDS:
-                    last_prune = time.monotonic()
-                    await db(effects.prune_finished)
-            except Exception:
-                logger.exception("Deadline loop error")
-            await asyncio.sleep(DEADLINE_INTERVAL_SECONDS)
+        await deadline_loop(self.heartbeat, on_fired=self.wake_effects)
 
     async def _effect_loop(self) -> None:
         """Hand due effects to per-match lanes. Wakes on a click, a fired timer or a lane ending."""
+        errors = LoopErrors("Effect loop error")
         while True:
             try:
                 self._effects_wake.clear()
                 await self.worker.dispatch()
-            except Exception:
-                logger.exception("Effect loop error")
+                self.heartbeat.beat("effects")
+                errors.passed()
+            except Exception as exc:
+                errors.failed(exc)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._effects_wake.wait(), EFFECT_IDLE_SECONDS)
+
+    async def on_interaction(self, interaction: discord.Interaction[DraftBot]) -> None:
+        metrics.INTERACTIONS.labels(interaction.type.name).inc()
 
     async def on_message(self, message: discord.Message) -> None:
         """Chat is welcome in match channels, but the board has to stay in view."""
@@ -179,14 +307,17 @@ class _Tree(app_commands.CommandTree[DraftBot]):
             logger.error("Command error", extra={"command": command}, exc_info=error)
 
 
-def run() -> None:
+def run(role: Role = "all") -> None:
+    """The `all` or `gateway` role: connect to Discord and run until stopped."""
     if not settings.DISCORD_TOKEN:
         raise SystemExit("DISCORD_TOKEN isn't set. Add it to .env.")
+    point_at_discord()
     # In a container the bot is PID 1, which ignores SIGTERM by default, so `docker compose stop`
     # waited out the grace period and then killed it. Treat SIGTERM like Ctrl+C: discord.py then
     # closes the connection cleanly, and any effect cut short stays pending and runs on restart.
     signal.signal(signal.SIGTERM, _stop_on_sigterm)
-    bot = DraftBot()
+    bot = DraftBot(role)
+    metrics.serve(bot)
     # Only the bot process posts errors to Discord, so this isn't in settings.LOGGING, which the
     # web process and tests share. It's bound to the loop once that's running (setup_hook).
     logging.getLogger().addHandler(discord_error_handler)
@@ -196,3 +327,43 @@ def run() -> None:
 def _stop_on_sigterm(signum: int, frame: object) -> None:
     logger.info("SIGTERM received, shutting down")
     raise KeyboardInterrupt
+
+
+def point_at_discord() -> None:
+    """Send REST calls and the gateway connection where settings say. Left alone for Discord.
+
+    A stand-in gets the bot token with every call, so it only works with DEBUG on."""
+    api = settings.DISCORD_API_BASE or DISCORD_API_BASE
+    gateway = settings.DISCORD_GATEWAY_URL or DISCORD_GATEWAY_URL
+    if api == DISCORD_API_BASE and gateway == DISCORD_GATEWAY_URL:
+        return
+    if not settings.DEBUG:
+        raise SystemExit(
+            "DISCORD_API_BASE and DISCORD_GATEWAY_URL point away from Discord, which only works"
+            " with DEBUG on. Unset them in production."
+        )
+    discord.http.Route.BASE = api
+    DiscordWebSocket.DEFAULT_GATEWAY = yarl.URL(gateway)
+    logger.warning(
+        "Not talking to Discord: using a stand-in", extra={"api_base": api, "gateway": gateway}
+    )
+
+
+def run_scheduler() -> None:
+    """The `scheduler` role: deadlines and the daily prune, with no Discord connection."""
+    heartbeat = Heartbeat(settings.BOT_HEARTBEAT_FILE, ("deadlines",))
+    metrics.serve()
+    with contextlib.suppress(KeyboardInterrupt):  # Ctrl+C
+        asyncio.run(schedule(heartbeat))
+
+
+async def schedule(heartbeat: Heartbeat, stop: asyncio.Event | None = None) -> None:
+    """Apply the startup grace, then fire deadlines until `stop` is set or SIGTERM arrives."""
+    stop = stop or asyncio.Event()
+    # Windows has no loop signal handlers; Ctrl+C still works there.
+    with contextlib.suppress(NotImplementedError):
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop.set)
+    extended = await db(deadlines.extend_past_due)
+    logger.info("Scheduler started", extra={"extended": extended})
+    await deadline_loop(heartbeat, stop=stop)
+    logger.info("Scheduler stopped")

@@ -14,10 +14,13 @@ class Command(BaseCommand):
     help = "Exit non-zero if the bot's task loops have stopped updating the heartbeat file."
 
     def handle(self, *args: Any, **options: Any) -> None:
+        # Every role writes the same file: each runs in its own container. To run two roles side by
+        # side on one machine, give each its own BOT_HEARTBEAT_FILE.
+        path = settings.BOT_HEARTBEAT_FILE
         try:
-            age = time.time() - settings.BOT_HEARTBEAT_FILE.stat().st_mtime
+            age = time.time() - path.stat().st_mtime
         except OSError:
-            self.stderr.write("No heartbeat file.")
+            self.stderr.write(f"No heartbeat file at {path}.")
             sys.exit(1)
         if age > MAX_AGE_SECONDS:
             self.stderr.write(f"Heartbeat is {age:.0f}s old.")
