@@ -1,14 +1,14 @@
 # Dev-only control panel: build the SPA with Node, serve it (and proxy the dev APIs) with an
 # unprivileged nginx on port 8091. Runs with a read-only root filesystem and a tmpfs on /tmp.
 
-FROM node:22.23.5-trixie-slim AS build
+FROM node:26.13.0-trixie-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.30.6-alpine3.24
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine3.24
 LABEL org.opencontainers.image.title="draft-bot control panel" \
       org.opencontainers.image.description="Dev-only UI for the local stack and the Discord simulator"
 ENV NGINX_ENTRYPOINT_QUIET_LOGS=1
