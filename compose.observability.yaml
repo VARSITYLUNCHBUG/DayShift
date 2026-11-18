@@ -77,7 +77,7 @@ services:
 
   prometheus:
     <<: *observability
-    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     networks: [default, app]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -104,7 +104,7 @@ services:
 
   alertmanager:
     <<: [*observability, *exporter-limits]
-    image: prom/alertmanager:v0.34.2@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
+    image: prom/alertmanager:v0.35.0@sha256:e638797febd034838eca8b98cdbd46f951e9bf7f178777aa8669167406a9946c
     entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
     command: ["--web.listen-address=:9093", "--cluster.listen-address="]
     # ALERTMANAGER_DISCORD_WEBHOOK_URL and ALERTMANAGER_WATCHDOG_URL, if they are set there.
@@ -124,7 +124,7 @@ services:
 
   grafana:
     <<: *observability
-    image: grafana/grafana:13.2.6@sha256:b21409d7951ddcfd63a4b49083e4ef2cc35bc1437d071813bf82bfb238b00bca
+    image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
     # Hands GRAFANA_ADMIN_PASSWORD (from .env.observability) to Grafana, or refuses to start.
     entrypoint: ["/bin/sh", "/etc/grafana/draftbot-entrypoint.sh"]
     env_file: *observability-env
