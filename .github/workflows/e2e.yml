@@ -1,0 +1,41 @@
+# The browser suite: the whole stack against the Discord simulator, driven by Playwright, the
+# same way `scripts/test.sh e2e` runs it on your machine. ci.yml calls it on every push to main or
+# a version tag, where the image publish waits for it, and on every pull request that touches what
+# the stack is built from (ci.yml's `changes` job has the list), so `CI OK` covers it. Run it by
+# hand from the Actions tab.
+name: E2E
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+# Named for this file: called from ci.yml, github.workflow is ci.yml's name, and sharing its
+# group would leave this run waiting on the run that called it.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  e2e:
+    name: Browser suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Builds the stack, waits for it to be healthy, runs tests/e2e and tears everything down.
+      # On a failure it prints the services' last log lines into this log.
+      - run: sh scripts/test.sh e2e
+      - name: Upload traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-test-results
+          path: test-results/e2e/
+          if-no-files-found: ignore
+          retention-days: 14

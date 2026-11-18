@@ -1,0 +1,65 @@
+# Fast checks before each commit. CI runs every one of them too (ci.yml's infra-lint and
+# python-lint), so a contributor without the hook still can't merge what it would catch. Set up
+# once with
+#   uvx pre-commit install
+# and run them over everything with `uvx pre-commit run --all-files`. mypy and the tests stay in
+# CI (ci.yml): they're too slow for a commit hook. The Docker hooks need Docker running.
+#
+# Hooks are pinned by commit, like the workflows' actions; `uvx pre-commit autoupdate --freeze`
+# moves them. Keep ruff's rev on the version uv.lock pins.
+minimum_pre_commit_version: "4.0.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      # Both keep a CRLF file's CRLF line endings. The one exception, a CRLF file with no final
+      # newline, gets an LF one, and mixed-line-ending below then flags it for you to fix.
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      # Reports a file that mixes CRLF and LF but never rewrites one: .gitattributes owns line
+      # endings, and many files here are CRLF on purpose.
+      - id: mixed-line-ending
+        args: [--fix=no]
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: c0f278f1254ccc8fb09676bcdb8d847e7db493e5 # frozen: v0.17.4
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: cba56bcde1fdd01c1deb3f945e69764c291a6530 # frozen: v1.38.0
+    hooks:
+      - id: yamllint
+        args: [-c, .github/linters/.yamllint.yaml]
+        # deploy-lint.yml lints the Ansible tree with its own config.
+        exclude: ^deploy/ansible/
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: 745eface02aef23e168a8afb6b5737818efbea95 # frozen: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca # frozen: v1.7.12
+    hooks:
+      - id: actionlint-docker
+
+  # hadolint's own Docker hook runs an unpinned image, so this one pins it.
+  - repo: local
+    hooks:
+      - id: hadolint
+        name: hadolint
+        language: docker_image
+        entry: >-
+          hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
+          hadolint --config .github/linters/.hadolint.yaml
+        files: (^|/)Dockerfile$|\.Dockerfile$
