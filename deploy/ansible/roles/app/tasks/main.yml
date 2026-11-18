@@ -1,17 +1,114 @@
 ---
-- name: Check the settings and secrets
-  ansible.builtin.import_tasks: checks.yml
-  when: not draftbot_checked | default(false)
-  tags: [app, app-files, app-check]
+- name: Check the inventory and the vault
+  ansible.builtin.assert:
+    that:
+      - draftbot_domain | length > 0
+      - draftbot_image_tag | length > 0
+      - draftbot_discord_guild_id is match('^[0-9]{17,20}$')
+      - draftbot_discord_token | length > 0
+      - draftbot_django_secret_key | length >= 50
+      - draftbot_postgres_password is match('^[A-Za-z0-9]{16,}$')
+    fail_msg: >-
+      Set draftbot_domain, draftbot_image_tag and draftbot_discord_guild_id in group_vars/all/main.yml,
+      and vault_discord_token, vault_django_secret_key (50+ characters) and vault_postgres_password
+      (16+ letters and digits) in the vault.
+    quiet: true
 
-- name: Install the compose project's files
-  ansible.builtin.import_tasks: files.yml
-  tags: [app, app-files]
+# --- The compose project: two compose files and the Caddyfile from this checkout, and .env ----------
+- name: Create the project directory
+  ansible.builtin.file:
+    path: "{{ draftbot_root }}/infra/caddy"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
 
-- name: Get the images and migrate the database
-  ansible.builtin.import_tasks: migrate.yml
-  tags: [app, app-start]
+- name: Install the compose files and the Caddyfile
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../{{ item.src }}"
+    dest: "{{ draftbot_root }}/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - { src: compose.yaml, dest: compose.yaml }
+    - { src: deploy/compose.prod.yaml, dest: compose.prod.yaml }
+    - { src: infra/caddy/Caddyfile, dest: infra/caddy/Caddyfile }
+  loop_control:
+    label: "{{ item.dest }}"
 
-- name: Start the services one at a time
-  ansible.builtin.import_tasks: start.yml
-  tags: [app, app-start]
+# Compose recreates every container whose settings change here on the next `up`.
+- name: Write .env
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ draftbot_root }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+# --- The image ----------------------------------------------------------------------------------
+- name: Log in to the registry, for a private image
+  community.docker.docker_login:
+    registry_url: "{{ draftbot_registry }}"
+    username: "{{ draftbot_registry_username }}"
+    password: "{{ draftbot_registry_password }}"
+  when: draftbot_registry_username | length > 0
+  no_log: true
+
+# migrate runs first (web and bot wait for it), then everything waits to be healthy.
+- name: Pull the images and start the stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ draftbot_root }}"
+    pull: "{{ draftbot_pull }}"
+    remove_orphans: true
+    wait: true
+    wait_timeout: 300
+
+- name: Check the site answers over HTTPS
+  ansible.builtin.uri:
+    url: "https://{{ draftbot_domain }}/readyz"
+    status_code: 200
+  register: app_ready
+  retries: 10
+  delay: 6
+  until: app_ready.status == 200
+  delegate_to: localhost
+  become: false
+  when: draftbot_check_https | bool
+
+# --- Backups and the host's health checks, which post to the alert webhook --------------------------
+- name: Install the backup, health and notify scripts
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/usr/local/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0700"
+  loop: [draftbot-backup, draftbot-health, draftbot-notify]
+
+- name: Install the systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - draftbot-backup.service
+    - draftbot-backup.timer
+    - draftbot-health.service
+    - draftbot-health.timer
+    - draftbot-notify@.service
+  notify: Reload systemd
+
+- name: Load changed units before starting their timers
+  ansible.builtin.meta: flush_handlers
+
+- name: Start the backup and health timers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: [draftbot-backup.timer, draftbot-health.timer]

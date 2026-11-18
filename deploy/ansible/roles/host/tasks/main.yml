@@ -1,0 +1,154 @@
+---
+- name: Check the deploy user can still log in once root and passwords are refused
+  ansible.builtin.assert:
+    that:
+      - draftbot_authorized_keys | length > 0
+      - draftbot_authorized_keys | reject('match', '^(ssh-|ecdsa-|sk-)\S+ [A-Za-z0-9+/=]{40,}') | list | length == 0
+    fail_msg: >-
+      draftbot_authorized_keys needs your real public keys (the contents of ~/.ssh/id_ed25519.pub).
+      This role turns off root and password logins, so without one you would be locked out.
+    quiet: true
+
+- name: Install the packages the host needs
+  ansible.builtin.apt:
+    name: [ca-certificates, curl, jq, sudo, ufw, unattended-upgrades, python3-debian, python3-requests]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Set the timezone
+  community.general.timezone:
+    name: "{{ draftbot_timezone }}"
+
+# --- The deploy user and SSH --------------------------------------------------------------------
+- name: Create the deploy user
+  ansible.builtin.user:
+    name: "{{ draftbot_deploy_user }}"
+    shell: /bin/bash
+    # Locked: it logs in with keys only and sudo needs no password.
+    password: "!"
+    update_password: on_create
+
+- name: Install the deploy user's SSH keys
+  ansible.posix.authorized_key:
+    user: "{{ draftbot_deploy_user }}"
+    key: "{{ draftbot_authorized_keys | join('\n') }}"
+    exclusive: true
+
+- name: Give the deploy user passwordless sudo
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/90-draftbot-deploy
+    content: "{{ draftbot_deploy_user }} ALL=(ALL:ALL) NOPASSWD: ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+# sshd reads its drop-ins in name order and keeps the first value it sees, so 10- wins over the
+# 50-cloud-init.conf some images ship with PasswordAuthentication yes.
+- name: Turn off root and password logins
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-draftbot.conf
+    content: |
+      # Managed by Ansible (roles/host).
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      AuthenticationMethods publickey
+      MaxAuthTries 4
+      X11Forwarding no
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart ssh
+
+# --- Firewall: SSH (rate limited), HTTP and HTTPS -------------------------------------------------
+# Docker publishes ports through its own iptables chains, ahead of ufw. Only the edge's 80 and 443
+# are published on every interface; Postgres and web publish nothing in production.
+- name: Allow SSH, rate limited
+  community.general.ufw:
+    rule: limit
+    port: "22"
+    proto: tcp
+
+- name: Allow HTTP and HTTPS
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+  loop: ["80", "443"]
+
+- name: Deny everything else coming in, and turn the firewall on
+  community.general.ufw:
+    state: enabled
+    default: deny
+    direction: incoming
+
+# --- Unattended upgrades, Docker's repository included --------------------------------------------
+- name: Turn on unattended upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/52draftbot-unattended-upgrades
+    content: |
+      // Managed by Ansible (roles/host).
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      Unattended-Upgrade::Origins-Pattern { "origin=Docker,label=Docker CE"; };
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Automatic-Reboot "{{ draftbot_auto_reboot | ternary('true', 'false') }}";
+      Unattended-Upgrade::Automatic-Reboot-Time "04:00";
+    owner: root
+    group: root
+    mode: "0644"
+
+# --- Docker Engine and the compose plugin, from Docker's own apt repository ------------------------
+- name: Remove distribution packages that clash with Docker's
+  ansible.builtin.apt:
+    name: [docker.io, docker-doc, docker-compose, docker-compose-v2, podman-docker, containerd, runc]
+    state: absent
+  notify: Reload systemd
+
+- name: Add Docker's apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}"
+    suites: ["{{ ansible_facts['distribution_release'] }}"]
+    components: [stable]
+    signed_by: "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}/gpg"
+    state: present
+  register: host_docker_repo
+
+- name: Install Docker
+  ansible.builtin.apt:
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+    state: present
+    update_cache: "{{ host_docker_repo is changed }}"
+
+# Containers keep running while dockerd restarts (an upgrade), and their logs rotate.
+- name: Configure the Docker daemon
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {"live-restore": true, "log-driver": "local", "log-opts": {"max-size": "10m", "max-file": "5"}}
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+
+# A server that ran the distribution's docker.io: removing it leaves systemd holding that
+# package's docker.socket and docker.service until a reload, so docker-ce's units don't take over.
+# The reload (and a changed daemon.json's restart) happen here, before Docker is started.
+- name: Apply a changed Docker setup before anything starts containers
+  ansible.builtin.meta: flush_handlers
+
+- name: Keep Docker's socket listening
+  ansible.builtin.systemd_service:
+    name: docker.socket
+    state: started
+    enabled: true
+
+- name: Keep Docker running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true

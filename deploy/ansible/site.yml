@@ -1,41 +1,12 @@
 ---
 # A fresh install, or bringing a server back in line with its inventory. Safe to run again.
 #   ansible-playbook -i inventories/<client> site.yml --ask-vault-pass
+# The very first run on a new server logs in as root: add -e ansible_user=root.
 - name: Install dl-mm-discord
   hosts: draftbot
   become: true
-  pre_tasks:
-    - name: Check the inventory names the install
-      ansible.builtin.assert:
-        that:
-          - draftbot_domain is defined and draftbot_domain | length > 0
-          - draftbot_image_tag is defined and draftbot_image_tag | length > 0
-          - draftbot_root is defined and draftbot_root is match('^/')
-        fail_msg: Set draftbot_domain, draftbot_image_tag and draftbot_root in group_vars/all/main.yml.
-        quiet: true
-      tags: [always]
-
-    - name: Check the inventory and the vault
-      ansible.builtin.import_tasks: tasks/preflight.yml
   roles:
-    - role: base
-      tags: [base]
-    - role: docker
-      tags: [docker]
-    # The compose project: its files and .env, the migrate job, then pgbouncer, web, scheduler
-    # and bot.
+    - role: host
+      tags: [host]
     - role: app
       tags: [app]
-    # Then the edge, once there is a certificate for it, and the observability services.
-    - role: edge
-      tags: [edge]
-    - role: observability
-      tags: [observability]
-    - role: backups
-      tags: [backups]
-  post_tasks:
-    - name: Start the project at boot
-      ansible.builtin.include_role:
-        name: app
-        tasks_from: systemd.yml
-      tags: [app, app-systemd]

@@ -1,12 +1,24 @@
 ---
-# Take a backup now, on top of the nightly one. Add -e backups_fetch_dir=backups to copy it to
-# backups/<host>/ here as well (git ignores that folder).
-#   ansible-playbook -i inventories/<client> backup.yml --ask-vault-pass
-- name: Back up the dl-mm-discord database
+# Back up the database now, and copy the dump to the controller's backups/<host>/.
+#   ansible-playbook -i inventories/<client> backup.yml
+- name: Back up dl-mm-discord
   hosts: draftbot
   become: true
   tasks:
     - name: Take a backup
-      ansible.builtin.include_role:
-        name: backups
-        tasks_from: run.yml
+      ansible.builtin.command: /usr/local/bin/draftbot-backup
+      register: backup_run
+      changed_when: true
+
+    - name: Find the newest dump
+      ansible.builtin.shell: set -o pipefail && ls -1t /var/backups/draftbot/draftbot-*.dump | head -n 1
+      args:
+        executable: /bin/bash
+      register: backup_newest
+      changed_when: false
+
+    - name: Copy it to the controller
+      ansible.builtin.fetch:
+        src: "{{ backup_newest.stdout }}"
+        dest: "backups/{{ inventory_hostname }}/"
+        flat: true

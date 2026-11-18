@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Every few minutes (draftbot-health.timer): is every service of the compose project running and
+# healthy? A change either way is posted once through draftbot-notify, not on every run.
+set -euo pipefail
+
+cd {{ draftbot_root | quote }}
+state=/run/draftbot-health.last
+
+# One line per service that isn't running, or whose healthcheck isn't passing. migrate is a
+# one-shot that exits when it's done, so it only counts if it failed.
+problems=$(docker compose ps --all --format json | jq -r '
+    select(
+        (.Service == "migrate" and .State == "exited" and .ExitCode != 0)
+        or (.Service != "migrate" and (.State != "running" or (.Health != "" and .Health != "healthy")))
+    )
+    | "\(.Service): \(.State)\(if .Health != "" then " (\(.Health))" else "" end)"' | sort)
+
+last=$(cat "$state" 2>/dev/null || true)
+if [ "$problems" != "$last" ]; then
+    if [ -n "$problems" ]; then
+        /usr/local/bin/draftbot-notify "Unhealthy on $(uname -n):"$'\n'"$problems"
+    else
+        /usr/local/bin/draftbot-notify "All services healthy again on $(uname -n)."
+    fi
+    printf '%s' "$problems" > "$state"
+fi

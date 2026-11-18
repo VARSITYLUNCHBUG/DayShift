@@ -1,3 +1,0 @@
----
-base_notify_script: /usr/local/sbin/draftbot-notify
-base_notify_webhook_config: /etc/draftbot/notify.curlrc
