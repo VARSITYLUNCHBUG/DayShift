@@ -191,7 +191,9 @@ services:
       retries: 20
       start_period: 30s
       start_interval: 1s
-    cpus: "2"
+    # Docker refuses a limit above the host's CPU count, so a 1-CPU server sets DB_CPUS=1 (the
+    # Ansible app role sets it from the host's CPUs).
+    cpus: "${DB_CPUS:-2}"
     mem_limit: 1g
     pids_limit: 256
 

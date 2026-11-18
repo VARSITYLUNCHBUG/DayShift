@@ -30,6 +30,7 @@ app_env_reserved:
   - DATABASE_URL
   - DB_APP_PASSWORD
   - DB_CONN_MAX_AGE
+  - DB_CPUS
   - DB_MONITOR_PASSWORD
   - DB_PGBOUNCER
   - DB_POOL
