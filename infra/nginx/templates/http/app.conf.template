@@ -1,9 +1,0 @@
-# Plain HTTP on 8080: the quickstart, the dev stack and the test stack. compose.yaml publishes it
-# on 127.0.0.1 only. Anything reachable from the internet uses the https site instead.
-server {
-    listen 8080 default_server;
-    listen [::]:8080 default_server;
-    server_name _;
-
-    include /etc/nginx/snippets/app.conf;
-}

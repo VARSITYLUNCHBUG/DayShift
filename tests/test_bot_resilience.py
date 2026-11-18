@@ -20,7 +20,7 @@ CACHED = "server login has been failing, cached error: server DNS lookup failed"
 
 
 class FlakyDb:
-    """`db()` that raises like pgbouncer for its first `failures` calls."""
+    """`db()` that raises like a database that is down for its first `failures` calls."""
 
     def __init__(self, failures: int) -> None:
         self.left = failures
@@ -44,7 +44,7 @@ def test_startup_recovery_waits_for_the_database_then_starts_the_loops(
     beat = tmp_path / "beat"
 
     async def scenario() -> set[str]:
-        bot = DraftBot("gateway", beat)
+        bot = DraftBot(beat)
         await asyncio.wait_for(bot.on_ready(), 5)
         await bot.on_ready()  # A reconnect's on_ready: nothing is started twice.
         await asyncio.sleep(0.05)
@@ -56,7 +56,7 @@ def test_startup_recovery_waits_for_the_database_then_starts_the_loops(
         return set(names)
 
     with caplog.at_level(logging.INFO, logger="bot.client"):
-        assert asyncio.run(scenario()) == {"effects"}
+        assert asyncio.run(scenario()) == {"deadlines", "effects", "watchdog"}
     assert beat.exists()
     assert flaky.calls.count(deadlines.extend_past_due) == 4
     failed = [r for r in caplog.records if r.getMessage() == "Startup recovery failed, retrying"]

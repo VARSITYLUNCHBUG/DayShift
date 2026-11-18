@@ -1,38 +1,20 @@
-# The whole stack, production-shaped. On its own it is the self-host quickstart:
+# The whole stack. On its own it is the self-host quickstart:
 #
 #   docker compose up -d --build        then open http://127.0.0.1:8000/admin/
 #
-# Every other environment layers an override on top: compose.dev.yaml (local dev against the
-# Discord simulator), compose.test.yaml (throwaway test stacks), compose.observability.yaml
-# (Prometheus and Grafana) and deploy/compose.prod.yaml (TLS on 80/443 for a real domain).
+# Overrides layer on top: compose.dev.yaml (local dev against the Discord simulator),
+# compose.test.yaml (throwaway test stacks) and deploy/compose.prod.yaml (HTTPS on 80/443 for a
+# real domain). The Makefile drives all of them.
 #
-#   edge       nginx, the only ingress (infra/nginx), and the static files. Plain HTTP on
-#              127.0.0.1 here.
-#   web        the admin, dashboard and player web UI (uvicorn, ASGI)
-#   bot        the Discord gateway connection, clicks and the effect worker
-#   scheduler  deadlines and the daily prune; database only, no Discord connection
-#   migrate    one-shot: static files for the edge, migrations, presets and the monitoring
-#              role, then exits
-#   pgbouncer  transaction pooling between web/bot/scheduler and Postgres (infra/pgbouncer)
-#   db         Postgres, in UTC
+#   edge     Caddy, the only way in (infra/caddy/Caddyfile). Plain HTTP on 127.0.0.1 here
+#   web      the Django admin and the calibration dashboard (uvicorn), and the static files
+#   bot      the Discord gateway connection, clicks, the effect worker, the deadline loop and
+#            the health watchdog
+#   migrate  one-shot: migrations and presets, then exits; web and bot wait for it
+#   db       Postgres, in UTC
 #
-# Every service runs as a non-root user on a read-only root filesystem with no capabilities.
-#
-# Networks. Each service joins only the ones it needs (`networks:` at the end): `data` holds
-# Postgres, `app` pgbouncer and its clients, `edge` the edge and web. The observability overlay's
-# services live on `default`, which no service here joins, so Grafana can never open a
-# connection to Postgres, pgbouncer or the app.
-#
-# Database roles. Postgres's superuser, draftbot (POSTGRES_PASSWORD), is for migrate and the
-# operator only. web, bot and scheduler log in as draftbot_app (DB_APP_PASSWORD), which may read
-# and write the app's tables and owns nothing: no DDL, no COPY ... PROGRAM, no other roles.
-# migrate creates it, or brings its password and grants up to date, on every start
-# (config/app_role.py).
-#
-# Environment. `.env` (from .env.example) is the app's: migrate, web, bot and scheduler get it,
-# with the database passwords that aren't theirs blanked below, and compose reads it for the
-# variables below. The other services get only what each one lists. The observability overlay's
-# own secrets live in a file of their own, .env.observability, so the app never sees them.
+# Every service runs on a read-only root filesystem with no Linux capabilities, and the app's as
+# a non-root user. `.env` (from .env.example) is the app's environment file.
 
 name: dl-mm-discord
 
@@ -50,25 +32,6 @@ x-hardening: &hardening
   restart: unless-stopped
   logging: *logging
 
-# The app's database connection: draftbot_app through pgbouncer. migrate overrides it with the
-# superuser's, straight to Postgres. DB_APP_PASSWORD falls back to POSTGRES_PASSWORD, so an older
-# .env keeps working; give it a value of its own (.env.example).
-x-app-env: &app-env
-  DATABASE_URL: postgres://draftbot_app:${DB_APP_PASSWORD:-${POSTGRES_PASSWORD:-change-me}}@pgbouncer:6432/draftbot
-  DATABASE_DIRECT_URL: postgres://draftbot_app:${DB_APP_PASSWORD:-${POSTGRES_PASSWORD:-change-me}}@db:5432/draftbot
-  DB_PGBOUNCER: "true"
-  # The superuser's password is in .env (compose needs it there) but isn't the app's: blanked
-  # here, whatever .env says. migrate's DATABASE_URL below carries it.
-  POSTGRES_PASSWORD: ""
-  BOT_HEARTBEAT_FILE: /tmp/bot-heartbeat
-  # The bot's and the scheduler's metrics, for Prometheus on the container network. Never
-  # published.
-  METRICS_ADDR: 0.0.0.0
-  # The exporters' database password lives in .env (compose needs it there), but it isn't the
-  # app's: blanked here, whatever .env says. compose.observability.yaml hands it to migrate,
-  # which creates their read-only role with it.
-  DB_MONITOR_PASSWORD: ""
-
 x-app: &app
   <<: *hardening
   build:
@@ -79,67 +42,41 @@ x-app: &app
       INSTALL_OCR: ${INSTALL_OCR:-false}
   # Published to the repo's packages. `docker compose pull` fetches it; `--build` builds it here.
   image: ${DRAFTBOT_IMAGE:-ghcr.io/varsitylunchbug/dl-mm-discord}:${DRAFTBOT_IMAGE_TAG:-latest}
-  env_file: .env
+  env_file:
+    - path: .env
+      required: false
+  environment: &app-env
+    DATABASE_URL: postgres://draftbot:${POSTGRES_PASSWORD:-change-me}@db:5432/draftbot
+    BOT_HEARTBEAT_FILE: /tmp/bot-heartbeat
   # Sized, so a burst of uploads (Django spools bodies over 2.5 MB here) fails a request rather
   # than filling the container's memory limit, which tmpfs pages count against.
   tmpfs:
     - /tmp:size=128m
+  networks: [backend]
   stop_grace_period: 30s
-
-# The heartbeat file is at most 60 s old (bot/client.py's Heartbeat; `manage.py bot_healthcheck`
-# is the same check for a person to run). Plain Python, no Django: booting Django cost 2-5 CPU
-# seconds a run, which took longer than the timeout under the scheduler's half a CPU.
-x-bot-healthcheck: &bot-healthcheck
-  test:
-    - CMD
-    - python
-    - -I
-    - -S
-    - -c
-    - "import os, sys, time; sys.exit(time.time() - os.stat(os.environ['BOT_HEARTBEAT_FILE']).st_mtime > 60)"
-  interval: 30s
-  timeout: 10s
-  retries: 3
-  start_period: 60s
-  start_interval: 2s
 
 services:
   edge:
     <<: *hardening
-    image: nginxinc/nginx-unprivileged:1.31.7-alpine3.24@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     environment:
-      # Templates may use EDGE_* variables; nginx's own $variables are left alone.
-      NGINX_ENVSUBST_FILTER: "^EDGE_"
+      EDGE_SITE: ${EDGE_SITE:-:8080}
+      EDGE_ADMIN_CIDRS: ${EDGE_ADMIN_CIDRS:-0.0.0.0/0 ::/0}
     volumes:
-      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./infra/nginx/snippets:/etc/nginx/snippets:ro
-      - ./infra/nginx/templates/http:/etc/nginx/templates:ro
-      # Optional admin access control: *.conf files included in the /admin/ locations
-      # (infra/nginx/admin-access/README.md). Empty by default.
-      - ${EDGE_ADMIN_ACCESS_DIR:-./infra/nginx/admin-access}:/etc/nginx/admin-access:ro
-      # The static files, which migrate copies from the image.
-      - static:/srv/static:ro
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and the ACME account, kept across restarts.
+      - caddy-data:/data
+      - caddy-config:/config
     tmpfs:
-      # Request bodies over 128k wait here until web takes them (infra/nginx/snippets/app.conf):
-      # room for six 21 MB uploads at once. A seventh gets a 500, not an out-of-memory kill:
-      # 160m of tmpfs plus nginx's own ~30 MB stays under the limit below.
-      - /tmp:size=160m
-      # The image renders the templates here at start.
-      - /etc/nginx/conf.d:uid=101,gid=101,size=1m
+      - /tmp
     ports:
       - "127.0.0.1:${EDGE_PORT:-8000}:8080"
-    networks:
-      edge:
-        # Fixed, so web believes proxy headers from this one address (FORWARDED_ALLOW_IPS), and
-        # outside EDGE_IP_RANGE, where Docker hands out every other address on the network.
-        # The edge reaches web over IPv4 only (infra/nginx/nginx.conf), so its IPv6 address
-        # needn't be fixed.
-        ipv4_address: ${EDGE_IP:-10.203.140.2}
+    networks: [edge]
     depends_on:
       web:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/nginx_status"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -161,11 +98,11 @@ services:
       # Page checksums, so disk corruption is reported rather than read back. Only applies when
       # the data volume is created.
       POSTGRES_INITDB_ARGS: --data-checksums
-    # UTC, so Django never has to SET TIME ZONE on a pooled connection. Sized for a 1 GB limit.
+    # UTC, so Django never has to SET TIME ZONE. Sized for a 1 GB limit.
     command: >-
       postgres
       -c timezone=UTC -c log_timezone=UTC
-      -c max_connections=100
+      -c max_connections=50
       -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
       -c effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-768MB}
       -c work_mem=8MB -c maintenance_work_mem=64MB
@@ -180,7 +117,7 @@ services:
     tmpfs:
       - /tmp
       - /var/run/postgresql:uid=70,gid=70
-    networks: [data]
+    networks: [backend]
     shm_size: 256m
     stop_grace_period: 60s
     healthcheck:
@@ -191,74 +128,16 @@ services:
       retries: 20
       start_period: 30s
       start_interval: 1s
-    # Docker refuses a limit above the host's CPU count, so a 1-CPU server sets DB_CPUS=1 (the
-    # Ansible app role sets it from the host's CPUs).
-    cpus: "${DB_CPUS:-2}"
     mem_limit: 1g
     pids_limit: 256
 
-  pgbouncer:
-    <<: *hardening
-    image: edoburu/pgbouncer:v1.26.1-p0@sha256:488422e38cff912895d0d65d8963fcd306e6ac589a724398b6eb8e294e94d624
-    # Writes the auth file to tmpfs from the environment, then runs pgbouncer.
-    entrypoint: ["/bin/sh", "/etc/pgbouncer/entrypoint.sh"]
-    environment:
-      POSTGRES_USER: draftbot
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-      # The app's login, draftbot_app, as in x-app-env.
-      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-${POSTGRES_PASSWORD:-change-me}}
-      # The pgbouncer exporter's login; compose.observability.yaml sets it.
-      DB_MONITOR_PASSWORD: ""
-    volumes:
-      - ./infra/pgbouncer:/etc/pgbouncer:ro
-    tmpfs:
-      - /run/pgbouncer:uid=70,gid=70,mode=0700
-    networks: [app, data]
-    # SIGTERM makes pgbouncer wait for every client to disconnect, which the bot's and the
-    # scheduler's kept connections never do, so Docker killed it mid-transaction. SIGINT only
-    # waits for the transactions in flight.
-    stop_signal: SIGINT
-    stop_grace_period: 30s
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "pg_isready", "-q", "-h", "127.0.0.1", "-p", "6432", "-U", "draftbot", "-d", "draftbot"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-      start_interval: 1s
-    cpus: "1"
-    mem_limit: 64m
-    pids_limit: 64
-
   migrate:
     <<: *app
-    # The image's static files to the volume the edge serves (old hashed names stay, for pages
-    # that are still open), then the database. Every step is safe to repeat; `up` runs it all
-    # again on every start.
-    command:
-      - sh
-      - -c
-      - >-
-        cp -R /app/staticfiles/. /srv/static/
-        && python manage.py migrate --noinput
-        && python manage.py load_presets
-        && python -m config.app_role
-        && python -m league.observability.monitoring_role
+    # Every step is safe to repeat; `up` runs it again on every start.
+    command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py load_presets"]
     environment:
       <<: *app-env
-      # Straight to Postgres, as the superuser: migrations want a session of their own, and own
-      # the tables they create.
-      DATABASE_URL: postgres://draftbot:${POSTGRES_PASSWORD:-change-me}@db:5432/draftbot
-      DB_PGBOUNCER: "false"
       SERVICE_NAME: migrate
-      # draftbot_app's password, which migrate sets (config/app_role.py).
-      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-${POSTGRES_PASSWORD:-change-me}}
-    volumes:
-      - static:/srv/static
-    networks: [app, data]
     depends_on:
       db:
         condition: service_healthy
@@ -275,16 +154,12 @@ services:
       # A database connection per request, closed when it ends: each request runs its sync
       # work on a thread of its own, where a kept connection would be stranded (config/settings).
       DB_CONN_MAX_AGE: "0"
-      # Believe X-Forwarded-* from the edge's fixed address only: not the network's gateway, not
-      # anything else that joins it.
-      FORWARDED_ALLOW_IPS: ${EDGE_IP:-10.203.140.2}
-    # data for DATABASE_DIRECT_URL: a session of its own, for the live updates' LISTEN.
-    networks: [app, data, edge]
+      # Only the edge and the app's own services can reach web, so proxy headers are believed.
+      FORWARDED_ALLOW_IPS: "*"
+    networks: [backend, edge]
     depends_on:
       migrate:
         condition: service_completed_successfully
-      pgbouncer:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
       interval: 30s
@@ -298,61 +173,41 @@ services:
 
   bot:
     <<: *app
-    command: ["python", "manage.py", "runbot", "--role", "gateway"]
+    command: ["python", "manage.py", "runbot"]
     environment:
       <<: *app-env
       SERVICE_NAME: bot
-    networks: [app]
     depends_on:
       migrate:
         condition: service_completed_successfully
-      pgbouncer:
-        condition: service_healthy
-    healthcheck: *bot-healthcheck
+    # The heartbeat file is at most 60 s old (bot/client.py's Heartbeat; `manage.py
+    # bot_healthcheck` is the same check for a person to run). Plain Python, no Django, so the
+    # check itself stays cheap.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -I
+        - -S
+        - -c
+        - "import os, sys, time; sys.exit(time.time() - os.stat(os.environ['BOT_HEARTBEAT_FILE']).st_mtime > 60)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
     # Score OCR (INSTALL_OCR=true) loads its model in this process.
     cpus: "1"
     mem_limit: 1g
     pids_limit: 256
 
-  scheduler:
-    <<: *app
-    command: ["python", "manage.py", "runbot", "--role", "scheduler"]
-    environment:
-      <<: *app-env
-      SERVICE_NAME: scheduler
-    networks: [app]
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      pgbouncer:
-        condition: service_healthy
-    healthcheck: *bot-healthcheck
-    cpus: "0.5"
-    mem_limit: 384m
-    pids_limit: 128
-
 networks:
-  # Postgres, and what logs in to it directly: pgbouncer, migrate, and web (LISTEN).
-  data:
-  # pgbouncer and its clients. The bot reaches Discord from here.
-  app:
-  # The edge and web only, on a fixed subnet so the edge can have a fixed address (EDGE_IP),
-  # outside the range Docker assigns from (EDGE_IP_RANGE). Pick another EDGE_SUBNET, with the
-  # other two inside it, if it collides with a network on this host.
-  #
-  # Dual-stack, so an IPv6 client's own address reaches the edge: on an IPv4-only network Docker's
-  # proxy relays every IPv6 connection from the network's gateway, which put all IPv6 clients in
-  # one rate-limit bucket and inside any allowlist that holds the gateway. EDGE_SUBNET6 is a
-  # private (ULA) /64; Docker NATs to it with ip6tables, on by default since Docker 27.
+  # Postgres and the app's services. The bot reaches Discord from here.
+  backend:
+  # The edge and web only.
   edge:
-    enable_ipv6: true
-    ipam:
-      config:
-        - subnet: ${EDGE_SUBNET:-10.203.140.0/28}
-          ip_range: ${EDGE_IP_RANGE:-10.203.140.8/29}
-        - subnet: ${EDGE_SUBNET6:-fd0d:7261:6674:140::/64}
 
 volumes:
   pgdata:
-  # The static files the edge serves. migrate refreshes them from the image on every start.
-  static:
+  caddy-data:
+  caddy-config:

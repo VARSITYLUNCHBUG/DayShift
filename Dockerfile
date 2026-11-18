@@ -4,7 +4,10 @@
 #
 # Targets: `runtime` (the default, last, and what is published) has only what production runs.
 # `dev` adds devtools/ and fixtures/: the dev control API and the dev seed, for compose.dev.yaml
-# and compose.test.yaml. Bases are pinned by digest as well as tag; Dependabot moves both.
+# and compose.test.yaml. `test` is the unit suite's: the same locked dependencies plus the dev
+# group, then the code and tests. The layers are ordered so a code change rebuilds only the last
+# one: dependencies first, from pyproject.toml and uv.lock alone.
+# Bases are pinned by digest as well as tag; Dependabot moves both.
 
 # Build stage: uv resolves the locked dependencies into /opt/venv.
 FROM python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS build
@@ -47,8 +50,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip uninstall --yes --no-cache-dir pip \
     && rm -rf /usr/local/lib/python3.13/ensurepip \
-    && useradd --uid 1000 --user-group --no-create-home --shell /usr/sbin/nologin app \
-    && install -d -o app -g app /srv/static
+    && useradd --uid 1000 --user-group --no-create-home --shell /usr/sbin/nologin app
 
 COPY --from=build /opt/venv /opt/venv
 WORKDIR /app
@@ -60,18 +62,17 @@ COPY config/ config/
 COPY league/ league/
 COPY presets/ presets/
 COPY scoreocr/ scoreocr/
-# Static files and bytecode are built here, because the running containers can't write. migrate
-# copies the static files to the volume the edge serves them from (/srv/static).
+# Static files and bytecode are built here, because the running containers can't write. web
+# serves the static files (WhiteNoise).
 RUN DEBUG=true python manage.py collectstatic --noinput \
     && python -m compileall -q -j 0 bot config league scoreocr manage.py
 
 USER app
 
 EXPOSE 8000
-# One worker: it holds every player's websocket, and fans live updates out from one LISTEN
-# connection. Lifespan is off because Channels' router doesn't speak it. Proxy headers are
-# trusted only from FORWARDED_ALLOW_IPS (uvicorn's default: 127.0.0.1); compose sets it to the
-# edge's address.
+# One worker is plenty for the admin and the dashboard. Lifespan is off because Django's ASGI
+# handler doesn't speak it. Proxy headers are trusted only from FORWARDED_ALLOW_IPS (uvicorn's
+# default: 127.0.0.1); compose sets it for the edge.
 CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--lifespan", "off", "--timeout-graceful-shutdown", "20"]
 
 
@@ -83,6 +84,32 @@ COPY devtools/ devtools/
 COPY fixtures/ fixtures/
 RUN python -m compileall -q -j 0 devtools
 USER app
+
+
+# The unit suite's dependencies: the build stage's virtualenv plus the dev group, so only what the
+# dev group adds is installed here.
+FROM build AS test-venv
+ARG INSTALL_OCR=false
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ "$INSTALL_OCR" = "true" ]; then \
+        uv sync --frozen --group ocr --no-install-project; \
+    else \
+        uv sync --frozen --no-install-project; \
+    fi
+
+
+# The unit suite: the cached dependencies, then the working tree (.dockerignore's allowlist, tests
+# included) as the last layer, which is all a code change rebuilds.
+FROM python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS test
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    HOME=/tmp
+COPY --from=test-venv /opt/venv /opt/venv
+WORKDIR /app
+COPY --chown=1000:1000 . .
+USER 1000:1000
+CMD ["pytest", "-n", "auto"]
 
 
 # Production: the published image. Last, so it is what a plain `docker build` makes.

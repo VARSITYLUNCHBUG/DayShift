@@ -378,7 +378,7 @@ def _lock_tables(tables: list[str], give_up: float) -> None:
     while True:
         try:
             with transaction.atomic(), connection.cursor() as cursor:
-                # SET LOCAL: transaction-scoped, so safe through pgbouncer's transaction pooling.
+                # SET LOCAL: transaction-scoped, so it ends with the reset's transaction.
                 cursor.execute(f"SET LOCAL statement_timeout = {LOCK_TRY_MS}")
                 cursor.execute(f"LOCK TABLE {names} IN ACCESS EXCLUSIVE MODE")
                 cursor.execute("SET LOCAL statement_timeout TO DEFAULT")

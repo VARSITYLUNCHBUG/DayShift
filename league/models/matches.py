@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.db.models import Q
 
+from league.domain.engine import TIMED
 from league.domain.engine import Status as S
 
 
@@ -41,6 +44,16 @@ class Source(models.TextChoices):
     TIMEOUT = "timeout", "Timeout"
     STAFF = "staff", "Staff"
     SYSTEM = "system", "System"
+
+
+class MatchQuerySet(models.QuerySet["Match"]):
+    def timed(self) -> MatchQuerySet:
+        """Matches in a phase with a clock: the ones the deadline loop has to keep moving."""
+        return self.filter(status__in=TIMED)
+
+    def overdue(self, before: datetime) -> MatchQuerySet:
+        """Timed matches whose deadline passed before `before` without firing."""
+        return self.timed().filter(deadline_at__lt=before)
 
 
 class Match(models.Model):
@@ -94,6 +107,8 @@ class Match(models.Model):
     created_at = models.DateTimeField()
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
+
+    objects = MatchQuerySet.as_manager()
 
     class Meta:
         db_table = "matches"

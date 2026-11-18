@@ -8,15 +8,12 @@
 !league/
 !presets/
 !scoreocr/
+# The unit suite, for the `test` target only: the runtime and dev targets copy named folders.
+!tests/
+tests/e2e/
 !manage.py
 !pyproject.toml
 !uv.lock
-# The player web UI's sources, for an image stage that builds them (the HeroUI branch), without
-# what a local build left behind.
-!frontend/
-frontend/node_modules
-frontend/dist
-
 # Local bytecode caches inside those; the image compiles its own.
 **/__pycache__
 **/*.py[co]

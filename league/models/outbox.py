@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from django.db import models
 from django.db.models import Q
 
@@ -9,6 +11,12 @@ class EffectStatus(models.TextChoices):
     DONE = "done", "Done"
     FAILED = "failed", "Failed"
     SKIPPED = "skipped", "Skipped"
+
+
+class OutboxEffectQuerySet(models.QuerySet["OutboxEffect"]):
+    def due(self, at: datetime) -> OutboxEffectQuerySet:
+        """Pending effects whose time has come: what the worker should be running now."""
+        return self.filter(status=EffectStatus.PENDING, run_after__lte=at)
 
 
 class OutboxEffect(models.Model):
@@ -40,6 +48,8 @@ class OutboxEffect(models.Model):
     last_error = models.TextField(blank=True)
     created_at = models.DateTimeField()
     done_at = models.DateTimeField(null=True, blank=True)
+
+    objects = OutboxEffectQuerySet.as_manager()
 
     class Meta:
         db_table = "outbox_effects"
