@@ -24,6 +24,15 @@
         # /etc/hosts is a bind mount in a container and can't be swapped by rename.
         unsafe_writes: true
 
+    # Many servers already run Ubuntu's own Docker. The Ubuntu one here starts from it, so the
+    # docker role has to replace it, as on a real server, and still bring Docker up.
+    - name: Start the Ubuntu server from Ubuntu's docker.io
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+        update_cache: true
+      when: ansible_facts["distribution_release"] == "noble"
+
     - name: Install Docker
       ansible.builtin.include_role:
         name: docker
