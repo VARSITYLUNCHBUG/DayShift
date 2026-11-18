@@ -1,0 +1,6 @@
+# The e2e image needs the suite and its lock, nothing a run leaves behind.
+test-results/
+**/__pycache__/
+**/*.py[co]
+.pytest_cache/
+.ruff_cache/

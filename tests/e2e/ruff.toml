@@ -1,0 +1,3 @@
+# The repo's rules, for the Python the Playwright image runs.
+extend = "../../pyproject.toml"
+target-version = "py312"

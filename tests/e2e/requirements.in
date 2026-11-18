@@ -1,0 +1,9 @@
+# The browser suite's direct dependencies. requirements.txt is the lock, with hashes:
+#   uv pip compile requirements.in --universal --python-version 3.12 --generate-hashes \
+#     -o requirements.txt
+# playwright must match the Playwright image in the Dockerfile.
+httpx==0.28.1
+playwright==1.64.1
+pytest==9.2.0
+pytest-playwright==0.10.0
+pytest-timeout==2.4.0
