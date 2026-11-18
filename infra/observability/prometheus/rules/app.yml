@@ -1,0 +1,134 @@
+# Alerts on the app itself: the web process, the bot's gateway and the scheduler.
+# `runbook` says where to look first. Service names are compose services: run the commands in
+# the stack's directory (/opt/draftbot on a client install).
+
+groups:
+  - name: draftbot-app
+    rules:
+      - alert: AppServiceDown
+        expr: up{job=~"web|bot|scheduler"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus hasn't been able to scrape {{ $labels.job }} for 2 minutes."
+          runbook: >-
+            `docker compose ps {{ $labels.job }}` and `docker compose logs --tail 200
+            {{ $labels.job }}`. A crash loop at start is usually the database or a bad .env value.
+
+      - alert: BotHeartbeatStale
+        expr: time() - draftbot_loop_heartbeat_timestamp_seconds > 60
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }}'s {{ $labels.loop }} loop has stopped"
+          description: >-
+            The {{ $labels.loop }} loop last went round {{ $value | humanizeDuration }} ago. It
+            normally goes round every second.
+          runbook: >-
+            The process is up but stuck. Check `docker compose logs --tail 200 {{ $labels.job }}`
+            for a loop error, then `docker compose restart {{ $labels.job }}`: pending work
+            resumes from the database.
+
+      - alert: DeadlinesOverdue
+        expr: draftbot_deadlines_overdue > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Match timers aren't firing"
+          description: >-
+            {{ $value }} live matches have a deadline over 30 s past that hasn't fired, so their
+            phase won't move on by itself.
+          runbook: >-
+            The scheduler isn't ticking. `docker compose ps scheduler`, then its logs; restart it.
+            Its startup grace gives everyone time to act before the late timers fire.
+
+      - alert: OutboxBacklog
+        expr: draftbot_outbox_oldest_due_seconds > 120
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Discord updates are queuing up"
+          description: >-
+            The oldest due effect has waited {{ $value | humanizeDuration }}. Boards, DMs and
+            channel changes are late.
+          runbook: >-
+            The gateway's effect worker is stuck or Discord is rate-limiting it. Check the Bot
+            dashboard (effects by outcome, gateway latency) and `docker compose logs bot`.
+
+      - alert: EffectsFailing
+        expr: sum by (kind) (increase(draftbot_effects_total{outcome="failed"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.kind }} effects failed for good"
+          description: "{{ $value | humanize }} {{ $labels.kind }} effects gave up in 15 minutes."
+          runbook: >-
+            Find them in the admin's outbox (status failed, last error), or in
+            `docker compose logs bot` under "Effect failed for good". A 403 is a missing
+            Discord permission on the server.
+
+      - alert: EffectRetryRateHigh
+        expr: |
+          sum(rate(draftbot_effects_total{outcome=~"retried|failed"}[10m]))
+            / sum(rate(draftbot_effects_total[10m])) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 20% of Discord effects are failing"
+          description: "{{ $value | humanizePercentage }} of effect runs retried or failed."
+          runbook: >-
+            Usually Discord itself (discordstatus.com) or rate limits. The Bot dashboard shows
+            which kinds; `docker compose logs bot` shows the errors.
+
+      - alert: WebErrorRateHigh
+        expr: |
+          sum(rate(draftbot_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(draftbot_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 5% of web requests fail"
+          description: "{{ $value | humanizePercentage }} of requests answer 5xx."
+          runbook: >-
+            `docker compose logs --tail 200 web` for the tracebacks. If every request fails,
+            check the database and pgbouncer dashboards first.
+
+      - alert: BotErrorsLogged
+        expr: sum by (job, logger) (increase(draftbot_log_errors_total[10m])) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} logs errors from {{ $labels.logger }}"
+          description: >-
+            {{ $value | humanize }} errors in 10 minutes. `bot.routing` errors are failed clicks
+            and commands.
+          runbook: >-
+            `docker compose logs bot scheduler | grep '"level": "ERROR"'`. The operator's error
+            channel (ERROR_LOG_CHANNEL_ID) has the full tracebacks too.
+
+      - alert: GatewayLatencyHigh
+        expr: draftbot_gateway_latency_seconds > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Discord gateway latency is {{ $value | humanizeDuration }}"
+          description: "Clicks will feel slow. Usually Discord's side or the host's network."
+          runbook: "Check discordstatus.com and the Host dashboard's CPU."
+
+      - alert: LeagueMetricsUnavailable
+        expr: draftbot_league_metrics_up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The web process can't read the league's state"
+          description: "The queue, match and outbox gauges are missing, so their alerts can't fire."
+          runbook: "`docker compose logs web` for \"Couldn't read the league gauges\"; check pgbouncer."

@@ -1,0 +1,13 @@
+# Loads the dashboards in infra/observability/grafana/dashboards. Edit them there: changes made
+# in Grafana's UI can't be saved over a provisioned dashboard.
+apiVersion: 1
+
+providers:
+  - name: draftbot
+    folder: Draft bot
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/dashboards

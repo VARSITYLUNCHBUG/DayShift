@@ -1,0 +1,21 @@
+# Alertmanager with nowhere to send: used when ALERTMANAGER_DISCORD_WEBHOOK_URL is unset. Alerts
+# still show in Prometheus, Grafana and Alertmanager's own UI. The Watchdog still pings
+# ALERTMANAGER_WATCHDOG_URL if that is set (alertmanager.yml).
+
+route:
+  receiver: none
+  routes:
+    - matchers: [alertname="Watchdog"]
+      receiver: watchdog
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+
+receivers:
+  - name: none
+  - name: watchdog
+    # BEGIN watchdog-webhook
+    webhook_configs:
+      - url_file: /tmp/watchdog-url
+        send_resolved: false
+    # END watchdog-webhook
