@@ -38,7 +38,7 @@ def test_the_calibration_page_marks_its_inline_code_with_the_nonce() -> None:
     nonce = re.search(r"'nonce-([^']+)'", response["Content-Security-Policy"])
     assert nonce
     body = response.content.decode()
-    tags = re.findall(r"<(script|style)\b([^>]*)>", body)
+    tags = re.findall(r"<(script|style)\b([^>]*)>", body, flags=re.IGNORECASE)
     inline = [attrs for _tag, attrs in tags if "src=" not in attrs]
     assert inline, "the page has inline code to check"
     assert all(f'nonce="{nonce.group(1)}"' in attrs for attrs in inline)

@@ -21,10 +21,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("X-Stub-Forwarded-Proto", self.headers.get("X-Forwarded-Proto", ""))
-        self.send_header("X-Stub-Forwarded-For", self.headers.get("X-Forwarded-For", ""))
+        self.send_header("X-Stub-Forwarded-Proto", self._echo("X-Forwarded-Proto"))
+        self.send_header("X-Stub-Forwarded-For", self._echo("X-Forwarded-For"))
         self.end_headers()
         self.wfile.write(body)
+
+    def _echo(self, name: str) -> str:
+        """A request header, for verify.yml to read back, with no line breaks to split on."""
+        return self.headers.get(name, "").replace("\r", "").replace("\n", "")
 
     def _wants_websocket(self) -> bool:
         return (self.headers.get("Upgrade") or "").lower() == "websocket"

@@ -1901,7 +1901,12 @@ def test_finished_draft_shows_its_name_gif_and_glhf(voting: Match) -> None:
     text = str(_check(match))
     assert draft_name(match.rng_seed) in text
     assert "GLHF" in text
-    assert "tenor.com" in text  # The GIF, from presets/draft_gifs.json.
+    # The GIF: one of presets/draft_gifs.json's, as a whole URL.
+    import json
+    from pathlib import Path
+
+    presets = Path(__file__).resolve().parents[1] / "presets" / "draft_gifs.json"
+    assert any(gif in text for gif in json.loads(presets.read_text())["gifs"])
 
 
 @pytest.mark.django_db
