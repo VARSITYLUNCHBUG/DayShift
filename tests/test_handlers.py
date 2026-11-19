@@ -26,10 +26,9 @@ from bot.handlers.results import DisputeModal, ReportModal, process_report
 from bot.routing import Context, _dispatch
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
-from league.models import Community, Match, Player, QueueEntry, ResultSubmission
+from league.models import Community, Match, Player, QueueEntry, ResultSubmission, Season
 from league.models.permissions import Area
 from league.services import community, integrity, permissions, queue
-from league.services.common import captain_of, open_season
 from tests.conftest import make_player
 from tests.helpers import (
     acting_captain,
@@ -253,11 +252,11 @@ def test_coinflip_buttons(wired: Community) -> None:
     assert match.status == Status.COINFLIP
     winner = match.coinflip_winner
     loser = "B" if winner == "A" else "A"
-    refused = fake_interaction(captain_of(match, loser).player)
+    refused = fake_interaction(match.captain_of(loser).player)
     click(refused, "coin_choice", match.pk, "hidden_king")
     assert replies(refused)[0] == "Only the coinflip winner can make this choice!"
 
-    click(fake_interaction(captain_of(match, winner).player), "coin_choice", match.pk, "archmother")
+    click(fake_interaction(match.captain_of(winner).player), "coin_choice", match.pk, "archmother")
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
     # The winner took The Archmother: the other team is Hidden King, and goes first.
@@ -282,7 +281,7 @@ def test_random_champion_button(wired: Community) -> None:
 def test_player_and_champion_buttons(wired: Community) -> None:
     match, _players = lobby_of_twelve(wired)
     match = vote_captains(ready_all(match))
-    captain = captain_of(match, match.player_first_pick).player
+    captain = match.captain_of(match.player_first_pick).player
     target = match.participants.filter(team="").first().player_id
     click(fake_interaction(captain), "pick_player", match.pk, f"0.{target}")
     assert fresh(match).step_index == 1
@@ -309,7 +308,7 @@ def test_player_and_champion_buttons(wired: Community) -> None:
 def test_a_champion_click_out_of_turn_is_refused(wired: Community) -> None:
     match, _players = lobby_of_twelve(wired)
     match = to_champion_draft(match)
-    waiting = captain_of(match, "B" if match.champion_first_pick == "A" else "A").player
+    waiting = match.captain_of("B" if match.champion_first_pick == "A" else "A").player
     champion = match.champion_pool[0]
     interaction = fake_interaction(waiting)
     click(interaction, "choose_champion", match.pk, f"{match.step_index}.{champion}")
@@ -320,7 +319,7 @@ def test_a_champion_click_out_of_turn_is_refused(wired: Community) -> None:
 def test_a_stale_click_gets_a_friendly_reply(wired: Community) -> None:
     match, _players = lobby_of_twelve(wired)
     match = vote_captains(ready_all(match))
-    captain = captain_of(match, match.player_first_pick).player
+    captain = match.captain_of(match.player_first_pick).player
     target = match.participants.filter(team="").first().player_id
     click(fake_interaction(captain), "pick_player", match.pk, f"0.{target}")
     late = fake_interaction(captain)
@@ -368,7 +367,7 @@ def in_progress(wired: Community) -> Match:
 
 def test_report_modal_journey(wired: Community) -> None:
     match = in_progress(wired)
-    captain = captain_of(match, "A").player
+    captain = match.captain_of("A").player
     opener = fake_interaction(captain)
     click(opener, "report_open", match.pk, "A")
     modal = opener.response.modal
@@ -396,8 +395,8 @@ def test_report_modal_journey(wired: Community) -> None:
 
 def test_add_my_screenshot_still_asks_who_won(wired: Community) -> None:
     match = in_progress(wired)
-    captain_a = captain_of(match, "A").player
-    captain_b = captain_of(match, "B").player
+    captain_a = match.captain_of("A").player
+    captain_b = match.captain_of("B").player
     asyncio.run(
         process_report(fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), "")
     )
@@ -426,7 +425,7 @@ def test_bad_screenshots_are_refused_and_not_archived(
     wired: Community, file: MagicMock, message: str
 ) -> None:
     match = in_progress(wired)
-    captain = captain_of(match, "A").player
+    captain = match.captain_of("A").player
     interaction = fake_interaction(captain)
 
     async def run() -> None:
@@ -448,8 +447,8 @@ def test_non_captain_cannot_open_report(wired: Community) -> None:
 
 def test_confirm_and_dispute_buttons(wired: Community) -> None:
     match = in_progress(wired)
-    captain_a = captain_of(match, "A").player
-    captain_b = captain_of(match, "B").player
+    captain_a = match.captain_of("A").player
+    captain_b = match.captain_of("B").player
     asyncio.run(
         process_report(fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), "")
     )
@@ -461,8 +460,8 @@ def test_confirm_and_dispute_buttons(wired: Community) -> None:
 
 def test_dispute_modal_then_staff_buttons(wired: Community) -> None:
     match = in_progress(wired)
-    captain_a = captain_of(match, "A").player
-    captain_b = captain_of(match, "B").player
+    captain_a = match.captain_of("A").player
+    captain_b = match.captain_of("B").player
     asyncio.run(
         process_report(fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), "")
     )
@@ -489,8 +488,8 @@ def test_dispute_modal_then_staff_buttons(wired: Community) -> None:
 def test_a_disputes_role_can_rule_on_a_dispute(wired: Community) -> None:
     permissions.grant(wired.pk, 555, [Area.DISPUTES], granted_by=None)
     match = in_progress(wired)
-    captain_a = captain_of(match, "A").player
-    captain_b = captain_of(match, "B").player
+    captain_a = match.captain_of("A").player
+    captain_b = match.captain_of("B").player
     asyncio.run(
         process_report(fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), "")
     )
@@ -545,7 +544,7 @@ def test_queue_status_command(wired: Community) -> None:
 
 def test_submit_command_is_the_upload_fallback(wired: Community) -> None:
     match = in_progress(wired)
-    captain = captain_of(match, "B").player
+    captain = match.captain_of("B").player
     interaction = fake_interaction(captain)
     run_command(
         player_commands.submit_command,
@@ -581,7 +580,7 @@ def test_staff_commands_refuse_non_staff(wired: Community) -> None:
         band=app_commands.Choice(name="High", value="high"),
     )
     assert "It needs Ratings access" in replies(interaction)[0]
-    assert open_season(wired).ratings.count() == 0
+    assert Season.objects.open_for(wired).ratings.count() == 0
 
 
 def test_seed_and_adjust_commands(wired: Community) -> None:
@@ -633,7 +632,7 @@ def test_rescore_finished_match_previews_then_corrects(wired: Community) -> None
         subcommand(staff.match_group, "rescore"),
         interaction,
         match_id=match.pk,
-        winning_captain=member(captain_of(match, "B").player),
+        winning_captain=member(match.captain_of("B").player),
         reason="Wrong report",
     )
     assert fresh(match).winner == "A"

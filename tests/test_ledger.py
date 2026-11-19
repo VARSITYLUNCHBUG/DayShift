@@ -22,6 +22,7 @@ from league.models import (
 )
 from league.services import corrections, integrity, lobby, modes, ratings
 from tests.conftest import make_player
+from tests.factories import played
 from tests.helpers import fresh, play_full_match, ready_all, to_in_progress, vote_captains
 
 pytestmark = pytest.mark.django_db
@@ -34,7 +35,7 @@ def ladder(league: Community, count: int = 4) -> list[Match]:
     for index in range(count):
         rotated = pool[index * 2 :] + pool[: index * 2]
         winner = "A" if index % 2 == 0 else "B"
-        matches.append(play_full_match(league, rotated[:12], winner, number=index + 1))
+        matches.append(played(league, rotated[:12], winner, number=index + 1))
     return matches
 
 
@@ -191,7 +192,7 @@ def test_seed_before_play_affects_expected_score(league: Community) -> None:
     pool = [make_player(n) for n in range(1, 13)]
     for player in pool[:6]:
         ratings.seed_player(season, player, "high", actor=None)
-    match = play_full_match(league, pool, "A", 1)
+    match = played(league, pool, "A", 1)
     assert integrity.check_all() == []
     assert RatingEvent.objects.filter(match=match, expected__isnull=False).exists()
 
@@ -236,7 +237,8 @@ def test_integrity_detects_a_stray_ledger_row(league: Community) -> None:
     "model", [RatingEvent, RatingRun, MatchResult, MatchTransition, DraftAction, DraftModeVersion]
 )
 def test_history_rows_cannot_be_updated_or_deleted(league: Community, model: type) -> None:
-    ladder(league, 1)
+    # The real flow, so the draft's own rows exist too.
+    play_full_match(league, [make_player(n) for n in range(1, 13)], "A", 1)
     row = model.objects.first()
     assert row is not None
     # Raw SQL: this tests the database's own guard, not Django's PROTECT check in front of it.

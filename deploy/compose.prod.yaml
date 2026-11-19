@@ -1,65 +1,23 @@
-# Production deltas on top of the root compose.yaml, for a server with a public domain:
-#
-#   docker compose -f compose.yaml -f compose.prod.yaml -f compose.observability.yaml up -d
-#
-# The Ansible app role puts these files side by side in /opt/draftbot and writes .env there, with
-# COMPOSE_FILE set so a plain `docker compose ...` in that directory uses them all. What changes:
+# Production on top of the root compose.yaml, for a server with a public domain. The Ansible app
+# role puts both files in /opt/draftbot and writes .env there with COMPOSE_FILE set, so a plain
+# `docker compose ...` in that directory uses them together. What changes:
 #
 # - the app services run the published image at DRAFTBOT_IMAGE_TAG and never build;
-# - the edge serves the TLS site (infra/nginx/templates/https) on 80 and 443, with certificates
-#   from certbot (roles/edge gets the first one and renews them);
+# - the edge serves the domain (EDGE_SITE) over HTTPS on 80 and 443; Caddy gets and renews the
+#   certificate itself;
 # - DEBUG is forced off, whatever .env says;
-# - Postgres is no longer published on the host. Backups run on the host (roles/backups).
-#
-# compose.yaml already sends web, bot and scheduler through pgbouncer and migrate straight to
-# Postgres, and has web believe proxy headers from the edge network only.
+# - Postgres is no longer published on the host. Backups run on the host (roles/app).
 
 x-image: &image ${DRAFTBOT_IMAGE:-ghcr.io/varsitylunchbug/dl-mm-discord}:${DRAFTBOT_IMAGE_TAG:?Set DRAFTBOT_IMAGE_TAG}
-
-x-prod-env: &prod-env
-  DEBUG: "false"
 
 services:
   edge:
     environment:
-      EDGE_SERVER_NAME: ${EDGE_SERVER_NAME:?Set EDGE_SERVER_NAME in .env}
-    volumes:
-      # The TLS site. While there is no certificate yet, the edge role points EDGE_SITE_TEMPLATES
-      # at an HTTP-only site that answers the ACME challenge and nothing else.
-      - ${EDGE_SITE_TEMPLATES:-./infra/nginx/templates/https}:/etc/nginx/templates:ro
-      - ./letsencrypt:/etc/letsencrypt:ro
-      - ./acme-challenge:/var/www/certbot:ro
+      EDGE_SITE: ${EDGE_SITE:?Set EDGE_SITE to the domain in .env}
     ports: !override
       - "80:8080"
       - "443:8443"
-
-  # One-shot: `docker compose run --rm certbot ...`. roles/edge runs it for the first
-  # certificate, and draftbot-certbot-renew.timer twice a day for renewals. It runs as the edge's
-  # user, so the edge can read the keys it writes.
-  certbot:
-    image: certbot/certbot:v5.10.0
-    profiles: [certbot]
-    user: "101:101"
-    init: true
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    volumes:
-      - ./letsencrypt:/etc/letsencrypt
-      - ./acme-challenge:/var/www/certbot
-    tmpfs:
-      - /tmp
-      - /var/lib/letsencrypt:uid=101,gid=101
-      - /var/log/letsencrypt:uid=101,gid=101
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "5"
-    restart: "no"
-    cpus: "0.5"
-    mem_limit: 256m
-    pids_limit: 64
+      - "443:8443/udp"
 
   db:
     ports: !reset []
@@ -67,19 +25,17 @@ services:
   migrate:
     image: *image
     build: !reset null
-    environment: *prod-env
+    environment:
+      DEBUG: "false"
 
   web:
     image: *image
     build: !reset null
-    environment: *prod-env
+    environment:
+      DEBUG: "false"
 
   bot:
     image: *image
     build: !reset null
-    environment: *prod-env
-
-  scheduler:
-    image: *image
-    build: !reset null
-    environment: *prod-env
+    environment:
+      DEBUG: "false"

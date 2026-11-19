@@ -31,9 +31,9 @@ from league.models import (
 from league.models.ratings import RunKind
 from league.models.scoreboards import AwardSource
 from league.services import awards, corrections, integrity, ratings, results
-from league.services.common import captain_of
 from league.services.community import start_season
-from tests.helpers import fresh, image, play_full_match, to_in_progress
+from tests.factories import played
+from tests.helpers import fresh, image, to_in_progress
 
 ALGO = OpenSkillAlgo()
 PARAMS = merged_params(None)
@@ -52,7 +52,7 @@ def _match(awards_: dict[int, str] | None = None, outcome: str = "A") -> MatchIn
 team_states = st.lists(st.tuples(st.floats(5, 45), st.floats(2, 8.4)), min_size=12, max_size=12)
 
 
-@settings(max_examples=60, deadline=None)
+@settings(deadline=None)
 @given(team_states, st.sampled_from(["A", "B"]), st.integers(0, 11), st.integers(0, 11))
 def test_awards_are_zero_sum_within_each_team_and_capped(
     raw: list[tuple[float, float]], outcome: str, mvp: int, key: int
@@ -146,10 +146,10 @@ def test_a_new_season_rates_with_openskill(
     openskill: Season, league: Community, players: list[Player]
 ) -> None:
     assert openskill.start_rating == 0  # mu 25 - 3 x 8.33 rounds to nothing.
-    match = play_full_match(league, players, "A", 1)
+    match = played(league, players, "A", 1)
     run = RatingRun.objects.get(match=match, kind=RunKind.LIVE)
     assert run.algo_version == "openskill_pl_v1"
-    row = PlayerRating.objects.get(season=openskill, player=captain_of(match, "A").player)
+    row = PlayerRating.objects.get(season=openskill, player=match.captain_of("A").player)
     assert row.mu > Decimal(25) and row.sigma < Decimal(25) / 3
     assert integrity.check_season(openskill) == []
 
@@ -162,12 +162,12 @@ def test_report_awards_feed_the_rating(
 
         queue.join(league.pk, player)
     match = to_in_progress(Season.objects.get(pk=openskill.pk).matches.get())
-    first = captain_of(match, "A").player
+    first = match.captain_of("A").player
     team_a = [p.player_id for p in match.participants.filter(team="A")]
     team_b = [p.player_id for p in match.participants.filter(team="B")]
     picks = {team_a[1]: "mvp", team_b[0]: "key"}
     results.submit_report(match.pk, first, "A", image(1), None, picks)
-    results.confirm(match.pk, captain_of(match, "B").player)
+    results.confirm(match.pk, match.captain_of("B").player)
     events = {e.player_id: e for e in RatingEvent.objects.filter(match=match)}
     assert events[team_a[1]].award_adj > 0
     assert events[team_b[0]].award_adj > 0  # A smaller loss.
@@ -178,8 +178,8 @@ def test_report_awards_feed_the_rating(
 def test_staff_awards_after_the_result_correct_the_ledger(
     openskill: Season, league: Community, players: list[Player]
 ) -> None:
-    match = play_full_match(league, players, "A", 1)
-    winner = captain_of(match, "A").player
+    match = played(league, players, "A", 1)
+    winner = match.captain_of("A").player
     run = corrections.apply_award_correction(
         match.pk, {winner.pk: "mvp"}, AwardSource.STAFF, None, "Watched the VOD"
     )
@@ -199,8 +199,8 @@ def test_staff_awards_after_the_result_correct_the_ledger(
 def test_staff_awards_beat_the_scoreboard_and_reports(
     openskill: Season, league: Community, players: list[Player]
 ) -> None:
-    match = play_full_match(league, players, "A", 1)
-    first, second = captain_of(match, "A").player, captain_of(match, "B").player
+    match = played(league, players, "A", 1)
+    first, second = match.captain_of("A").player, match.captain_of("B").player
     assert awards.record(match, {first.pk: "mvp"}, AwardSource.STAFF, None) is not None
     assert awards.record(match, {second.pk: "mvp"}, AwardSource.OCR, None) is None
     assert awards.record(match, {second.pk: "mvp"}, AwardSource.REPORT, second) is None
@@ -214,10 +214,10 @@ def test_awards_must_go_to_the_roster(
     from league.domain.errors import InvalidAction
     from tests.conftest import make_player
 
-    match = play_full_match(league, players, "A", 1)
+    match = played(league, players, "A", 1)
     with pytest.raises(InvalidAction):
         awards.record(match, {make_player(70).pk: "mvp"}, AwardSource.STAFF, None)
-    first, second = captain_of(match, "A").player, captain_of(match, "B").player
+    first, second = match.captain_of("A").player, match.captain_of("B").player
     with pytest.raises(InvalidAction):
         awards.record(match, {first.pk: "mvp", second.pk: "mvp"}, AwardSource.STAFF, None)
 
@@ -226,10 +226,10 @@ def test_awards_must_go_to_the_roster(
 def test_a_void_after_awards_refolds_cleanly(
     openskill: Season, league: Community, players: list[Player]
 ) -> None:
-    first = play_full_match(league, players, "A", 1)
-    play_full_match(league, players, "B", 2)
+    first = played(league, players, "A", 1)
+    played(league, players, "B", 2)
     corrections.apply_award_correction(
-        first.pk, {captain_of(first, "A").player_id: "mvp"}, AwardSource.STAFF, None, "x"
+        first.pk, {first.captain_of("A").player_id: "mvp"}, AwardSource.STAFF, None, "x"
     )
     corrections.apply_outcome_correction(first.pk, "void", None, "Wrong lobby")
     assert integrity.check_season(openskill) == []
@@ -240,12 +240,11 @@ def test_a_void_after_awards_refolds_cleanly(
 def test_seeding_a_band_and_the_strength_used_for_captains(
     openskill: Season, players: list[Player]
 ) -> None:
-    from league.services.common import strength_of
 
     event = ratings.seed_player(openskill, players[0], "high", None)
     assert event.mu_delta == Decimal(10)
-    assert strength_of(openskill, players[0].pk) == 35_000
-    assert strength_of(openskill, players[1].pk) == 25_000
+    assert openskill.strength_of(players[0].pk) == 35_000
+    assert openskill.strength_of(players[1].pk) == 25_000
     assert integrity.check_season(openskill) == []
 
 

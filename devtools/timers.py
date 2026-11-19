@@ -22,7 +22,7 @@ from league.models.matches import EarlyLeaveStatus
 from league.models.subs import UNRESOLVED, OfferStatus
 from league.models.swaps import SwapStatus
 from league.services import deadlines, early_leave, subs, swaps
-from league.services.common import lock_match, now, render_board
+from league.services.common import now, render_board
 
 FROZEN_FOR = timedelta(days=3650)
 # A deadline this far out was computed from one of ours (a sub hold started while frozen).
@@ -118,7 +118,7 @@ def _freeze_locked(match: Match) -> FrozenMatch:
 
 @transaction.atomic
 def freeze(match_id: int) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status not in TIMED:
         raise Conflict(f"Match #{match_id} is {match.status}: it has no timers to pause.")
     _freeze_locked(match)
@@ -142,7 +142,7 @@ def _thaw_locked(match: Match) -> None:
 
 @transaction.atomic
 def resume(match_id: int) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if paused_all():
         raise Conflict("Every timer is paused. Resume them all instead (timers/resume).")
     _thaw_locked(match)
@@ -155,7 +155,7 @@ def refreeze(match_id: int) -> None:
         frozen = FrozenMatch.objects.filter(match_id=match_id).first()
         if frozen is None:
             return
-        match = lock_match(match_id)
+        match = Match.objects.lock(match_id)
         if match.status not in TIMED:
             frozen.delete()
             return
@@ -205,7 +205,7 @@ def _seconds_left(timer: Timer, saved: dict[tuple[str, int, str], FrozenTimer]) 
 def fire(match_id: int) -> bool:
     """Run out the match's soonest timer now, as the deadline loop would. Returns whether
     anything happened. On a frozen match the deadlines it sets are frozen again."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status not in TIMED:
         raise Conflict(f"Match #{match_id} is {match.status}: it has no timer to fire.")
     frozen = FrozenMatch.objects.filter(match=match).first()

@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Back up the draftbot database nightly
+
+[Timer]
+OnCalendar={{ draftbot_backup_on_calendar }}
+RandomizedDelaySec=15m
+# A run missed while the server was off happens at the next boot.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

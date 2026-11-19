@@ -37,13 +37,9 @@ from league.models.ratings import RunKind
 from league.services import awards as award_service
 from league.services.common import (
     add_effect,
-    bump,
     lock_community,
-    lock_match,
     now,
     render_board,
-    roster,
-    save_transition,
     transition,
 )
 from league.services.lobby import next_revision
@@ -120,7 +116,7 @@ def _latest_outcomes(season: Season) -> dict[int, str]:
 
 
 def _rosters(season: Season) -> dict[int, dict[int, str]]:
-    rows = MatchParticipant.objects.filter(match__season=season, removed_reason="").exclude(team="")
+    rows = MatchParticipant.objects.roster().filter(match__season=season)
     result: dict[int, dict[int, str]] = defaultdict(dict)
     for match_id, player_id, team in rows.values_list("match_id", "player_id", "team"):
         result[match_id][player_id] = team
@@ -267,7 +263,7 @@ def preview_outcome(match: Match, outcome: str) -> Preview:
 
 
 def preview_sub(match: Match, out_player: Player, in_player: Player) -> Preview:
-    current = {p.player_id: p.team for p in roster(match)}
+    current = {p.player_id: p.team for p in match.participants.roster()}
     if out_player.pk not in current:
         raise InvalidAction(f"{out_player.display_name} is not on this match's roster.")
     if in_player.pk in current:
@@ -378,7 +374,7 @@ def rebuild_projection(season: Season, fold: Fold | None = None) -> int:
 def _has_full_teams(match: Match) -> bool:
     """A match voided mid-draft has partial rosters, so it can never be rated."""
     size = parse_mode(match.mode_version.body).team_size
-    return all(roster(match).filter(team=team).count() == size for team in ("A", "B"))
+    return all(match.participants.roster().filter(team=team).count() == size for team in ("A", "B"))
 
 
 @transaction.atomic
@@ -386,7 +382,7 @@ def apply_outcome_correction(
     match_id: int, outcome: str, actor: Player | None, reason: str
 ) -> RatingRun | None:
     """Change the result of a match that has ended. Appends; never rewrites history."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     lock_community(match.community_id)  # Corrections and live results must not interleave.
     if match.status not in {Status.COMPLETED, Status.VOIDED}:
         raise InvalidAction("Only a finished match can be corrected.")
@@ -417,7 +413,7 @@ def apply_outcome_correction(
     match.winner = "" if outcome == "void" else outcome
     if match.ended_at is None:
         match.ended_at = now()
-    save_transition(match, "winner", "ended_at")
+    match.save_transition("winner", "ended_at")
     run = _write_correction(match.season, match, f"rev:{revision}", actor, reason)
     add_effect(
         match.community,
@@ -435,11 +431,11 @@ def apply_sub_correction(
     match_id: int, out_player: Player, in_player: Player, actor: Player | None, reason: str
 ) -> RatingRun | None:
     """Replace a player on a finished match's roster. The substitute takes the result."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     lock_community(match.community_id)
     if match.status != Status.COMPLETED:
         raise InvalidAction("Late substitutions apply only to a completed match.")
-    leaving = roster(match).filter(player=out_player).first()
+    leaving = match.participants.roster().filter(player=out_player).first()
     if leaving is None:
         raise InvalidAction(f"{out_player.display_name} is not on this match's roster.")
     if match.participants.filter(player=in_player).exists():
@@ -458,7 +454,7 @@ def apply_sub_correction(
     leaving.removed_at = moment
     leaving.is_captain = False
     leaving.save(update_fields=["removed_reason", "removed_at", "is_captain"])
-    bump(match)
+    match.bump()
     run = _write_correction(match.season, match, f"sub:{match.version}", actor, reason)
     add_effect(
         match.community,
@@ -479,7 +475,7 @@ def apply_award_correction(
 ) -> RatingRun | None:
     """Set a match's MVP and key players. Before the result is final this only records them, and
     finalising rates with them. After, the season is refolded and the differences appended."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     lock_community(match.community_id)
     revision = award_service.record(match, awards, source, actor)
     if revision is None or match.status != Status.COMPLETED:

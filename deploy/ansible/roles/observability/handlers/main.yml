@@ -1,9 +1,0 @@
----
-# They read infra/observability at start.
-- name: Restart the services that read it
-  community.docker.docker_compose_v2:
-    project_src: "{{ observability_root }}"
-    services: "{{ observability_config_services }}"
-    state: restarted
-    wait: true
-    wait_timeout: "{{ observability_wait_timeout }}"

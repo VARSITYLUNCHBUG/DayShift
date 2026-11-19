@@ -1,12 +1,11 @@
-# Throwaway test stacks. Everything is ephemeral: Postgres runs on tmpfs, nothing is published on
-# the host, and `down -v` leaves nothing behind. scripts/test.sh (or .bat) drives it.
+# Test stacks. Nothing is published on the host, Postgres runs on tmpfs, and `make clean` (or
+# `down -v`) leaves nothing behind. The Makefile drives it:
 #
-#   unit profile: db + tests (the pytest suite, -n auto, straight to Postgres: it creates and
-#                 drops a test database per worker, which pgbouncer can't pool)
-#   e2e profile:  db, pgbouncer, migrate (+ dev_seed), web, bot, scheduler, discord-sim,
-#                 control-panel, chrome (a Playwright server) and e2e (tests/e2e against them)
-#
-#   docker compose -p draftbot-test -f compose.yaml -f compose.test.yaml --profile unit run --rm tests
+#   unit profile: db + tests. `make test` keeps db running between runs, so pytest's --reuse-db
+#                 skips creating and migrating a database per xdist worker. The tests image is the
+#                 Dockerfile's `test` target: cached dependency layers, then the working tree.
+#   e2e profile:  db, migrate (+ dev_seed), web, bot, discord-sim, control-panel, chrome (a
+#                 Playwright server) and e2e (tests/e2e against them). `make e2e`.
 
 name: draftbot-test
 
@@ -16,30 +15,23 @@ x-test-app: &test-app
     target: dev
   image: ${COMPOSE_PROJECT_NAME}/app:local
   restart: "no"
+  # Self-contained: no .env needed. Everything the app reads is below. The reset is on each
+  # service, not here: Compose v2 drops a !reset that arrives through `<<:`.
 
-# web logs in as the superuser, for the dev control API's reset (compose.dev.yaml says why); the
-# bot and the scheduler as draftbot_app, as in production.
 x-test-env: &test-env
-  DATABASE_URL: postgres://draftbot:test@pgbouncer:6432/draftbot
-  DATABASE_DIRECT_URL: postgres://draftbot:test@db:5432/draftbot
+  DATABASE_URL: postgres://draftbot:test@db:5432/draftbot
+  BOT_HEARTBEAT_FILE: /tmp/bot-heartbeat
   DEBUG: "true"
   DJANGO_SECRET_KEY: test-only-not-secret
   DEV_CONTROL: "true"
-  WEB_DEV_LOGIN: "true"
   SECURE_COOKIES: "false"
   ALLOWED_HOSTS: localhost,127.0.0.1,web,control-panel
-  PUBLIC_URL: http://web:8000
   LOG_FORMAT: text
   DISCORD_TOKEN: sim-token
   DISCORD_GUILD_ID: "1100000000000000001"
   DISCORD_API_BASE: http://discord-sim:8090/api/v10
   DISCORD_GATEWAY_URL: ws://discord-sim:8090/gateway
   DISCORD_SIM_URL: http://discord-sim:8090
-
-x-test-app-role: &test-app-role
-  <<: *test-env
-  DATABASE_URL: postgres://draftbot_app:test-app@pgbouncer:6432/draftbot
-  DATABASE_DIRECT_URL: postgres://draftbot_app:test-app@db:5432/draftbot
 
 # The test-only services get the same hardening as the app.
 x-test-hardening: &test-hardening
@@ -48,6 +40,7 @@ x-test-hardening: &test-hardening
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
   restart: "no"
+  networks: [backend]
   tmpfs:
     - /tmp
 
@@ -60,7 +53,7 @@ services:
     command: >-
       postgres -c timezone=UTC -c log_timezone=UTC
       -c fsync=off -c synchronous_commit=off -c full_page_writes=off
-      -c max_connections=300
+      -c max_connections=200
     tmpfs: !override
       - /tmp
       - /var/run/postgresql:uid=70,gid=70
@@ -69,36 +62,19 @@ services:
     ports: !reset []
     restart: "no"
 
-  pgbouncer:
-    profiles: [e2e]
-    environment:
-      POSTGRES_PASSWORD: test
-      DB_APP_PASSWORD: test-app
-    restart: "no"
-
-  # Not part of either suite: they talk to web directly. Off the host if started anyway.
-  edge:
-    profiles: [e2e]
-    ports: !reset []
-    restart: "no"
-    networks:
-      edge:
-        ipv4_address: ${TEST_EDGE_IP:-10.203.140.34}
-
   tests:
+    <<: *test-hardening
     profiles: [unit]
-    # Writable: Hypothesis keeps its example database in the working directory.
-    init: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
     build:
       context: .
-      dockerfile: scripts/docker/tests.Dockerfile
+      target: test
     image: ${COMPOSE_PROJECT_NAME}/tests:local
-    networks: [data]
     environment:
       DATABASE_URL: postgres://draftbot:test@db:5432/draftbot
       DJANGO_SECRET_KEY: test-only-not-secret
+      HYPOTHESIS_PROFILE: ${HYPOTHESIS_PROFILE:-dev}
+      # The image is read-only: no pytest cache.
+      PYTEST_ADDOPTS: -p no:cacheprovider
     depends_on:
       db:
         condition: service_healthy
@@ -106,17 +82,16 @@ services:
   migrate:
     <<: *test-app
     profiles: [e2e]
-    # Self-contained: no .env needed. Everything the app reads is below. The reset is on the
-    # service itself, not in x-test-app: Compose v2 drops a !reset that arrives through `<<:`.
     env_file: !reset []
     command: >-
       sh -c "python manage.py migrate --noinput && python manage.py load_presets
-      && python -m config.app_role && python manage.py dev_seed"
+      && python manage.py dev_seed"
     environment:
       <<: *test-env
-      DATABASE_URL: postgres://draftbot:test@db:5432/draftbot
-      DB_APP_PASSWORD: test-app
+      SERVICE_NAME: migrate
     depends_on:
+      db:
+        condition: service_healthy
       discord-sim:
         condition: service_healthy
 
@@ -126,7 +101,9 @@ services:
     env_file: !reset []
     environment:
       <<: *test-env
-      FORWARDED_ALLOW_IPS: ${TEST_EDGE_IP:-10.203.140.34}
+      SERVICE_NAME: web
+      DB_CONN_MAX_AGE: "0"
+      FORWARDED_ALLOW_IPS: "*"
     healthcheck:
       interval: 10s
 
@@ -134,17 +111,17 @@ services:
     <<: *test-app
     profiles: [e2e]
     env_file: !reset []
-    environment: *test-app-role
+    environment:
+      <<: *test-env
+      SERVICE_NAME: bot
     healthcheck:
       interval: 10s
 
-  scheduler:
-    <<: *test-app
-    profiles: [e2e]
-    env_file: !reset []
-    environment: *test-app-role
-    healthcheck:
-      interval: 10s
+  # Not part of either suite: they talk to web directly.
+  edge:
+    profiles: [edge]
+    ports: !reset []
+    restart: "no"
 
   # The dev stack's simulator and control panel, off the host and required here.
   discord-sim:
@@ -159,7 +136,7 @@ services:
     extends:
       file: compose.dev.yaml
       service: control-panel
-    profiles: [e2e]
+    profiles: !override [e2e]
     ports: !reset []
     restart: "no"
     depends_on: !override
@@ -169,13 +146,11 @@ services:
         condition: service_healthy
 
   # A clean headless Chromium per run: each test connects to this Playwright server and gets a
-  # fresh browser, so nothing carries over between runs.
-  # Playwright starts Chromium without its sandbox (its default), so it needs no capabilities.
-  # Profiles and crash dumps go to the tmpfs mounts; the browsers themselves are in the image.
+  # fresh browser, so nothing carries over between runs. Playwright starts Chromium without its
+  # sandbox (its default), so it needs no capabilities.
   chrome:
     <<: *test-hardening
     profiles: [e2e]
-    networks: [app]
     build:
       context: tests/e2e
       target: chrome
@@ -197,15 +172,13 @@ services:
       start_period: 20s
       start_interval: 1s
 
-  # Writes only test-results/ (mounted below) and HOME on /tmp; no bytecode, no pytest cache.
-  # The one service here with a writable root: pytest-playwright empties test-results/ by
-  # removing the folder, and only tolerates that failing as "busy" (a mount point on a writable
-  # root), not as "read-only file system".
+  # Writes only test-results/ (mounted below) and HOME on /tmp. The one service here with a
+  # writable root: pytest-playwright empties test-results/ by removing the folder, and only
+  # tolerates that failing as "busy" (a mount point on a writable root).
   e2e:
     <<: *test-hardening
     read_only: false
     profiles: [e2e]
-    networks: [app]
     build:
       context: tests/e2e
       target: e2e
@@ -215,7 +188,7 @@ services:
     cpus: "1"
     mem_limit: 1g
     pids_limit: 256
-    # The host user on Linux (scripts/test.sh sets these), so test-results/ stays yours.
+    # The host user (the Makefile sets these), so test-results/ stays yours.
     user: "${DRAFTBOT_UID:-1001}:${DRAFTBOT_GID:-1001}"
     environment:
       HOME: /tmp
@@ -233,14 +206,3 @@ services:
         condition: service_healthy
       bot:
         condition: service_healthy
-      scheduler:
-        condition: service_healthy
-
-networks:
-  # IPv4 only, as in compose.dev.yaml.
-  edge:
-    enable_ipv6: false
-    ipam:
-      config: !override
-        - subnet: ${TEST_EDGE_SUBNET:-10.203.140.32/28}
-          ip_range: ${TEST_EDGE_IP_RANGE:-10.203.140.40/29}

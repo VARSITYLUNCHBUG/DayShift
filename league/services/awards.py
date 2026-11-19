@@ -15,7 +15,7 @@ from django.db.models import Max
 from league.domain.errors import InvalidAction
 from league.models import Match, MatchAward, Player
 from league.models.scoreboards import AwardKind, AwardSource
-from league.services.common import now, roster
+from league.services.common import now
 
 RANK: dict[str, int] = {
     AwardSource.REPORT: 1,
@@ -38,7 +38,7 @@ def current(match: Match) -> tuple[dict[int, str], str]:
 
 
 def validate(match: Match, awards: Mapping[int, str]) -> None:
-    on_roster = set(roster(match).values_list("player_id", flat=True))
+    on_roster = set(match.participants.roster().values_list("player_id", flat=True))
     if any(player_id not in on_roster for player_id in awards):
         raise InvalidAction("Awards can only go to players on the match's final roster.")
     kinds = list(awards.values())

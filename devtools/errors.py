@@ -43,7 +43,7 @@ class BotTimeout(ControlError):
 
 
 class BotBusy(ControlError):
-    """The bot or the scheduler kept the league tables busy, so a reset couldn't start."""
+    """The bot kept the league tables busy, so a reset couldn't start."""
 
     status = 503
     code = "busy"

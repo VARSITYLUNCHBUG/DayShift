@@ -21,12 +21,8 @@ from league.models.permissions import Area
 from league.services import alerts, penalties
 from league.services.common import (
     add_effect,
-    bump,
-    lock_match,
-    mode_of,
     now,
     render_board,
-    roster,
 )
 
 
@@ -53,13 +49,13 @@ def can_report(match: Match) -> bool:
     started = game_started_at(match)
     if match.status != Status.IN_PROGRESS or started is None:
         return False
-    window = timedelta(minutes=mode_of(match).results.early_leave_report_minutes)
+    window = timedelta(minutes=match.mode.results.early_leave_report_minutes)
     return now() <= started + window
 
 
 @transaction.atomic
 def report(match_id: int, captain: Player, leaver_id: int) -> EarlyLeave:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.IN_PROGRESS:
         raise StaleAction("The game isn't on.")
     _captain(match, captain)
@@ -67,10 +63,12 @@ def report(match_id: int, captain: Player, leaver_id: int) -> EarlyLeave:
         raise InvalidAction("It's too late to report an early leave. Ask staff if it matters.")
     if pending(match) is not None:
         raise InvalidAction("An early leave is already waiting for an answer.")
-    leaver = roster(match).filter(player_id=leaver_id).select_related("player").first()
+    leaver = (
+        match.participants.roster().filter(player_id=leaver_id).select_related("player").first()
+    )
     if leaver is None:
         raise InvalidAction("That player isn't in this match.")
-    results = mode_of(match).results
+    results = match.mode.results
     claim = EarlyLeave.objects.create(
         match=match,
         leaver=leaver.player,
@@ -96,14 +94,14 @@ def report(match_id: int, captain: Player, leaver_id: int) -> EarlyLeave:
             },
             match=match,
         )
-    bump(match)
+    match.bump()
     render_board(match)
     return claim
 
 
 @transaction.atomic
 def answer(match_id: int, captain: Player, agree: bool) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     claim = pending(match)
     if claim is None or match.status != Status.IN_PROGRESS:
         raise StaleAction("There's no early leave to answer.")
@@ -122,20 +120,20 @@ def answer(match_id: int, captain: Player, agree: bool) -> None:
         "`/match early_leave` voids the match.",
         match=match,
     )
-    bump(match)
+    match.bump()
     render_board(match)
 
 
 @transaction.atomic
 def staff_void(match_id: int, leaver: Player, actor: Player | None) -> None:
     """Staff deciding it was an early leave, with or without a pending report."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status not in {Status.IN_PROGRESS, Status.AWAITING_CONFIRMATION, Status.DISPUTED}:
         raise InvalidAction(
             "Only a match that's being played or waiting for its result can be voided for an "
             "early leave."
         )
-    if not roster(match).filter(player=leaver).exists():
+    if not match.participants.roster().filter(player=leaver).exists():
         raise InvalidAction(f"{leaver.display_name} isn't in this match.")
     claim = pending(match) or EarlyLeave.objects.create(
         match=match,
@@ -184,7 +182,7 @@ def tick(moment: datetime) -> int:
     for claim_id in due.values_list("pk", flat=True):
         with transaction.atomic():
             claim = EarlyLeave.objects.select_related("leaver").get(pk=claim_id)
-            match = lock_match(claim.match_id)
+            match = Match.objects.lock(claim.match_id)
             claim.refresh_from_db()
             if claim.status != EarlyLeaveStatus.PENDING:
                 continue
@@ -197,7 +195,7 @@ def tick(moment: datetime) -> int:
                 "answer. `/match early_leave` voids the match.",
                 match=match,
             )
-            bump(match)
+            match.bump()
             render_board(match)
             fired += 1
     return fired

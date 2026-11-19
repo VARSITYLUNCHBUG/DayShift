@@ -21,13 +21,9 @@ from league.services.common import (
     add_effect,
     close_subs,
     lock_community,
-    lock_match,
-    mode_of,
     now,
     render_board,
     render_queue,
-    roster,
-    save_transition,
     seconds_from_now,
     transition,
 )
@@ -137,7 +133,7 @@ def submit_report(
     awards: dict[int, str] | None = None,
 ) -> str:
     """Record a captain's report and return the match's new status."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status not in {Status.IN_PROGRESS, Status.AWAITING_CONFIRMATION}:
         raise StaleAction("This match isn't waiting for a result.")
     if winner not in {"A", "B"}:
@@ -157,7 +153,7 @@ def submit_report(
             deadlock_match_id=deadlock_match_id,
         )
         _record_report_awards(match, captain, awards)
-        mode = mode_of(match)
+        mode = match.mode
         transition(
             match,
             Status.AWAITING_CONFIRMATION,
@@ -165,7 +161,7 @@ def submit_report(
             actor=captain,
             deadline_at=seconds_from_now(mode.results.confirm_window_seconds),
         )
-        save_transition(match)
+        match.save_transition()
         other = (
             match.participants.filter(is_captain=True, is_active=True)
             .exclude(player=captain)
@@ -221,7 +217,7 @@ def submit_report(
 
 @transaction.atomic
 def confirm(match_id: int, captain: Player) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.AWAITING_CONFIRMATION:
         raise StaleAction("There's nothing to confirm.")
     _captain_team(match, captain)
@@ -236,7 +232,7 @@ def confirm(match_id: int, captain: Player) -> None:
 
 @transaction.atomic
 def dispute(match_id: int, captain: Player, note: str) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.AWAITING_CONFIRMATION:
         raise StaleAction("There's nothing to dispute.")
     _captain_team(match, captain)
@@ -255,14 +251,14 @@ def _dispute(match: Match, actor: Player | None, reason: str) -> None:
         actor=actor,
         deadline_at=seconds_from_now(STAFF_REPING_SECONDS),
     )
-    save_transition(match)
+    match.save_transition()
     alerts.raise_alert(match.community, AlertKind.DISPUTE, Area.DISPUTES, reason, match=match)
     render_board(match)
 
 
 @transaction.atomic
 def resolve_dispute(match_id: int, outcome: str, actor: Player | None, reason: str = "") -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.DISPUTED:
         raise StaleAction("That match isn't disputed any more.")
     if outcome == "void":
@@ -297,7 +293,7 @@ def _finalise(
 ) -> None:
     """Result, ledger and projections commit together. Discord effects follow the commit."""
     community = lock_community(match.community_id)  # Keeps ledger order equal to `ended_at` order.
-    on_roster = list(roster(match).values_list("player_id", flat=True))
+    on_roster = list(match.participants.roster().values_list("player_id", flat=True))
     strikes_before = standing.standings(community, on_roster)
     moment = now()
     revision = next_revision(match)
@@ -313,7 +309,7 @@ def _finalise(
     match.winner = outcome
     match.ended_at = moment
     transition(match, Status.COMPLETED, source=source, actor=actor)
-    save_transition(match, "winner", "ended_at")
+    match.save_transition("winner", "ended_at")
     ratings.apply_live_result(match, outcome, revision)
     interim.rebuild_if_enabled(match.season)
     leaderboards.request(community)

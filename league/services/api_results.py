@@ -31,7 +31,7 @@ from league.models.api import CheckStatus
 from league.models.permissions import Area
 from league.models.scoreboards import AwardSource
 from league.services import alerts, runtime, steam
-from league.services.common import add_effect, lock_match, now, roster
+from league.services.common import add_effect, now
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,18 @@ def schedule(match: Match, attempt: int = 1) -> bool:
         run_after=now() + timedelta(minutes=BACKOFF_MINUTES[attempt - 1]),
     )
     return True
+
+
+@transaction.atomic
+def correct_deadlock_match_id(match_id: int, deadlock_match_id: int) -> None:
+    """Staff set or correct a match's Deadlock ID (/deadlock check), and check it at once. This is
+    the one place an ID that is already set gets replaced."""
+    match = Match.objects.lock(match_id)
+    if match.deadlock_match_id not in (None, deadlock_match_id):
+        match.deadlock_match_id = None
+        match.save(update_fields=["deadlock_match_id"])
+    if not set_deadlock_match_id(match, deadlock_match_id):
+        schedule(match, attempt=match.api_checks.count() + 1)
 
 
 def set_deadlock_match_id(match: Match, deadlock_match_id: int) -> bool:
@@ -150,7 +162,7 @@ def _next_attempt(match: Match) -> int:
 def record_miss(match_id: int, deadlock_match_id: int, status: str, http_status: int | None,
                 reason: str) -> ApiMatchCheck:  # fmt: skip
     """Not in deadlock-api yet, or the request failed: note it and try again later."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     attempt = _next_attempt(match)
     check = ApiMatchCheck.objects.create(
         match=match,
@@ -170,7 +182,7 @@ def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any])
     """Compare deadlock-api's match with ours, store the comparison, and act on it."""
     from league.services import corrections, results
 
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     summary = summarise(data)
     letters = _team_letters(match)
     api_players = {p["account_id"]: p for p in summary["players"]}
@@ -178,7 +190,7 @@ def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any])
         letters.get(summary["winning_team"], "") if summary["winning_team"] is not None else ""
     )
 
-    rows = list(roster(match).select_related("player"))
+    rows = list(match.participants.roster().select_related("player"))
     linked = {row.player.steam_account_id: row for row in rows if row.player.steam_account_id}
     wrong_team: list[int] = []
     missing: list[int] = []
@@ -254,9 +266,8 @@ def _note_abandons(
 ) -> None:
     """Linked players deadlock-api shows abandoning the match are marked as having left early.
     An abandon inside the early-leave window is put to staff, who can void it."""
-    from league.services.common import mode_of
 
-    window = mode_of(match).results.early_leave_minutes * 60
+    window = match.mode.results.early_leave_minutes * 60
     for account_id, row in linked.items():
         abandoned = int(api_players.get(int(account_id), {}).get("abandoned_s") or 0)
         if abandoned <= 0:
@@ -312,7 +323,7 @@ def api_stat_lines(match: Match) -> dict[int, str]:
     by_account = {p["account_id"]: p for p in check.summary.get("players", [])}
     lines = {}
     accounts = dict(
-        Player.objects.filter(pk__in=roster(match).values("player_id"))
+        Player.objects.filter(pk__in=match.participants.roster().values("player_id"))
         .exclude(steam_account_id__isnull=True)
         .values_list("pk", "steam_account_id")
     )

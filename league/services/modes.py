@@ -56,12 +56,16 @@ def load_yaml(path: Path) -> dict[str, object]:
 
 @transaction.atomic
 def activate(community_id: int, version_id: int) -> DraftModeVersion:
-    """New lobbies use this version. Live matches keep the version they pinned at creation."""
+    """New lobbies use this version, and the queue panel shows it. Live matches keep the
+    version they pinned at creation."""
+    from league.services.common import render_queue
+
     version = DraftModeVersion.objects.get(pk=version_id)
     validate_body(version.body)
     community = Community.objects.select_for_update().get(pk=community_id)
     community.active_mode = version
     community.save(update_fields=["active_mode"])
+    render_queue(community)
     return version
 
 

@@ -26,19 +26,11 @@ from league.domain.mode_schema import DraftMode
 from league.models import Champion, DraftAction, Match, Player
 from league.models.matches import MatchKind, Source
 from league.services.common import (
-    active_participants,
     add_effect,
-    bump,
-    captain_of,
     clear_notices,
-    lock_match,
-    mode_of,
     now,
     render_board,
-    require_not_on_hold,
-    save_transition,
     seconds_from_now,
-    strength_of,
     transition,
 )
 
@@ -94,14 +86,14 @@ def _record(
 
 def _undrafted(match: Match) -> list[DraftablePlayer]:
     players = []
-    for participant in active_participants(match).filter(team=""):
-        strength = strength_of(match.season, participant.player_id)
+    for participant in match.participants.active().filter(team=""):
+        strength = match.season.strength_of(participant.player_id)
         players.append(DraftablePlayer(participant.player_id, strength))
     return players
 
 
 def _assign_player(match: Match, step: PlanStep, team: str, player_id: int) -> None:
-    participant = active_participants(match).filter(player_id=player_id, team="").first()
+    participant = match.participants.active().filter(player_id=player_id, team="").first()
     if participant is None:
         raise InvalidAction(copy.PLAYER_TAKEN)
     participant.team = team
@@ -110,7 +102,7 @@ def _assign_player(match: Match, step: PlanStep, team: str, player_id: int) -> N
 
 
 def _require_acting_captain(match: Match, step: PlanStep, team: str, player: Player) -> None:
-    if captain_of(match, team).player_id != player.pk:
+    if match.captain_of(team).player_id != player.pk:
         raise NotAllowed(copy.not_your_turn(step.action))
 
 
@@ -125,11 +117,11 @@ def pick_player(
     target_player_id: int,
     interaction_id: int | None = None,
 ) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.PLAYER_DRAFT:
         raise StaleAction("The player draft has finished.")
-    require_not_on_hold(match)
-    mode = mode_of(match)
+    match.require_not_on_hold()
+    mode = match.mode
     step = _current_step(match, mode, step_index)
     team = _acting_team(match, step)
     _require_acting_captain(match, step, team, captain)
@@ -168,12 +160,12 @@ def _advance_player_draft(match: Match, mode: DraftMode) -> None:
         _advance_player_draft(match, mode)
         return
     match.deadline_at = seconds_from_now(mode.player_draft.seconds)
-    bump(match, "step_index", "deadline_at")
+    match.bump("step_index", "deadline_at")
     render_board(match)
 
 
 def on_player_draft_timeout(match: Match) -> None:
-    mode = mode_of(match)
+    mode = match.mode
     step = _current_step(match, mode, None)
     team = _acting_team(match, step)
     target = auto_player_pick(
@@ -202,13 +194,13 @@ def begin_coinflip(match: Match, mode: DraftMode) -> None:
         source=Source.SYSTEM,
         deadline_at=seconds_from_now(mode.champion_draft.coinflip_seconds),
     )
-    save_transition(
-        match, "step_index", "coinflip_winner", "coinflip_winner_choice", "coinflip_loser_choice"
+    match.save_transition(
+        "step_index", "coinflip_winner", "coinflip_winner_choice", "coinflip_loser_choice"
     )
     add_effect(
         match.community, "create_team_voice", match=match, dedupe_key=f"team_voice:{match.pk}"
     )
-    winner = captain_of(match, match.coinflip_winner).player
+    winner = match.captain_of(match.coinflip_winner).player
     add_effect(
         match.community,
         "ping",
@@ -231,12 +223,12 @@ def coinflip_turn(match: Match) -> tuple[str, str]:
 
 @transaction.atomic
 def choose_coinflip(match_id: int, captain: Player, choice: str) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.COINFLIP:
         raise StaleAction("The coinflip choices are already made.")
-    require_not_on_hold(match)
+    match.require_not_on_hold()
     team, who = coinflip_turn(match)
-    if captain_of(match, team).player_id != captain.pk:
+    if match.captain_of(team).player_id != captain.pk:
         raise NotAllowed(copy.coinflip_only(who))
     ranked = match.kind != MatchKind.SCRIM
     if choice not in coinflip_options(match.coinflip_winner_choice, ranked=ranked):
@@ -252,7 +244,7 @@ def on_coinflip_timeout(match: Match) -> None:
 
 
 def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | None) -> None:
-    mode = mode_of(match)
+    mode = match.mode
     if match.kind != MatchKind.SCRIM:
         # Ranked: the winner's side sets the sides, and the Hidden King bans and picks first.
         match.coinflip_winner_choice = choice
@@ -264,7 +256,7 @@ def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | 
     if not match.coinflip_winner_choice:
         # As in Bebot: no turn timer, only the scrim's idle one.
         match.coinflip_winner_choice = choice
-        bump(match, "coinflip_winner_choice")
+        match.bump("coinflip_winner_choice")
         render_board(match)
         return
     match.coinflip_loser_choice = choice
@@ -281,7 +273,7 @@ def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | 
         actor=actor,
         deadline_at=seconds_from_now(IDLE_SECONDS),
     )
-    save_transition(match, "champion_first_pick", "hidden_king_team", "coinflip_loser_choice")
+    match.save_transition("champion_first_pick", "hidden_king_team", "coinflip_loser_choice")
     render_board(match)
 
 
@@ -297,8 +289,7 @@ def begin_champion_draft(
         actor=actor,
         deadline_at=seconds_from_now(step.seconds),
     )
-    save_transition(
-        match,
+    match.save_transition(
         "champion_first_pick",
         "hidden_king_team",
         "coinflip_winner_choice",
@@ -306,7 +297,7 @@ def begin_champion_draft(
         "step_index",
     )
     if match.kind == MatchKind.RANKED:  # A scrim's channel is public: no notices there.
-        first = captain_of(match, match.champion_first_pick).player
+        first = match.captain_of(match.champion_first_pick).player
         add_effect(
             match.community,
             "ping",
@@ -340,11 +331,11 @@ def choose_champion(
     champion_id: int,
     interaction_id: int | None = None,
 ) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.CHAMPION_DRAFT:
         raise StaleAction("The champion draft has finished.")
-    require_not_on_hold(match)
-    mode = mode_of(match)
+    match.require_not_on_hold()
+    mode = match.mode
     step = _current_step(match, mode, step_index)
     team = _acting_team(match, step)
     _require_acting_captain(match, step, team, captain)
@@ -371,11 +362,11 @@ def choose_random_champion(
     interaction_id: int | None = None,
 ) -> int:
     """The Random button: the acting captain takes a random available champion. Returns it."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.CHAMPION_DRAFT:
         raise StaleAction("The champion draft has finished.")
-    require_not_on_hold(match)
-    mode = mode_of(match)
+    match.require_not_on_hold()
+    mode = match.mode
     step = _current_step(match, mode, step_index)
     team = _acting_team(match, step)
     _require_acting_captain(match, step, team, captain)
@@ -395,7 +386,7 @@ def choose_random_champion(
 
 
 def on_champion_draft_timeout(match: Match) -> None:
-    mode = mode_of(match)
+    mode = match.mode
     step = _current_step(match, mode, None)
     team = _acting_team(match, step)
     champion = auto_champion(available_champions(match), match.rng_seed, step.index)
@@ -415,7 +406,7 @@ def _advance_champion_draft(match: Match, mode: DraftMode) -> None:
         begin_lobby_code(match, mode)
         return
     match.deadline_at = seconds_from_now(plan[match.step_index].seconds)
-    bump(match, "step_index", "deadline_at")
+    match.bump("step_index", "deadline_at")
     render_board(match)
 
 
@@ -424,7 +415,7 @@ def _advance_champion_draft(match: Match, mode: DraftMode) -> None:
 
 def begin_lobby_code(match: Match, mode: DraftMode) -> None:
     team = seeded_rng(match.rng_seed, "lobby-host").choice(["A", "B"])
-    host = captain_of(match, team)
+    host = match.captain_of(team)
     match.lobby_code_host = host.player
     match.lobby_code_attempts = 1
     transition(
@@ -433,7 +424,7 @@ def begin_lobby_code(match: Match, mode: DraftMode) -> None:
         source=Source.SYSTEM,
         deadline_at=seconds_from_now(mode.lobby_code.seconds),
     )
-    save_transition(match, "lobby_code_host", "lobby_code_attempts", "step_index")
+    match.save_transition("lobby_code_host", "lobby_code_attempts", "step_index")
     # deadlock-api's bot always makes the lobby. Only if that fails is the host asked for a code.
     add_effect(
         match.community,
@@ -464,7 +455,7 @@ API_LOBBY_MINUTES = 15
 def accept_api_lobby(match_id: int, party_id: str, party_code: str) -> bool:
     """deadlock-api made the lobby: post its code and start the game. False if a captain got
     there first, or the match moved on."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.LOBBY_CODE or match.held_seconds is not None:
         return False
     if match.api_lobby_failed:
@@ -478,7 +469,7 @@ def accept_api_lobby(match_id: int, party_id: str, party_code: str) -> bool:
 @transaction.atomic
 def api_lobby_failed(match_id: int, reason: str) -> None:
     """Lobby creation didn't work: the host makes one by hand."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.LOBBY_CODE or match.api_lobby_failed:
         return
     logger.warning("API lobby failed", extra={"match": match.pk, "reason": reason[:200]})
@@ -487,14 +478,14 @@ def api_lobby_failed(match_id: int, reason: str) -> None:
 
 def _fall_back_to_code(match: Match) -> None:
     """The host now needs a code, and gets the full time to make the lobby and enter it."""
-    seconds = mode_of(match).lobby_code.seconds
+    seconds = match.mode.lobby_code.seconds
     match.api_lobby_failed = True
     if match.held_seconds is not None:  # Paused for a sub: the time waits with the match.
         match.held_seconds = seconds
-        bump(match, "api_lobby_failed", "held_seconds")
+        match.bump("api_lobby_failed", "held_seconds")
     else:
         match.deadline_at = seconds_from_now(seconds)
-        bump(match, "api_lobby_failed", "deadline_at")
+        match.bump("api_lobby_failed", "deadline_at")
     if match.lobby_code_host is not None:
         _ping_host(match, match.lobby_code_host, "the bot couldn't make the lobby, so please ")
     render_board(match)
@@ -514,11 +505,11 @@ def check_can_start_api(match_id: int, player: Player) -> str:
 
 @transaction.atomic
 def mark_api_started(match_id: int, player: Player) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.api_started_at is not None:
         return
     match.api_started_at = now()
-    bump(match, "api_started_at")
+    match.bump("api_started_at")
     add_effect(
         match.community,
         "fetch_api_match_id",
@@ -544,7 +535,7 @@ def record_api_match_id(match_id: int, deadlock_match_id: int | None, attempt: i
     """The Deadlock match ID of a started API lobby, or another try later."""
     from league.services import api_results
 
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if deadlock_match_id is not None:
         api_results.set_deadlock_match_id(match, deadlock_match_id)
         return
@@ -563,7 +554,7 @@ def record_api_match_id(match_id: int, deadlock_match_id: int | None, attempt: i
 def on_lobby_code_timeout(match: Match) -> None:
     from league.services.lobby import void_live  # Avoids a cycle: lobby calls into the draft flow.
 
-    mode = mode_of(match)
+    mode = match.mode
     if not match.api_lobby_failed:
         # deadlock-api never answered in time: treat it as a failure, and ask the host.
         logger.warning("API lobby timed out", extra={"match": match.pk})
@@ -573,11 +564,11 @@ def on_lobby_code_timeout(match: Match) -> None:
         void_live(match, source=Source.TIMEOUT, reason="No lobby code was provided")
         return
     current_team = match.participants.get(player=match.lobby_code_host).team
-    other = captain_of(match, "B" if current_team == "A" else "A")
+    other = match.captain_of("B" if current_team == "A" else "A")
     match.lobby_code_host = other.player
     match.lobby_code_attempts = 2
     match.deadline_at = seconds_from_now(mode.lobby_code.seconds)
-    bump(match, "lobby_code_host", "lobby_code_attempts", "deadline_at")
+    match.bump("lobby_code_host", "lobby_code_attempts", "deadline_at")
     clear_notices(match)  # The first host's prompt no longer applies.
     _ping_host(match, other.player)
     render_board(match)
@@ -588,7 +579,7 @@ def check_lobby_host(match_id: int, player: Player) -> None:
     match = Match.objects.filter(pk=match_id).first()
     if match is None or match.status != Status.LOBBY_CODE:
         raise StaleAction("The lobby code step has finished.")
-    require_not_on_hold(match)
+    match.require_not_on_hold()
     _require_code_wanted(match, player)
 
 
@@ -604,10 +595,10 @@ API_LOBBY_PENDING = "The bot is creating the lobby. If it can't, the host is ask
 
 @transaction.atomic
 def submit_lobby_code(match_id: int, player: Player, code: str) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.LOBBY_CODE:
         raise StaleAction("The lobby code step has finished.")
-    require_not_on_hold(match)
+    match.require_not_on_hold()
     _require_code_wanted(match, player)
     cleaned = code.strip()
     if not LOBBY_CODE_PATTERN.match(cleaned):
@@ -617,7 +608,7 @@ def submit_lobby_code(match_id: int, player: Player, code: str) -> None:
 
 def _start_game(match: Match, code: str, *, source: str, actor: Player | None) -> None:
     """The lobby exists: post its code and start the result clock."""
-    mode = mode_of(match)
+    mode = match.mode
     match.lobby_code = code
     match.started_at = now()
     transition(
@@ -627,7 +618,7 @@ def _start_game(match: Match, code: str, *, source: str, actor: Player | None) -
         actor=actor,
         deadline_at=seconds_from_now(mode.results.staff_escalation_minutes * 60),
     )
-    save_transition(match, "lobby_code", "started_at", "api_party_id", "api_lobby_created_at")
+    match.save_transition("lobby_code", "started_at", "api_party_id", "api_lobby_created_at")
     add_effect(match.community, "announce_lobby_code", match=match)
     add_effect(
         match.community,

@@ -11,6 +11,13 @@ devtools model). They load in file name order:
 | `20_season.json` | Season 1, open |
 | `30_players.json` | 14 players, pks 1 to 14 |
 | `40_dev_profiles.json` | Each player's dev profile: the rating `dev_seed` gives them (1600 down to 400), and some champion preferences and bans the autopilot follows |
+| `50_pings.json` | A `staff` ping in the simulator's #general that mentions the Staff role, at most every 15 minutes |
+
+**Every model needs rows here.** `manage.py check_fixtures` (a pre-commit hook, and
+`tests/test_fixtures.py`) fails for a model with none, unless
+`league/management/commands/check_fixtures.py` lists it in `EXEMPT` with where its rows come from
+instead: the presets, the ledger, or matches being played. A new model that is configuration, or
+that the dev stack needs from its first click, gets a file here.
 
 The IDs match the Discord simulator's seeded world: the guild is `1100000000000000001`, the
 Staff role `1100000000000000004`, and the players are `1100000000000000100` to

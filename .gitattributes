@@ -1,14 +1,15 @@
 # Line endings that must hold on every checkout, whatever core.autocrlf says. Everything that a
-# Linux container, a Linux server or a POSIX shell reads stays LF: one CR at a line's end breaks
-# a shebang, a heredoc, an nginx or pgbouncer directive, or an Ansible template rendered on the
-# host. Batch files for cmd.exe stay CRLF. Everything else follows the checkout's own settings.
+# Linux container, a Linux server, make or a POSIX shell reads stays LF: one CR at a line's end
+# breaks a shebang, a heredoc, a Makefile recipe, a Caddyfile directive, or an Ansible template
+# rendered on the host. Everything else follows the checkout's own settings.
 
 # Whole trees that only ever run on Linux. text=auto still leaves binaries alone.
 deploy/** text=auto eol=lf
 infra/** text=auto eol=lf
 .github/** text=auto eol=lf
 
-# Shell scripts, and the templates Ansible renders into them and into configs.
+# The Makefile, shell scripts, and the templates Ansible renders.
+Makefile text eol=lf
 *.sh text eol=lf
 *.j2 text eol=lf
 # Run by its shebang as well as by `python manage.py`.
@@ -16,21 +17,16 @@ manage.py text eol=lf
 
 # Container builds.
 Dockerfile text eol=lf
-*.Dockerfile text eol=lf
 .dockerignore text eol=lf
-*.dockerignore text eol=lf
+Caddyfile text eol=lf
 
-# Configs mounted into containers: nginx, pgbouncer, Prometheus, compose and the rest.
+# Configs mounted into containers, compose files and the rest.
 *.conf text eol=lf
-*.ini text eol=lf
-*.template text eol=lf
-*.pem text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
 
-# Batch files for cmd.exe.
-*.bat text eol=crlf
-*.cmd text eol=crlf
+# PowerShell, for Windows.
+*.ps1 text eol=crlf
 
 # Binaries: never converted or diffed as text.
 *.png binary

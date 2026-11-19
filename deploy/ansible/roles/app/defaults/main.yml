@@ -1,60 +1,40 @@
 ---
-app_root: "{{ draftbot_root }}"
-app_domain: "{{ draftbot_domain }}"
-app_image_tag: "{{ draftbot_image_tag }}"
-# Another image than the one compose.prod.yaml names (a private fork's, say), without a tag.
-# Empty runs ghcr.io/varsitylunchbug/dl-mm-discord.
-app_image: ""
-# `missing` pulls only images the server doesn't have, which is right for a pinned sha- tag and
-# keeps site.yml from reporting a change every run. deploy.yml uses `always`, which also fetches
-# a moved tag such as `latest`.
-app_pull_policy: missing
-# For a private image's registry. Empty pulls anonymously.
-app_registry: ghcr.io
-app_registry_username: ""
-app_registry_password: ""
+# The compose project: where it lives, which image it runs, and its .env.
+draftbot_root: /opt/draftbot
+draftbot_domain: ""
+draftbot_image_tag: ""
+# Another image than ghcr.io/varsitylunchbug/dl-mm-discord (a private fork's, say), without a tag.
+draftbot_image: ""
+# For a private image: the registry and a user whose token (vault_registry_password) can read it.
+draftbot_registry: ghcr.io
+draftbot_registry_username: ""
+# `missing` pulls only images the server doesn't have yet (right for a pinned sha- tag, so site.yml
+# changes nothing on a second run). deploy.yml uses `always`, which also fetches a moved tag.
+draftbot_pull: missing
+# After starting, check https://<domain>/readyz answers from the controller. Off for a test server
+# whose name only resolves on the server itself.
+draftbot_check_https: true
+# A test server whose name Let's Encrypt can't reach (a .test domain, say): Caddy signs the
+# certificate with its own CA instead.
+draftbot_tls_internal: false
 
-# The compose files, from the checkout you run Ansible from.
-app_repo_root: "{{ role_path }}/../../../.."
-# Your own overrides (resource limits, say), on the controller. Applied last, in this order.
-app_compose_extra_files: []
+draftbot_discord_guild_id: ""
+draftbot_error_log_channel_id: ""
+draftbot_admin_cidrs: []
+draftbot_log_level: INFO
+# Anything else for .env, as KEY: value.
+draftbot_env_extra: {}
 
-# Prometheus, Grafana and the exporters (compose.observability.yaml). Their own secrets belong to
-# roles/observability; only the exporters' database password goes in .env.
-app_observability: "{{ draftbot_observability | default(true) }}"
-# The exporters' read-only database role, draftbot_monitor: letters and digits, 16 or more.
-# Required with observability.
-app_db_monitor_password: ""
-# Grafana through the edge at this name, too (compose.grafana.yaml). Empty keeps it on
-# 127.0.0.1 only.
-app_grafana_domain: "{{ draftbot_grafana_domain | default('') }}"
+# Nightly pg_dump to /var/backups/draftbot, kept this many days.
+draftbot_backup_keep_days: 14
+draftbot_backup_on_calendar: "*-*-* 03:30:00"
 
-# .env, from the inventory and the vault.
-app_discord_token: ""
-app_discord_guild_id: ""
-app_discord_client_id: ""
-app_discord_client_secret: ""
-app_django_secret_key: ""
-app_postgres_password: ""
-# draftbot_app's: the login web, bot and scheduler use, which reads and writes the tables and
-# nothing more. The migrate job keeps the superuser (app_postgres_password) to itself.
-app_db_app_password: ""
-app_deadlock_api_key: ""
-app_steam_web_api_key: ""
-app_error_log_channel_id: ""
-app_log_level: INFO
-app_env_extra: {}
-
-# Started one at a time after the migrate job, each healthy before the next. The edge and
-# observability roles start the rest.
-app_services:
-  - pgbouncer
-  - web
-  - scheduler
-  - bot
-app_wait_timeout: 300
-# Run the migrate job even if this image has migrated the database before.
-app_force_migrate: false
-
-# The systemd unit that starts the compose project at boot.
-app_systemd_unit: draftbot
+# The secrets, from vault.yml.
+draftbot_discord_token: "{{ vault_discord_token }}"
+draftbot_django_secret_key: "{{ vault_django_secret_key }}"
+draftbot_postgres_password: "{{ vault_postgres_password }}"
+draftbot_alert_webhook_url: "{{ vault_alert_webhook_url | default('') }}"
+draftbot_healthcheck_ping_url: "{{ vault_healthcheck_ping_url | default('') }}"
+draftbot_deadlock_api_key: "{{ vault_deadlock_api_key | default('') }}"
+draftbot_steam_web_api_key: "{{ vault_steam_web_api_key | default('') }}"
+draftbot_registry_password: "{{ vault_registry_password | default('') }}"

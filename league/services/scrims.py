@@ -22,20 +22,15 @@ from league.domain.draft_plan import champion_plan, player_draft_length, team_fo
 from league.domain.engine import SCRIM_LIVE, SIDE_LABELS, Status, seeded_rng
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import parse_mode
-from league.models import Champion, Community, Match, MatchParticipant, OutboxEffect, Player
+from league.models import Champion, Community, Match, MatchParticipant, OutboxEffect, Player, Season
 from league.models.matches import MatchKind, ResourceKind, Source
 from league.models.outbox import EffectStatus
 from league.services import champions, draft
 from league.services.common import (
     add_effect,
-    bump,
     lock_community,
-    lock_match,
-    mode_of,
     now,
-    open_season,
     render_board,
-    save_transition,
     transition,
 )
 
@@ -65,7 +60,7 @@ def is_host_channel(channel_id: int) -> bool:
 
 
 def _lock_scrim(match_id: int) -> Match:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.kind != MatchKind.SCRIM:
         raise StaleAction("That isn't a scrim.")
     return match
@@ -103,7 +98,7 @@ def _create(
         with transaction.atomic():
             match = Match.objects.create(
                 community=community,
-                season=open_season(community),
+                season=Season.objects.open_for(community),
                 mode_version=mode_version,
                 kind=MatchKind.SCRIM,
                 status=status,
@@ -203,7 +198,7 @@ def claim_captain(match_id: int, player: Player, side: str) -> str:
     if len(captains) + 1 == 2:
         _begin(match, source=Source.USER, actor=player)
     else:
-        bump(match)
+        match.bump()
         render_board(match)
     return label
 
@@ -220,7 +215,7 @@ def start_draft(match_id: int, player: Player) -> None:
 
 
 def _begin(match: Match, *, source: str, actor: Player | None) -> None:
-    draft.begin_champion_draft(match, mode_of(match), source=source, actor=actor)
+    draft.begin_champion_draft(match, match.mode, source=source, actor=actor)
 
 
 # --- Timers, the end and stopping ------------------------------------------------------------
@@ -243,7 +238,7 @@ def finish(match: Match) -> None:
 def _end(match: Match, status: str, *, source: str, actor: Player | None = None) -> None:
     transition(match, status, source=source, actor=actor, deadline_at=None)
     match.ended_at = now()
-    save_transition(match, "ended_at", "step_index")
+    match.save_transition("ended_at", "step_index")
     if status == Status.VOIDED:
         # Bebot removed a stopped draft. This runs in the match's lane after any render in
         # flight, and reads the message IDs then, so a message that render posts goes too.
@@ -268,7 +263,7 @@ def stop(channel_id: int, actor: Player) -> None:
 def close_gone(match_id: int) -> None:
     """The scrim can't be shown (its channel is gone, or refused the bot): free the channel
     rather than leave it blocked."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.kind == MatchKind.SCRIM and match.status in SCRIM_LIVE:
         _end(match, Status.VOIDED, source=Source.SYSTEM)
         logger.info("Scrim closed: its board is gone", extra={"match": match.pk})

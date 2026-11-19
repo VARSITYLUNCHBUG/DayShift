@@ -17,7 +17,6 @@ from league.models import Match, Player
 from league.models.permissions import Area
 from league.services import awards, early_leave, ocr, results
 from league.services.boards import team_name
-from league.services.common import captain_of, roster
 from league.services.results import ImageRef
 
 logger = logging.getLogger(__name__)
@@ -29,13 +28,17 @@ def _archive_channel_id(match_id: int) -> int | None:
 
 def _captain_names(match_id: int) -> dict[str, str]:
     match = Match.objects.get(pk=match_id)
-    return {team: captain_of(match, team).player.display_name for team in ("A", "B")}
+    return {team: match.captain_of(team).player.display_name for team in ("A", "B")}
 
 
 def _roster_options(match_id: int) -> list[tuple[int, str, str]]:
     """(player ID, name, team) for everyone on the roster, for the award pickers."""
     match = Match.objects.get(pk=match_id)
-    rows = roster(match).select_related("player").order_by("team", "player__display_name")
+    rows = (
+        match.participants.roster()
+        .select_related("player")
+        .order_by("team", "player__display_name")
+    )
     return [(row.player_id, row.player.display_name, row.team) for row in rows]
 
 
@@ -331,7 +334,7 @@ def _early_leave_picker(match_id: int, player: Player) -> discord.ui.LayoutView:
         raise InvalidAction("It's too late to report an early leave. Ask staff if it matters.")
     options = [
         SelectOption(
-            label=f"{name} ({team_name(captain_of(match, team).player.display_name)})"[:100],
+            label=f"{name} ({team_name(match.captain_of(team).player.display_name)})"[:100],
             value=str(pid),
         )
         for pid, name, team in _roster_options(match_id)

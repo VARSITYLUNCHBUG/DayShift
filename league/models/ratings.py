@@ -1,7 +1,23 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from django.db import models
 from django.db.models import Q
+
+from league.domain.errors import InvalidAction
+
+if TYPE_CHECKING:
+    from league.models.community import Community
+
+
+class SeasonQuerySet(models.QuerySet["Season"]):
+    def open_for(self, community: Community) -> Season:
+        """The community's current season. There is at most one (uniq_open_season)."""
+        season = self.filter(community=community, ended_at__isnull=True).first()
+        if season is None:
+            raise InvalidAction("No season is open. Ask staff to run /setup.")
+        return season
 
 
 class Season(models.Model):
@@ -17,6 +33,8 @@ class Season(models.Model):
     leaderboard_min_games = models.PositiveSmallIntegerField(default=10)
     started_at = models.DateTimeField()
     ended_at = models.DateTimeField(null=True, blank=True)
+
+    objects = SeasonQuerySet.as_manager()
 
     class Meta:
         db_table = "seasons"
@@ -39,6 +57,24 @@ class Season(models.Model):
         from league.domain.openskill_v1 import OpenSkillAlgo, merged_params
 
         return OpenSkillAlgo().initial(merged_params(self.rating_params)).rating
+
+    def rating_of(self, player_id: int) -> tuple[int, int]:
+        """(rating, games) for a player, falling back to the season's start rating."""
+        row = self.ratings.filter(player_id=player_id).first()
+        if row is None:
+            return self.start_rating, 0
+        return row.rating, row.games
+
+    def strength_of(self, player_id: int) -> int:
+        """What captain tie-breaks, first pick and auto-picks compare: mu, in thousandths. The
+        shown rating is deliberately conservative, so a strong player still in placement would
+        otherwise look weak."""
+        row = self.ratings.filter(player_id=player_id).first()
+        if row is not None:
+            return int(row.mu * 1000)
+        from league.domain.openskill_v1 import merged_params
+
+        return int(float(merged_params(self.rating_params)["mu"]) * 1000)
 
 
 class PlayerRating(models.Model):

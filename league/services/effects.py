@@ -356,7 +356,7 @@ def on_voice_join(discord_user_id: int, joined_channel_id: int) -> tuple[int, in
 def stale_resources() -> list[tuple[int, str, int]]:
     """Channels of finished matches whose delete effect has failed for good."""
     finished = Match.objects.filter(
-        kind=MatchKind.RANKED, status__in=("completed", "voided"), ended_at__isnull=False
+        kind=MatchKind.RANKED, status__in=(Status.COMPLETED, Status.VOIDED), ended_at__isnull=False
     )
     failed = OutboxEffect.objects.filter(
         match__in=finished,

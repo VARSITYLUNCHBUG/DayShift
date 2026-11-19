@@ -22,8 +22,9 @@ from bot.renderers.random_draft import render_random_draft
 from bot.routing import guarded, reply
 from league.domain import copy
 from league.domain.errors import InvalidAction
+from league.models import Player
 from league.models.permissions import Area
-from league.services import common, scrims
+from league.services import scrims
 
 
 def _channel_id(interaction: Interaction[Any]) -> int:
@@ -101,8 +102,8 @@ async def captains_coinflip_command(
         community = await community_of(interaction)
         await require_area(interaction, community, Area.SCRIMS)
         custom_emojis = can_post_here(interaction)
-        first = await db(common.get_or_create_player, captain1.id, _name(captain1))
-        second = await db(common.get_or_create_player, captain2.id, _name(captain2))
+        first = await db(Player.objects.from_discord, captain1.id, _name(captain1))
+        second = await db(Player.objects.from_discord, captain2.id, _name(captain2))
         await db(
             scrims.start_coinflip,
             community.pk,

@@ -7,14 +7,13 @@ from discord import Interaction
 from bot.db import db
 from league.domain.errors import InvalidAction
 from league.models import Community, Player
-from league.services import common
 from league.services import community as community_service
 
 
 async def actor(interaction: Interaction[Any]) -> Player:
     """The Player for whoever clicked. First interaction creates the row."""
     user = interaction.user
-    return await db(common.get_or_create_player, user.id, user.display_name)
+    return await db(Player.objects.from_discord, user.id, user.display_name)
 
 
 async def community_of(interaction: Interaction[Any]) -> Community:

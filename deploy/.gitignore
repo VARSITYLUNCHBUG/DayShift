@@ -1,6 +1,3 @@
-# The root .gitignore drops every backups/ folder; this one is the backups role.
-!/ansible/roles/backups/
-
 # Each client's inventory holds their server and vault: keep it in your own private repository,
 # not here. Only the example is tracked.
 /ansible/inventories/*

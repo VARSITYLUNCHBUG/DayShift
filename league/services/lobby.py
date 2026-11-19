@@ -31,6 +31,7 @@ from league.models import (
     MatchTransition,
     Player,
     QueueEntry,
+    Season,
 )
 from league.models.alerts import AlertKind
 from league.models.matches import RemovedReason, ResourceKind, Source
@@ -39,26 +40,14 @@ from league.models.permissions import Area
 from league.models.subs import SubReason
 from league.services import alerts, champions, effects, penalties, prio, runtime, standing
 from league.services.common import (
-    active_participants,
     add_effect,
-    bump,
-    captain_of,
     clear_notices,
     close_subs,
     lock_community,
-    lock_match,
-    mode_of,
     now,
-    on_hold,
-    open_season,
-    rating_of,
     render_board,
     render_queue,
-    require_not_on_hold,
-    require_participant,
-    save_transition,
     seconds_from_now,
-    strength_of,
     transition,
 )
 
@@ -79,7 +68,7 @@ def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match |
     moment = now()
     match = Match.objects.create(
         community=community,
-        season=open_season(community),
+        season=Season.objects.open_for(community),
         mode_version=community.active_mode,
         status=Status.READY_CHECK,
         deadline_at=seconds_from_now(mode.ready_check.seconds),
@@ -129,17 +118,17 @@ def _gather(match: Match, player: Player, *, sub: bool = False) -> None:
 
 @transaction.atomic
 def mark_ready(match_id: int, player: Player) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.READY_CHECK:
         raise StaleAction("The ready check has already finished.")
-    require_not_on_hold(match)
-    participant = require_participant(match, player)
+    match.require_not_on_hold()
+    participant = match.require_participant(player)
     if participant.ready_at is not None:
         raise InvalidAction(copy.ALREADY_READY)
     participant.ready_at = now()
     participant.save(update_fields=["ready_at"])
-    bump(match)
-    if active_participants(match).filter(ready_at__isnull=True).exists():
+    match.bump()
+    if match.participants.active().filter(ready_at__isnull=True).exists():
         effects.request_ready_ping(match)
         render_board(match)
     else:
@@ -152,8 +141,8 @@ def on_ready_timeout(match: Match) -> None:
     from league.services import subs
 
     community = lock_community(match.community_id)
-    mode = mode_of(match)
-    missed = list(active_participants(match).filter(ready_at__isnull=True))
+    mode = match.mode
+    missed = list(match.participants.active().filter(ready_at__isnull=True))
     if not missed:
         begin_captain_phase(match)
         return
@@ -208,22 +197,22 @@ VOTES_PER_PLAYER = 2
 
 
 def _eligibility(match: Match, player_ids: Collection[int]) -> dict[int, standing.PlayerStanding]:
-    return standing.eligibility(match.community, mode_of(match), player_ids)
+    return standing.eligibility(match.community, match.mode, player_ids)
 
 
 def begin_captain_phase(match: Match) -> None:
     """Everyone is ready: open the captain vote. With Auto Captain on (a runtime setting), or two
     or fewer players able to captain, there is nothing to vote on, so captains are appointed
     straight away: the eligible first, then by experience and rating."""
-    mode = mode_of(match)
+    mode = match.mode
     transition(
         match,
         Status.CAPTAIN_PHASE,
         source=Source.SYSTEM,
         deadline_at=seconds_from_now(mode.captains.vote_seconds),
     )
-    save_transition(match)
-    active = list(active_participants(match))
+    match.save_transition()
+    active = list(match.participants.active())
     allowed = _eligibility(match, [p.player_id for p in active])
     auto = runtime.of(match.community_id).auto_captain
     if auto or sum(row.eligibility.ok for row in allowed.values()) <= 2:
@@ -250,17 +239,17 @@ def begin_captain_phase(match: Match) -> None:
 @transaction.atomic
 def cast_captain_votes(match_id: int, player: Player, candidate_ids: Sequence[int]) -> list[Player]:
     """Replace this player's captain votes. Returns who they voted for."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.CAPTAIN_PHASE:
         raise StaleAction("The captain vote has finished.")
-    require_not_on_hold(match)
-    require_participant(match, player)
+    match.require_not_on_hold()
+    match.require_participant(player)
     chosen = list(dict.fromkeys(candidate_ids))
     if not chosen:
         raise InvalidAction("Choose at least one player.")
     if len(chosen) > VOTES_PER_PLAYER:
         raise InvalidAction(f"You can vote for up to {VOTES_PER_PLAYER} players.")
-    candidates = {p.player_id: p.player for p in active_participants(match)}
+    candidates = {p.player_id: p.player for p in match.participants.active()}
     if any(candidate_id not in candidates for candidate_id in chosen):
         raise InvalidAction("You can only vote for players in this lobby.")
     for candidate_id, row in _eligibility(match, chosen).items():
@@ -273,19 +262,19 @@ def cast_captain_votes(match_id: int, player: Player, candidate_ids: Sequence[in
         CaptainVote(match=match, voter=player, candidate_id=candidate_id, created_at=moment)
         for candidate_id in chosen
     )
-    bump(match)
+    match.bump()
     advance_captain_phase(match)
     return [candidates[candidate_id] for candidate_id in chosen]
 
 
 def _everyone_voted(match: Match) -> bool:
     voters = set(match.captain_votes.values_list("voter_id", flat=True))
-    return all(p.player_id in voters for p in active_participants(match))
+    return all(p.player_id in voters for p in match.participants.active())
 
 
 def advance_captain_phase(match: Match) -> None:
     """Close the vote once everyone still in the lobby has voted."""
-    if on_hold(match) or not _everyone_voted(match):  # A sub picks it up again on arrival.
+    if match.on_hold or not _everyone_voted(match):  # A sub picks it up again on arrival.
         render_board(match)
         return
     _close_vote(match, Source.USER)
@@ -298,7 +287,7 @@ def on_captain_timeout(match: Match) -> None:
 
 def vote_counts(match: Match) -> dict[int, int]:
     """Votes per player, counting only voters and candidates still in the lobby."""
-    active = set(active_participants(match).values_list("player_id", flat=True))
+    active = set(match.participants.active().values_list("player_id", flat=True))
     counts: dict[int, int] = {}
     for vote in match.captain_votes.filter(voter_id__in=active, candidate_id__in=active):
         counts[vote.candidate_id] = counts.get(vote.candidate_id, 0) + 1
@@ -309,12 +298,12 @@ def _candidates(match: Match, participants: Sequence[MatchParticipant]) -> list[
     allowed = _eligibility(match, [p.player_id for p in participants])
     candidates = []
     for participant in participants:
-        _rating, games = rating_of(match.season, participant.player_id)
+        _rating, games = match.season.rating_of(participant.player_id)
         row = allowed[participant.player_id]
         candidates.append(
             CaptainCandidate(
                 participant.player_id,
-                strength_of(match.season, participant.player_id),
+                match.season.strength_of(participant.player_id),
                 games,
                 eligible=row.eligibility.ok,
                 experience=row.eligibility.games,
@@ -324,7 +313,7 @@ def _candidates(match: Match, participants: Sequence[MatchParticipant]) -> list[
 
 
 def _close_vote(match: Match, source: str) -> None:
-    participants = list(active_participants(match))
+    participants = list(match.participants.active())
     counts = vote_counts(match)
     captain_a, captain_b = tally_captain_votes(
         counts, _candidates(match, participants), match.rng_seed
@@ -341,7 +330,7 @@ def _close_vote(match: Match, source: str) -> None:
 
 
 def _captains(match: Match) -> list[MatchParticipant]:
-    return list(active_participants(match).filter(is_captain=True).order_by("team"))
+    return list(match.participants.active().filter(is_captain=True).order_by("team"))
 
 
 def _ping_captains(match: Match, captains: Sequence[MatchParticipant], text: str) -> None:
@@ -358,14 +347,14 @@ CHECKIN_PING = "you're captain. Press **I'm here** on the board to start the pla
 
 def begin_captain_checkin(match: Match, source: str) -> None:
     """Captains are chosen: each confirms they're here before anyone is drafted."""
-    mode = mode_of(match)
+    mode = match.mode
     transition(
         match,
         Status.CAPTAIN_CHECKIN,
         source=source,
         deadline_at=seconds_from_now(mode.captains.checkin_seconds),
     )
-    save_transition(match)
+    match.save_transition()
     _ping_captains(match, _captains(match), CHECKIN_PING)
     render_board(match)
 
@@ -373,24 +362,24 @@ def begin_captain_checkin(match: Match, source: str) -> None:
 @transaction.atomic
 def check_in(match_id: int, player: Player) -> None:
     """A captain's I'm here."""
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status != Status.CAPTAIN_CHECKIN:
         raise StaleAction("The captain check-in has finished.")
-    require_not_on_hold(match)
-    participant = require_participant(match, player)
+    match.require_not_on_hold()
+    participant = match.require_participant(player)
     if not participant.is_captain:
         raise NotAllowed("Only the captains check in. The board shows who they are.")
     if participant.checked_in_at is not None:
         raise InvalidAction("You've already checked in. The draft starts once both captains have.")
     participant.checked_in_at = now()
     participant.save(update_fields=["checked_in_at"])
-    bump(match)
+    match.bump()
     advance_checkin(match)
 
 
 def advance_checkin(match: Match) -> None:
     """Start the player draft once every captain has checked in."""
-    if on_hold(match) or any(p.checked_in_at is None for p in _captains(match)):
+    if match.on_hold or any(p.checked_in_at is None for p in _captains(match)):
         render_board(match)
         return
     begin_player_draft(match, source=Source.USER)
@@ -399,7 +388,7 @@ def advance_checkin(match: Match) -> None:
 def on_checkin_timeout(match: Match) -> None:
     """A captain who didn't check in is replaced by the next eligible player in captain order,
     who gets the full time. With nobody left to ask, the draft starts with the captains it has."""
-    participants = list(active_participants(match))
+    participants = list(match.participants.active())
     absent = [p for p in participants if p.is_captain and p.checked_in_at is None]
     taken = {p.player_id for p in participants if p.is_captain or p.missed_checkin}
     pool = [p for p in participants if p.player_id not in taken]
@@ -422,8 +411,8 @@ def on_checkin_timeout(match: Match) -> None:
     if not replaced:
         begin_player_draft(match, source=Source.TIMEOUT)
         return
-    match.deadline_at = seconds_from_now(mode_of(match).captains.checkin_seconds)
-    bump(match, "deadline_at")
+    match.deadline_at = seconds_from_now(match.mode.captains.checkin_seconds)
+    match.bump("deadline_at")
     clear_notices(match)  # The old captains' ping no longer applies.
     for missing, heir in replaced:
         _ping_captains(
@@ -435,9 +424,9 @@ def on_checkin_timeout(match: Match) -> None:
 
 
 def begin_player_draft(match: Match, source: str) -> None:
-    mode = mode_of(match)
-    rating_a = strength_of(match.season, captain_of(match, "A").player_id)
-    rating_b = strength_of(match.season, captain_of(match, "B").player_id)
+    mode = match.mode
+    rating_a = match.season.strength_of(match.captain_of("A").player_id)
+    rating_b = match.season.strength_of(match.captain_of("B").player_id)
     match.player_first_pick = first_pick_team(rating_a, rating_b, match.rng_seed)
     match.step_index = 0
     transition(
@@ -446,7 +435,7 @@ def begin_player_draft(match: Match, source: str) -> None:
         source=source,
         deadline_at=seconds_from_now(mode.player_draft.seconds),
     )
-    save_transition(match, "player_first_pick", "step_index")
+    match.save_transition("player_first_pick", "step_index")
     render_board(match)
 
 
@@ -485,7 +474,7 @@ def void_live(
         reason=reason[:500],
         created_at=moment,
     )
-    active = list(active_participants(match))
+    active = list(match.participants.active())
     if requeue:
         places = []
         for participant in active:
@@ -505,7 +494,7 @@ def void_live(
     )
     transition(match, Status.VOIDED, source=source, actor=actor)
     match.ended_at = moment
-    save_transition(match, "ended_at")
+    match.save_transition("ended_at")
     add_effect(community, "ping_lobby", {"text": f"Match cancelled: {reason}"}, match=match)
     if cleanup:
         schedule_cleanup(match)
@@ -533,8 +522,8 @@ def restart(match: Match, *, leaving: Collection[int]) -> Match:
     from league.services import subs
 
     community = lock_community(match.community_id)
-    mode = mode_of(match)
-    stayed = [p for p in active_participants(match) if p.player_id not in leaving]
+    mode = match.mode
+    stayed = [p for p in match.participants.active() if p.player_id not in leaving]
     gone = list(Player.objects.filter(pk__in=list(leaving)))
     names = ", ".join(player.display_name for player in gone)
     void_live(
@@ -590,7 +579,7 @@ def schedule_cleanup(match: Match) -> None:
 
 @transaction.atomic
 def staff_void(match_id: int, actor: Player | None, reason: str) -> None:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status in TERMINAL:
         raise InvalidAction(
             "That match has finished. Use /match void or /match rescore to change it."
@@ -612,7 +601,7 @@ def _captaincy_heir(
     teammate with the most completed matches, then rating. None means the sub takes it: either
     they can captain, or nobody else on the team can."""
     teammates = list(
-        active_participants(match)
+        match.participants.active()
         .filter(team=leaving.team, is_captain=False)
         .exclude(pk=leaving.pk)
         .select_related("player")
@@ -625,7 +614,7 @@ def _captaincy_heir(
         return None
 
     def rank(participant: MatchParticipant) -> tuple[int, int, int]:
-        strength = strength_of(match.season, participant.player_id)
+        strength = match.season.strength_of(participant.player_id)
         return (-allowed[participant.player_id].eligibility.games, -strength, participant.player_id)
 
     return min(able, key=rank)
@@ -658,7 +647,7 @@ def swap_player(match: Match, leaving: MatchParticipant, in_player: Player, *, r
     if heir is not None:
         heir.is_captain = True
         heir.save(update_fields=["is_captain"])
-        teammates = active_participants(match).filter(team=heir.team).select_related("player")
+        teammates = match.participants.active().filter(team=heir.team).select_related("player")
         add_effect(
             community,
             "ping",
@@ -675,9 +664,9 @@ def swap_player(match: Match, leaving: MatchParticipant, in_player: Player, *, r
     ).delete()
     if match.lobby_code_host_id == leaving.player_id:
         match.lobby_code_host = in_player
-        bump(match, "lobby_code_host")
+        match.bump("lobby_code_host")
     else:
-        bump(match)
+        match.bump()
     add_effect(
         community, "remove_player", {"discord_user_id": leaving.player.discord_user_id}, match=match
     )
@@ -696,7 +685,7 @@ def substitute_live(
     """Staff swap a player in a live match. The substitute takes their team, role and the result."""
     from league.services import subs  # Avoids a cycle: subs builds on this module.
 
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     if match.status not in LIVE:
         raise InvalidAction("That match isn't live.")
     leaving = match.participants.filter(player=out_player, is_active=True).first()
@@ -710,7 +699,7 @@ def substitute_live(
 def fail_lobby_setup(match_id: int, reason: str) -> None:
     """Discord refused to create the lobby for good: cancel and put players back in line."""
     with transaction.atomic():
-        match = lock_match(match_id)
+        match = Match.objects.lock(match_id)
         if match.status in LIVE:
             match.participants.filter(is_active=True, ready_at__isnull=True).update(ready_at=now())
             void_live(match, source=Source.SYSTEM, reason=reason, requeue=True)

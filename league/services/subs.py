@@ -47,15 +47,9 @@ from league.models.subs import (
 )
 from league.services import lobby, penalties
 from league.services.common import (
-    active_participants,
     add_effect,
-    bump,
-    get_or_create_player,
-    lock_match,
-    mode_of,
     now,
     render_board,
-    require_participant,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,14 +105,14 @@ def _ping(match: Match, user_ids: list[int], text: str) -> None:
 
 
 def _captains(match: Match) -> list[MatchParticipant]:
-    return list(active_participants(match).filter(is_captain=True))
+    return list(match.participants.active().filter(is_captain=True))
 
 
 def _lock_request(request_id: int) -> tuple[Match, SubRequest]:
     request = SubRequest.objects.filter(pk=request_id).first()
     if request is None:
         raise StaleAction("That sub request no longer exists.")
-    match = lock_match(request.match_id)
+    match = Match.objects.lock(request.match_id)
     request.refresh_from_db()
     return match, request
 
@@ -146,13 +140,13 @@ def sub_out_options(match_id: int, player: Player) -> SubOutOptions:
     if match is None:
         raise StaleAction("That match no longer exists.")
     _require_subbable(match)
-    me = require_participant(match, player)
+    me = match.require_participant(player)
     choices = []
     if not _unresolved(match, player.pk):
         choices.append(SubOutChoice(player.pk, player.display_name, True))
     if me.is_captain and match.status != Status.READY_CHECK:
         others = (
-            active_participants(match)
+            match.participants.active()
             .filter(is_captain=False)
             .filter(Q(team=me.team) | Q(team=""))
             .order_by("id")
@@ -168,17 +162,17 @@ def sub_out_options(match_id: int, player: Player) -> SubOutOptions:
 
 @transaction.atomic
 def request_sub_out(match_id: int, requester: Player, leaving_player_id: int) -> SubRequest:
-    match = lock_match(match_id)
+    match = Match.objects.lock(match_id)
     _require_subbable(match)
-    me = require_participant(match, requester)
-    leaving = active_participants(match).filter(player_id=leaving_player_id).first()
+    me = match.require_participant(requester)
+    leaving = match.participants.active().filter(player_id=leaving_player_id).first()
     if leaving is None:
         raise InvalidAction("That player isn't in this match.")
     if _unresolved(match, leaving_player_id):
         raise InvalidAction(f"There's already a sub request for {leaving.player.display_name}.")
     if match.sub_requests.filter(status__in=UNRESOLVED).count() >= MAX_PENDING:
         raise InvalidAction("Too many subs are pending. Wait for one to finish, or ask staff.")
-    mode = mode_of(match)
+    mode = match.mode
     moment = now()
     if leaving_player_id == requester.pk:
         request = SubRequest.objects.create(
@@ -225,11 +219,11 @@ def answer_sub_out(request_id: int, player: Player, approve: bool) -> None:
     if request.status != SubStatus.AWAITING_APPROVAL:
         raise StaleAction("That request has already been answered.")
     _require_subbable(match)
-    me = require_participant(match, player)
+    me = match.require_participant(player)
     if not me.is_captain or player.pk == request.requested_by_id:
         raise NotAllowed("Only the other captain can answer this.")
     if approve:
-        _open(match, mode_of(match), request)
+        _open(match, match.mode, request)
         return
     _resolve(request, SubStatus.REJECTED)
     assert request.requested_by is not None  # Only a captain's request needs approving.
@@ -238,7 +232,7 @@ def answer_sub_out(request_id: int, player: Player, approve: bool) -> None:
         [request.requested_by.discord_user_id],
         f"**{player.display_name}** kept **{request.leaving.display_name}** in the match.",
     )
-    bump(match)
+    match.bump()
     _release_if_clear(match)
 
 
@@ -273,7 +267,7 @@ def cancel_sub(request_id: int, player: Player) -> None:
         raise NotAllowed("Only whoever asked for the sub can cancel it.")
     _withdraw_offers(request)
     _resolve(request, SubStatus.CANCELLED)
-    bump(match)
+    match.bump()
     _release_if_clear(match)
 
 
@@ -330,12 +324,12 @@ def invite_sub(
         raise NotAllowed("Only the player leaving or their captain can name a sub.")
     if request.offers.filter(status=OfferStatus.PENDING).exists():
         raise InvalidAction("Someone has already been asked. Wait for their answer.")
-    target = get_or_create_player(discord_user_id, display_name)
+    target = Player.objects.from_discord(discord_user_id, display_name)
     _check_eligible(match, request, target)
     offer = _make_offer(match, request, target, OfferSource.INVITE, inviter)
     request.name_until = None  # Named. If they say no, the queue is next.
     request.save(update_fields=["name_until"])
-    bump(match)
+    match.bump()
     render_board(match)
     return offer
 
@@ -359,7 +353,7 @@ def offer_to_queue(request_id: int, player: Player) -> None:
             "nobody in the queue can take the spot yet. "
             "It goes to the first person who joins, or you can still name someone.",
         )
-    bump(match)
+    match.bump()
     render_board(match)
 
 
@@ -370,7 +364,7 @@ def _make_offer(
     source: str,
     invited_by: Player | None = None,
 ) -> SubOffer:
-    subs = mode_of(match).subs
+    subs = match.mode.subs
     seconds = subs.invite_seconds if source == OfferSource.INVITE else subs.offer_seconds
     moment = now()
     offer = SubOffer.objects.create(
@@ -391,7 +385,10 @@ def _candidates(match: Match) -> Iterator[tuple[Player, str]]:
     those needed get looked up."""
     waiting = PrioEntry.objects.filter(community=match.community, grace_until__isnull=True)
     for entry in waiting.order_by("queued_at", "id"):
-        yield get_or_create_player(entry.discord_user_id, entry.display_name), OfferSource.PRIO
+        yield (
+            Player.objects.from_discord(entry.discord_user_id, entry.display_name),
+            OfferSource.PRIO,
+        )
     for queued in QueueEntry.objects.filter(community=match.community).select_related("player"):
         yield queued.player, OfferSource.QUEUE
 
@@ -453,7 +450,7 @@ def answer_offer(offer_id: int, player: Player, accept: bool) -> None:
         raise StaleAction("That offer no longer exists.")
     if offer.player_id != player.pk:
         raise NotAllowed("This offer isn't for you.")
-    match = lock_match(offer.request.match_id)
+    match = Match.objects.lock(offer.request.match_id)
     offer.refresh_from_db()
     request = offer.request
     request.refresh_from_db()
@@ -527,7 +524,7 @@ def _penalise(match: Match, player: Player, kind: str) -> None:
 def fail_offer(offer_id: int) -> None:
     """The bot couldn't reach them, so move on to the next person."""
     offer = SubOffer.objects.select_related("request", "player").get(pk=offer_id)
-    match = lock_match(offer.request.match_id)
+    match = Match.objects.lock(offer.request.match_id)
     offer.refresh_from_db()
     if offer.status != OfferStatus.PENDING:
         return
@@ -551,7 +548,7 @@ def _after_offer(match: Match, request: SubRequest, why: str) -> None:
                 why += " You can still name someone."
         if request.requested_by is not None:
             _ping(match, [request.requested_by.discord_user_id], why)
-    bump(match)
+    match.bump()
     render_board(match)
 
 
@@ -586,14 +583,14 @@ def _resolve(request: SubRequest, status: str) -> None:
 def _hold(match: Match) -> None:
     """Park the match's timer. The open request's own deadline stands in for it."""
     if match.held_seconds is not None:
-        bump(match)
+        match.bump()
         return
     left = 0
     if match.deadline_at is not None:
         left = max(0, int((match.deadline_at - now()).total_seconds()))
     match.held_seconds = left
     match.deadline_at = None
-    bump(match, "held_seconds", "deadline_at")
+    match.bump("held_seconds", "deadline_at")
 
 
 def _release_if_clear(match: Match) -> None:
@@ -604,9 +601,9 @@ def _release_if_clear(match: Match) -> None:
     moment = now()
     match.deadline_at = moment + timedelta(seconds=max(match.held_seconds, RESUME_MIN_SECONDS))
     match.held_seconds = None
-    bump(match, "held_seconds", "deadline_at")
+    match.bump("held_seconds", "deadline_at")
     if match.status == Status.READY_CHECK:
-        if not active_participants(match).filter(ready_at__isnull=True).exists():
+        if not match.participants.active().filter(ready_at__isnull=True).exists():
             lobby.begin_captain_phase(match)
             return
     elif match.status == Status.CAPTAIN_PHASE:
@@ -642,7 +639,7 @@ def _expire_request(request_id: int, moment: datetime) -> bool:
                 [request.requested_by.discord_user_id],
                 f"the other captain didn't answer, so **{request.leaving.display_name}** stays in.",
             )
-            bump(match)
+            match.bump()
             _release_if_clear(match)
             return True
         _withdraw_offers(request)
@@ -674,7 +671,7 @@ def _expire_request(request_id: int, moment: datetime) -> bool:
 def _expire_offer(offer_id: int, moment: datetime) -> bool:
     with transaction.atomic():
         offer = SubOffer.objects.select_related("request", "player").get(pk=offer_id)
-        match = lock_match(offer.request.match_id)
+        match = Match.objects.lock(offer.request.match_id)
         offer.refresh_from_db()
         if offer.status != OfferStatus.PENDING or offer.deadline_at > moment:
             return False
@@ -701,7 +698,7 @@ def _try_queue(request_id: int, moment: datetime) -> bool:
             request.save(update_fields=["name_until"])
         changed = _offer_next(match, request) or changed
         if changed:
-            bump(match)
+            match.bump()
             render_board(match)
         return changed
 

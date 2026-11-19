@@ -46,7 +46,7 @@
       "path": "matches/latest/fire"
     },
     {
-      "title": "A late player joins the queue: the scheduler offers them the restarted lobby's seat",
+      "title": "A late player joins the queue: the bot offers them the restarted lobby's seat",
       "method": "POST",
       "path": "players",
       "body": {

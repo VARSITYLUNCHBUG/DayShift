@@ -8,15 +8,17 @@
 !league/
 !presets/
 !scoreocr/
+# The unit suite, for the `test` target only: the runtime and dev targets copy named folders.
+# Two control-panel sources (tests/test_devtools_panel_contract.py checks them) and the Discord
+# simulator's package (tests/test_devtools_sim_heroes.py serves its heroes).
+!tests/
+tests/e2e/
+!services/control-panel/src/api/control.ts
+!services/control-panel/src/lib/match.ts
+!services/discord-sim/src/
 !manage.py
 !pyproject.toml
 !uv.lock
-# The player web UI's sources, for an image stage that builds them (the HeroUI branch), without
-# what a local build left behind.
-!frontend/
-frontend/node_modules
-frontend/dist
-
 # Local bytecode caches inside those; the image compiles its own.
 **/__pycache__
 **/*.py[co]

@@ -1,20 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta
 
-import channels.testing  # noqa: F401  (imported here for the side effect undone below)
 import pytest
 from django.conf import settings
 from django.utils import timezone
 
 from league.models import Community, DraftModeVersion, Match, Player
 from league.services import champions, common, community, modes, queue
-
-# channels.testing imports daphne, which installs Twisted's asyncio reactor and, on Windows,
-# switches the whole process to the selector event loop. Put the default back so every test runs
-# on the loop production uses; the web tests only need the communicators, not the reactor.
-asyncio.set_event_loop_policy(None)
 
 pytest_plugins = ["tests.parallel"]
 
@@ -125,7 +118,7 @@ def league(db: None) -> Community:
 
 def make_player(number: int) -> Player:
     # A large number, like a real Discord ID.
-    return common.get_or_create_player(10_000_000 + number, f"P{number}")
+    return Player.objects.from_discord(10_000_000 + number, f"P{number}")
 
 
 @pytest.fixture

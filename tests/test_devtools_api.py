@@ -331,9 +331,8 @@ def test_a_foreign_page_cant_change_dev_state(http: Client, league: Community) -
 
 
 def test_a_league_refusal_of_who_acts_is_403(http: Client, popped: Match) -> None:
-    from league.services.common import active_participants
 
-    for participant in active_participants(popped):
+    for participant in popped.participants.active():
         call(
             http,
             "POST",

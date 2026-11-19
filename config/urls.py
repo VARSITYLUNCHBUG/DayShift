@@ -1,5 +1,5 @@
-"""The web process's routes. /healthz, /readyz (config.health) and /metrics
-(league.observability) are answered by middleware before these."""
+"""The web process's routes. /healthz and /readyz (config.health) are answered by middleware
+before these."""
 
 from __future__ import annotations
 
@@ -13,8 +13,7 @@ urlpatterns = [
     # Before the admin's own URLs, so it isn't read as an app label.
     path("admin/calibration/", calibration_dashboard, name="calibration"),
     path("admin/", admin.site.urls),
-    # The edge serves /static/ in every stack. With DEBUG on, web serves it too, from the apps'
-    # own folders, for whatever talks to web directly: the dev stack's port, the test stack, a
-    # frontend dev server's proxy. Empty with DEBUG off.
+    # WhiteNoise serves /static/ from the image's collected files. With DEBUG on, this serves the
+    # apps' own folders too, so a change shows without collectstatic. Empty with DEBUG off.
     *staticfiles_urlpatterns(),
 ]

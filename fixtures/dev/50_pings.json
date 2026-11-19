@@ -1,0 +1,16 @@
+[
+  {
+    "model": "league.channelping",
+    "pk": 1,
+    "fields": {
+      "community": 1,
+      "channel_id": 1100000000000000011,
+      "name": "staff",
+      "role_ids": [1100000000000000004],
+      "user_ids": [],
+      "timer_minutes": 15,
+      "required_role_id": null,
+      "last_ping_at": null
+    }
+  }
+]

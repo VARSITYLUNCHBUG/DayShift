@@ -27,7 +27,6 @@ from league.models.matches import MatchKind
 from league.models.subs import UNRESOLVED, OfferSource, OfferStatus, SubRequest, SubStatus
 from league.services import awards as award_service
 from league.services import interim, leaderboards, ocr, ratings, runtime, standing, swaps
-from league.services.common import mode_of
 from league.services.gifs import draft_gifs
 from league.services.ratings import match_deltas
 from league.services.subs import SUBBABLE
@@ -239,7 +238,7 @@ def board_state(match_id: int) -> BoardState:
     match = Match.objects.select_related(
         "mode_version", "season", "lobby_code_host", "community"
     ).get(pk=match_id)
-    mode = mode_of(match)
+    mode = match.mode
     participants = match.participants.filter(removed_reason="").select_related("player")
     players = []
     ratings_shown = leaderboards.shown(match.season, [p.player_id for p in participants])

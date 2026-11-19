@@ -43,7 +43,6 @@ from league.services import (
     subs,
     swaps,
 )
-from league.services.common import captain_of, mode_of
 from tests.conftest import Clock, make_player
 from tests.helpers import (
     check_in_captains,
@@ -53,6 +52,7 @@ from tests.helpers import (
     settle_coinflip_for,
     vote_captains,
 )
+from tests.parallel import THOROUGH
 
 
 class MatchMachine(RuleBasedStateMachine):
@@ -145,11 +145,11 @@ class MatchMachine(RuleBasedStateMachine):
     def _acting(self, match: Match, status: str) -> Player | None:
         if match.status != status:
             return None
-        step = build_plan(mode_of(match))[match.step_index]
+        step = build_plan(match.mode)[match.step_index]
         first = (
             match.player_first_pick if status == Status.PLAYER_DRAFT else match.champion_first_pick
         )
-        return captain_of(match, team_for_role(step.role, first)).player
+        return match.captain_of(team_for_role(step.role, first)).player
 
     @rule(pick=integers(0, 11), double_click=sampled_from([False, True]))
     def pick_player(self, pick: int, double_click: bool) -> None:
@@ -204,7 +204,7 @@ class MatchMachine(RuleBasedStateMachine):
         self._try(
             results.submit_report,
             match.pk,
-            captain_of(match, team).player,
+            match.captain_of(team).player,
             winner,
             image(self.image_number),
         )
@@ -213,13 +213,13 @@ class MatchMachine(RuleBasedStateMachine):
     def confirm(self, team: str) -> None:
         match = self._fresh()
         if match.status == Status.AWAITING_CONFIRMATION:
-            self._try(results.confirm, match.pk, captain_of(match, team).player)
+            self._try(results.confirm, match.pk, match.captain_of(team).player)
 
     @rule(team=sampled_from(["A", "B"]))
     def dispute(self, team: str) -> None:
         match = self._fresh()
         if match.status == Status.AWAITING_CONFIRMATION:
-            self._try(results.dispute, match.pk, captain_of(match, team).player, "No")
+            self._try(results.dispute, match.pk, match.captain_of(team).player, "No")
 
     @rule(accept=sampled_from([True, True, False]))
     def answer_offers(self, accept: bool) -> None:
@@ -264,10 +264,10 @@ class MatchMachine(RuleBasedStateMachine):
                 self._try(draft.submit_lobby_code, match.pk, match.lobby_code_host, "ABC123")
         elif match.status == Status.IN_PROGRESS:
             self.image_number += 1
-            captain = captain_of(match, "A").player
+            captain = match.captain_of("A").player
             self._try(results.submit_report, match.pk, captain, "A", image(self.image_number))
         elif match.status == Status.AWAITING_CONFIRMATION:
-            captain = captain_of(match, "B").player
+            captain = match.captain_of("B").player
             if agree:
                 self._try(results.confirm, match.pk, captain)
             else:
@@ -368,9 +368,10 @@ class MatchMachine(RuleBasedStateMachine):
 
 
 # The run is split into seeded chunks so pytest-xdist can spread it over workers. Each chunk also
-# runs Hypothesis's simplest example first, so it gets one more than its share of the total.
+# runs Hypothesis's simplest example first, so it gets one more than its share of the total. The
+# quick profile (make test) runs a third of the merge gate's examples (HYPOTHESIS_PROFILE=ci).
 CHUNKS = 10
-EXAMPLES = 60
+EXAMPLES = 60 if THOROUGH else 20
 EXPLORE_EXAMPLES = 150
 
 # Guards against the machine passing only because it never got anywhere interesting.
@@ -443,7 +444,8 @@ def test_match_machine(
             suppress_health_check=list(HealthCheck),
         ),
     )
-    # The chunks share the job, so whichever finishes last checks what they reached together.
+    # The chunks share the job, so whichever finishes last checks what they reached together. Only
+    # the thorough run has examples enough to promise every status (a dispute takes a long path).
     reached = statuses_of_every_chunk(tmp_path_factory, chunk, machine.statuses_seen)
-    if reached is not None:
+    if reached is not None and THOROUGH:
         assert reached >= MUST_REACH, sorted(MUST_REACH - reached)

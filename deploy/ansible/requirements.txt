@@ -1,4 +1,3 @@
-# The controller's tools (the machine you run ansible-playbook from), pinned.
-# Install into a virtualenv with `pip install -r requirements.txt`,
-# or as a uv tool with `uv tool install ansible-core==2.22.0`.
+# The controller's tools (the machine you run ansible-playbook from), pinned. `make deploy-tools`
+# installs them into deploy/ansible/.venv, with the collections from requirements.yml.
 ansible-core==2.22.0

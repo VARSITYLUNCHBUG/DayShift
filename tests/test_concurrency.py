@@ -11,7 +11,6 @@ from django.db import connections
 from league.domain.errors import DomainError
 from league.models import Community, DraftAction, Match, Player, QueueEntry
 from league.services import community, integrity, lobby, queue, results
-from league.services.common import captain_of
 from tests.conftest import make_player
 from tests.helpers import fresh, image, ready_all, to_in_progress, vote_captains
 
@@ -60,7 +59,7 @@ def full_lobby(league: Community) -> tuple[Match, list[Player]]:
 def test_two_captains_racing_for_one_step_only_one_lands(live_league: Community) -> None:
     match, _players = full_lobby(live_league)
     match = vote_captains(ready_all(match))
-    captain = captain_of(match, match.player_first_pick).player
+    captain = match.captain_of(match.player_first_pick).player
     targets = list(match.participants.filter(team=""))[:2]
     from league.services import draft
 
@@ -103,7 +102,7 @@ def test_click_racing_a_timeout_applies_once(live_league: Community) -> None:
     match, _players = full_lobby(live_league)
     match = vote_captains(ready_all(match))
     Match.objects.filter(pk=match.pk).update(deadline_at=timezone.now())
-    captain = captain_of(match, match.player_first_pick).player
+    captain = match.captain_of(match.player_first_pick).player
     target = match.participants.filter(team="").first().player_id
     race(
         lambda: draft.pick_player(match.pk, captain, 0, target, 333),
@@ -117,8 +116,8 @@ def test_click_racing_a_timeout_applies_once(live_league: Community) -> None:
 def test_both_captains_confirming_at_once_rates_once(live_league: Community) -> None:
     match, _players = full_lobby(live_league)
     match = to_in_progress(match)
-    captain_a = captain_of(match, "A").player
-    captain_b = captain_of(match, "B").player
+    captain_a = match.captain_of("A").player
+    captain_b = match.captain_of("B").player
     wins, losses = race(
         lambda: results.submit_report(match.pk, captain_a, "A", image(1)),
         lambda: results.submit_report(match.pk, captain_b, "A", image(2)),

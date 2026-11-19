@@ -1,5 +1,0 @@
----
-backups_script: /usr/local/sbin/draftbot-backup
-backups_unit: draftbot-backup
-backups_rclone_conf_path: /root/.config/rclone/rclone.conf
-backups_scratch_db: draftbot_restore_check

@@ -37,10 +37,10 @@ from league.services import (
     results,
     steam,
 )
-from league.services.common import captain_of
 from league.services.community import start_season
 from tests.conftest import Clock, make_player
-from tests.helpers import fresh, image, play_full_match, to_in_progress
+from tests.factories import in_progress, played
+from tests.helpers import fresh, image, to_in_progress
 
 PARAMS = merged_params(None)
 
@@ -62,14 +62,12 @@ def farm_season(league: Community) -> Season:
 
 
 def _play_with_mvp(league: Community, players: list[Player], number: int, mvp: Player) -> Match:
-    for player in players:
-        queue.join(league.pk, player)
-    match = to_in_progress(Match.objects.filter(community=league).order_by("-id").first())
+    match = in_progress(league, players)
     team = match.participants.get(player=mvp).team
     results.submit_report(
-        match.pk, captain_of(match, team).player, team, image(number), None, {mvp.pk: "mvp"}
+        match.pk, match.captain_of(team).player, team, image(number), None, {mvp.pk: "mvp"}
     )
-    results.confirm(match.pk, captain_of(match, "B" if team == "A" else "A").player)
+    results.confirm(match.pk, match.captain_of("B" if team == "A" else "A").player)
     return fresh(match)
 
 
@@ -125,14 +123,14 @@ def _leaver(match: Match) -> Player:
 
 def test_an_agreed_early_leave_voids_the_match_and_penalises_the_leaver(game_on: Match) -> None:
     leaver = _leaver(game_on)
-    claim = early_leave.report(game_on.pk, captain_of(game_on, "A").player, leaver.pk)
+    claim = early_leave.report(game_on.pk, game_on.captain_of("A").player, leaver.pk)
     assert fresh(game_on).status == Status.IN_PROGRESS
     from league.services import boards
 
     assert boards.board_state(game_on.pk).early_leave_name == leaver.display_name
     with pytest.raises(NotAllowed):
-        early_leave.answer(game_on.pk, captain_of(game_on, "A").player, True)
-    early_leave.answer(game_on.pk, captain_of(game_on, "B").player, True)
+        early_leave.answer(game_on.pk, game_on.captain_of("A").player, True)
+    early_leave.answer(game_on.pk, game_on.captain_of("B").player, True)
     match = fresh(game_on)
     assert match.status == Status.VOIDED
     assert not RatingEvent.objects.filter(match=match).exists()
@@ -144,14 +142,14 @@ def test_an_agreed_early_leave_voids_the_match_and_penalises_the_leaver(game_on:
 
 
 def test_a_disagreed_early_leave_goes_to_staff(game_on: Match) -> None:
-    early_leave.report(game_on.pk, captain_of(game_on, "A").player, _leaver(game_on).pk)
-    early_leave.answer(game_on.pk, captain_of(game_on, "B").player, False)
+    early_leave.report(game_on.pk, game_on.captain_of("A").player, _leaver(game_on).pk)
+    early_leave.answer(game_on.pk, game_on.captain_of("B").player, False)
     assert fresh(game_on).status == Status.IN_PROGRESS
     assert StaffAlert.objects.filter(kind="early_leave", text__icontains="leave early").exists()
 
 
 def test_an_unanswered_early_leave_goes_to_staff(game_on: Match, clock: Clock) -> None:
-    early_leave.report(game_on.pk, captain_of(game_on, "A").player, _leaver(game_on).pk)
+    early_leave.report(game_on.pk, game_on.captain_of("A").player, _leaver(game_on).pk)
     clock.advance(121)
     assert early_leave.tick(clock.now()) == 1
     assert EarlyLeave.objects.get().status == EarlyLeaveStatus.EXPIRED
@@ -160,12 +158,12 @@ def test_an_unanswered_early_leave_goes_to_staff(game_on: Match, clock: Clock) -
 def test_early_leaves_must_be_reported_early(game_on: Match, clock: Clock) -> None:
     clock.advance(21 * 60)
     with pytest.raises(InvalidAction, match="too late"):
-        early_leave.report(game_on.pk, captain_of(game_on, "A").player, _leaver(game_on).pk)
+        early_leave.report(game_on.pk, game_on.captain_of("A").player, _leaver(game_on).pk)
 
 
 def test_staff_can_void_an_early_leave_after_a_report(game_on: Match) -> None:
     leaver = _leaver(game_on)
-    results.submit_report(game_on.pk, captain_of(game_on, "A").player, "A", image(1))
+    results.submit_report(game_on.pk, game_on.captain_of("A").player, "A", image(1))
     early_leave.staff_void(game_on.pk, leaver, None)
     assert fresh(game_on).status == Status.VOIDED
     assert fresh(game_on).participants.get(player=leaver).left_early
@@ -198,7 +196,7 @@ def test_an_early_abandon_in_deadlock_api_flags_the_player(game_on: Match) -> No
     for participant, api_player in zip(hk_rows, by_team[0], strict=True):
         steam.link(participant.player, api_player["account_id"])
     by_team[0][0]["abandon_match_time_s"] = 140
-    results.submit_report(game_on.pk, captain_of(game_on, hk).player, hk, image(1), 900000001)
+    results.submit_report(game_on.pk, game_on.captain_of(hk).player, hk, image(1), 900000001)
     api_results.record_metadata(game_on.pk, 900000001, data)
     assert fresh(game_on).participants.get(player=hk_rows[0].player).left_early
     assert StaffAlert.objects.filter(kind="api_abandon", text__icontains="2:20").exists()
@@ -217,15 +215,13 @@ def test_award_holders_who_keep_winning_show_a_signal(
         rating_params={"placement_games": 0, "farming_min_games": 1000}
     )
     for number in range(1, 9):
-        for player in players:
-            queue.join(league.pk, player)
-        match = to_in_progress(Match.objects.filter(community=league).order_by("-id").first())
+        match = in_progress(league, players)
         team = match.participants.get(player=players[0]).team
         results.submit_report(
-            match.pk, captain_of(match, team).player, team, image(number), None,
+            match.pk, match.captain_of(team).player, team, image(number), None,
             {players[0].pk: "mvp"},
         )  # fmt: skip
-        results.confirm(match.pk, captain_of(match, "B" if team == "A" else "A").player)
+        results.confirm(match.pk, match.captain_of("B" if team == "A" else "A").player)
     report = calibration.report(Season.objects.get(pk=farm_season.pk))
     signal = report.awards_signal
     assert signal is not None and signal.holders is not None and signal.others is not None
@@ -246,7 +242,7 @@ def test_the_dashboard_shows_the_award_check(
     staff_client: Any, league: Community, players: list[Player]
 ) -> None:
     for number in range(1, 3):
-        play_full_match(league, players, "A", number)
+        played(league, players, "A", number)
     body = staff_client.get("/admin/calibration/").content.decode()
     assert "Do MVP and key-player awards mean anything?" in body
     assert "Award share frozen" in body

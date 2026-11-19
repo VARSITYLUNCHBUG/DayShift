@@ -24,7 +24,7 @@ _RESERVED = set(logging.makeLogRecord({}).__dict__) | {
     "color_message",
 }
 
-# Which process this is, such as {"service": "bot", "role": "scheduler"}. Set by `set_process`.
+# Which process this is, such as {"service": "bot"}. Set by `set_process`.
 _process: dict[str, str] = {}
 
 

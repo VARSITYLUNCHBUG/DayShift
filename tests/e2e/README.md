@@ -16,17 +16,17 @@ Each test then checks what the bot posted in the simulated guild and what the le
 ## Running it
 
 ```
-scripts/test.sh e2e                    # build, start the test stack, run, tear down
-scripts/test.sh e2e -- -k timers       # arguments after -- go to pytest
-scripts/test.sh e2e --no-build         # reuse the images already built
+make e2e                    # build, start the test stack, run, tear down
+make e2e ARGS="-k timers"   # arguments for pytest
 ```
 
-`scripts/test.sh e2e` starts the `draftbot-test` stack from `compose.test.yaml` (the app
-behind pgbouncer, the bot and scheduler, the simulator, the control panel and a `chrome`
-service running a Playwright server), runs this folder in the `e2e` container, and removes
-everything afterwards, pass or fail. Nothing is published on the host.
+`make e2e` starts the `draftbot-test` stack from `compose.test.yaml` (web, the bot, Postgres,
+the simulator, the control panel and a `chrome` service running a Playwright server), runs this
+folder in the `e2e` container, and removes everything afterwards, pass or fail. Nothing is
+published on the host. It runs on a dev machine, not on every pull request; the E2E workflow
+runs it by hand on GitHub.
 
-Against your dev stack (`scripts/fixture_to_test.sh`) instead, with Python 3.12 or later:
+Against your dev stack (`make dev`) instead, with Python 3.12 or later:
 
 ```
 pip install --require-hashes -r tests/e2e/requirements.txt
@@ -46,7 +46,7 @@ Its folder under `test-results/e2e/` (the repo root, mounted into the container)
 - `state.json` and `sim-log.json`: the control API's state and the simulator's last 500 log
   entries (every REST call the bot made, every gateway event)
 
-`scripts/test.sh` also prints the last log lines of web, bot, scheduler and the simulator.
+On a failure, `make e2e` also prints the last log lines of web, the bot and the simulator.
 
 ## How the tests are built
 

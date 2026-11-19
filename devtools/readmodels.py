@@ -24,7 +24,7 @@ from league.models import (
 )
 from league.models.matches import ResourceKind
 from league.services import draft, lobby, runtime, swaps
-from league.services.common import mode_of, now
+from league.services.common import now
 
 JSON = dict[str, Any]
 
@@ -123,7 +123,7 @@ def _turn(match: Match) -> JSON:
             "player_ids": list(captains.values_list("player_id", flat=True)),
         }
     if status in {Status.PLAYER_DRAFT, Status.CHAMPION_DRAFT}:
-        step = build_plan(mode_of(match))[match.step_index]
+        step = build_plan(match.mode)[match.step_index]
         first = (
             match.player_first_pick if step.action == "player_pick" else match.champion_first_pick
         )

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Dumps the database, checks the dump reads back, and keeps {{ draftbot_backup_keep_days }} days of
+# them in /var/backups/draftbot. draftbot-backup.timer runs it nightly; run it by hand any time.
+set -euo pipefail
+umask 077
+
+dest=/var/backups/draftbot
+mkdir -p "$dest"
+cd {{ draftbot_root | quote }}
+name="draftbot-$(date -u +%Y%m%dT%H%M%SZ).dump"
+partial="$dest/.$name.partial"
+trap 'rm -f "$partial"' EXIT
+
+docker compose exec -T db pg_dump -U draftbot -d draftbot --format=custom > "$partial"
+# A dump pg_restore can't read is no backup.
+docker compose exec -T db pg_restore --list < "$partial" > /dev/null
+mv "$partial" "$dest/$name"
+echo "Wrote $dest/$name ($(du -h "$dest/$name" | cut -f1))"
+
+find "$dest" -maxdepth 1 -type f -name 'draftbot-*.dump' -mtime +{{ draftbot_backup_keep_days }} -print -delete

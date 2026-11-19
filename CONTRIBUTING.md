@@ -6,9 +6,9 @@ issue first so we can agree on the approach before you spend time on it.
 ## Getting set up
 
 The [developer guide](docs/dev/README.md) covers everything: the dev stack against a Discord
-simulator (`scripts/fixture_to_test.sh`), the control panel, the tests and cleaning up. You need
-Docker and [uv](https://docs.astral.sh/uv/), plus Node 22 or newer for the control panel (CI
-builds it on Node 26). On Windows, each script has a `.bat` twin.
+simulator (`make dev`), the control panel, the tests and cleaning up. You need Linux with Docker,
+make and [uv](https://docs.astral.sh/uv/); on Windows, `scripts\dev-vm.ps1` makes a Multipass VM
+with all of them. Run `make setup` once, so the checks run before each commit.
 
 ## Making a change
 
@@ -16,8 +16,8 @@ builds it on Node 26). On Windows, each script has a `.bat` twin.
 - Write focused commits whose messages say what they change ("Add ...", "Fix ...").
 - Add or update tests with the change: `tests/` for the bot and web app,
   `services/discord-sim/tests/` for the simulator, and `tests/e2e/` for flows players see.
-- A model change needs its migration; see
-  [writing a migration](docs/dev/README.md#writing-a-migration).
+- A model change needs its migration, and a new model needs rows in `fixtures/dev` (or a
+  written reason it can't have any): see [models and fixtures](docs/dev/README.md#models-and-fixtures).
 - Update the docs your change affects: `README.md` for players and admins, `docs/` for
   developers and operators.
 - Never commit secrets, real tokens, `.env` files or server inventories. Secret scanning blocks

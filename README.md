@@ -19,9 +19,9 @@ screenshot reporting, OpenSkill ratings with MVP and key-player awards (with Nea
 carried over while the server cuts over), a leaderboard channel, and optional score OCR.
 
 Python, Django and Postgres. One codebase and one image, run as a few services: `bot` (the
-discord.py gateway connection), `scheduler` (match timers), `web` (the Django admin and the staff
-calibration dashboard) and a one-shot `migrate`, behind an nginx `edge` and with pgbouncer in
-front of Postgres. [docs/architecture.md](docs/architecture.md) shows how they fit together.
+discord.py gateway connection, the match timers and the effect worker), `web` (the Django admin
+and the staff calibration dashboard) and a one-shot `migrate`, behind a Caddy `edge`.
+[docs/architecture.md](docs/architecture.md) shows how they fit together.
 
 This README is for whoever runs the bot. Players have the
 [wiki](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/wiki), a short guide to playing a match,
@@ -33,15 +33,14 @@ to include.
 | Guide | For |
 |---|---|
 | This README | Running the bot: setup, how a match runs, settings, ratings, commands |
-| [deploy/README.md](deploy/README.md) | Installing it for a client on their own server, with HTTPS, backups and alerts |
-| [docs/ops/](docs/ops/README.md) | Keeping that server running: alerts and their runbooks, backups, upgrades, secrets, capacity, incidents |
+| [deploy/README.md](deploy/README.md) | Installing it for a client on their own server, with HTTPS, backups and health alerts, and running it: upgrades, backups, restores, secrets |
 | [docs/dev/README.md](docs/dev/README.md) | Working on the code: the local stack against a Discord simulator, the control panel, tests |
 | [docs/architecture.md](docs/architecture.md) | The services, how a click and a timer reach Discord, and why it's built this way |
 
 ## Run it
 
 This is the quickstart on one machine, with the admin on 127.0.0.1. For a server on the internet,
-use the [deploy guide](deploy/README.md): it adds HTTPS, metrics and alerts, nightly backups and a
+use the [deploy guide](deploy/README.md): it adds HTTPS, health alerts, nightly backups and a
 hardened host.
 
 1. Create an application and bot in the
@@ -52,16 +51,13 @@ hardened host.
    https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+applications.commands&permissions=281475298741265
    ```
 3. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`, `DISCORD_GUILD_ID`,
-   `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD` (the database superuser's) and `DB_APP_PASSWORD`
-   (the login web, bot and scheduler use, which can't change the schema). The two passwords
-   must differ, and go into database URLs, so use letters and digits only. Generate the key and
-   the passwords with:
+   `DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD`. The password goes into a database URL, so use
+   letters and digits only. Generate the key and the password with:
    ```bash
    uv run python -c "import secrets; print(secrets.token_urlsafe(50))"
    uv run python -c "import secrets; print(secrets.token_hex(32))"
    ```
-   `DATABASE_URL` in `.env` is only for running `manage.py` on your machine; if you do, use the
-   superuser's password there.
+   `DATABASE_URL` in `.env` is only for running `manage.py` on your machine.
 4. Start everything, either from the published image:
    ```bash
    docker compose pull && docker compose up -d
@@ -71,9 +67,8 @@ hardened host.
    ```bash
    docker compose up -d --build
    ```
-   That starts `db` (Postgres), `pgbouncer`, the one-shot `migrate` (static files, migrations,
-   presets and the database roles, before anything else), `web`, `bot`, `scheduler` and the
-   `edge`, which serves the admin on http://127.0.0.1:8000. `docker compose ps` should show every
+   That starts `db` (Postgres), the one-shot `migrate` (migrations and presets, before anything
+   else), `web`, `bot` and the `edge`, which serves the admin on http://127.0.0.1:8000. `docker compose ps` should show every
    service it lists as healthy (`migrate` has exited by then, so only `ps -a` shows it).
    The published image is `ghcr.io/varsitylunchbug/dl-mm-discord`, listed under the repo's
    Packages. It's built from `main` without score OCR: `latest` and `main` follow `main`, and
@@ -678,8 +673,6 @@ bot/renderers/    State to Discord components, with no I/O. style.py is the one 
                   names.py names the channels the bot creates
 bot/effects/      Runs Discord side effects from the outbox, with retries
 bot/error_log.py  Posts ERROR logs to each server's /seterrorchannel channel
-bot/metrics.py    The bot's and the scheduler's Prometheus metrics
-league/observability/  The web process's metrics: requests, and the league's gauges
 config/           Django settings, the ASGI app, health probes (/healthz, /readyz), logging
 scoreocr/         Scoreboard screenshot reader, used through league/services/ocr.py when installed
 presets/          Draft modes, hero emojis and draft GIFs, loaded by load_presets
@@ -691,12 +684,11 @@ services/control-panel/  Dev and test only: the control panel over the two APIs 
 tests/            The unit suite (pytest, Postgres)
 tests/e2e/        The browser suite: Playwright against the whole stack and the simulator
 
-infra/nginx/      The edge: sites, TLS, rate limits, security headers, JSON access logs
-infra/pgbouncer/  The pooler's configuration and the entrypoint that writes its auth file
-infra/observability/  Prometheus scrapes and alert rules, Alertmanager, Grafana dashboards
-compose*.yaml     The stack, and an override per environment (dev, test, observability)
+infra/caddy/      The edge's Caddyfile: HTTPS, headers, uploads, the admin allowlist
+compose*.yaml     The stack, and an override per environment (dev, test)
+Makefile          Every dev, test and deploy task: `make` lists them
 deploy/           Ansible for a client's server, and the production compose overrides
-scripts/          fixture_to_test, test, clean_containers: the dev stack and the test runs
+scripts/          dev-vm.ps1: the Multipass dev VM for Windows
 docs/             Architecture, the developer guide, the operations guides
 ```
 
@@ -716,7 +708,7 @@ The rules that keep it reliable:
 
 ```bash
 docker compose ps
-docker compose logs -f bot scheduler
+docker compose logs -f bot
 docker compose exec bot python manage.py check_ledger
 ```
 
@@ -725,24 +717,24 @@ recreates `player_ratings` from the ledger; it never writes to the ledger itself
 effects page in admin, filtered to `failed`, if channels aren't being created or cleaned up.
 
 Back up the database daily: the volume is the only copy of match history and ratings. A client
-install does that by itself; [docs/ops/backups.md](docs/ops/backups.md) has both ways, and how to
-restore. The rest of running a server (alerts and their runbooks, upgrades, secrets, capacity) is
-in [docs/ops/](docs/ops/README.md).
+install does that by itself; [deploy/README.md](deploy/README.md#running-it) has how, and how to
+restore.
 
 ## Development
 
-[docs/dev/README.md](docs/dev/README.md) is the developer guide. In short, with Docker and
-[uv](https://docs.astral.sh/uv/):
+[docs/dev/README.md](docs/dev/README.md) is the developer guide. In short, on Linux with Docker,
+make and [uv](https://docs.astral.sh/uv/) (on Windows, `scripts\dev-vm.ps1` makes a Multipass VM
+with them and runs make there):
 
 ```bash
-scripts/fixture_to_test.sh      # the whole stack against a Discord simulator, seeded, with the control panel
-scripts/test.sh --local         # the unit suite, in parallel, against a throwaway Postgres
-scripts/test.sh e2e             # the browser suite against the whole stack
-scripts/clean_containers.sh     # remove everything the dev and test stacks left behind
+make dev       # the whole stack against a Discord simulator, seeded, with the control panel
+make test      # the unit suite, in parallel, in Docker
+make e2e       # the browser suite against the whole stack
+make check     # every pre-commit hook: lint, types, migrations, fixtures, compose, Ansible
+make clean     # remove everything the dev and test stacks left behind
 ```
 
-On Windows, the same scripts end in `.bat`. The guide's
-[lint and type checks](docs/dev/README.md#lint-and-type-checks) are what CI runs before a merge.
+`make check` and the unit suite are what CI runs before a merge.
 
 ## Check before launch
 

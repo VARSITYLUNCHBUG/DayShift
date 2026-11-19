@@ -31,7 +31,7 @@ from league.models import (
 )
 from league.models.outbox import EffectStatus, OutboxEffect
 from league.services import queue
-from league.services.common import get_or_create_player, now
+from league.services.common import now
 
 # Discord IDs for fake players when there is no simulator: clear of the simulator's range, the
 # stand-ins under 1000 and the test suite's.
@@ -126,7 +126,7 @@ def create_players(
     with transaction.atomic():
         created = []
         for user in users:
-            player = get_or_create_player(user.discord_user_id, user.name)
+            player = Player.objects.from_discord(user.discord_user_id, user.name)
             DevProfile.objects.update_or_create(
                 player=player, defaults={"dm_open": dm_open, "sim_user": user.sim_user}
             )
@@ -191,7 +191,7 @@ def update_player(
         with sim_client.client() as sim:
             sim.update_user(player.discord_user_id, **fields)
     if name is not None:
-        get_or_create_player(player.discord_user_id, name.strip())
+        Player.objects.from_discord(player.discord_user_id, name.strip())
     if dm_open is not None:
         profile.dm_open = dm_open
         profile.save(update_fields=["dm_open"])
@@ -367,7 +367,7 @@ def _tables() -> list[str]:
 def _lock_tables(tables: list[str], give_up: float) -> None:
     """Take every table the reset empties, all at once, before touching any of them.
 
-    The bot and the scheduler read and lock these tables in their own orders (a pass of the
+    The bot's loops read and lock these tables in their own orders (a pass of the
     deadline loop joins outbox_effects to matches, a queue pop locks the community first), so a
     TRUNCATE that takes its locks one by one can deadlock with them. Each try here is bounded by
     a statement timeout below Postgres's deadlock_timeout (1 s): a try that would deadlock gives
@@ -378,7 +378,7 @@ def _lock_tables(tables: list[str], give_up: float) -> None:
     while True:
         try:
             with transaction.atomic(), connection.cursor() as cursor:
-                # SET LOCAL: transaction-scoped, so safe through pgbouncer's transaction pooling.
+                # SET LOCAL: transaction-scoped, so it ends with the reset's transaction.
                 cursor.execute(f"SET LOCAL statement_timeout = {LOCK_TRY_MS}")
                 cursor.execute(f"LOCK TABLE {names} IN ACCESS EXCLUSIVE MODE")
                 cursor.execute("SET LOCAL statement_timeout TO DEFAULT")
@@ -388,7 +388,7 @@ def _lock_tables(tables: list[str], give_up: float) -> None:
                 raise
             if time.monotonic() >= give_up:
                 raise BotBusy(
-                    "The reset couldn't get the league tables: the bot or the scheduler kept "
+                    "The reset couldn't get the league tables: the bot kept "
                     f"them busy for {RESET_SECONDS:g} s. Try again."
                 ) from exc
         time.sleep(random.uniform(0.02, 0.15))  # Jitter, so two tries don't keep colliding.
@@ -428,7 +428,7 @@ def reset(fixture: str = "dev_default") -> seed.SeedReport:
     draft modes stay, ids restart at 1), then dev_seed, which lays out the guild again.
 
     In order: stop the bot's effects, then lock every league table, so nothing (a deadline the
-    scheduler fires, an effect the bot claims) can happen between the two and outlive the wipe.
+    bot fires, an effect it claims) can happen between the two and outlive the wipe.
     An effect the bot claimed in between sends the reset round again. Outbox ids keep counting
     rather than restart: a claim the bot read before the wipe then finds no row, instead of a
     new effect with the old one's id."""

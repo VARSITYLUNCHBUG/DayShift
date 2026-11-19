@@ -1,0 +1,8 @@
+---
+# The server itself: the deploy user, SSH, the firewall, unattended upgrades and Docker.
+draftbot_deploy_user: deploy
+# Public keys for the deploy user. Required: root and password logins are switched off.
+draftbot_authorized_keys: []
+draftbot_timezone: Etc/UTC
+# Reboot by itself at 04:00 when an unattended upgrade needs it.
+draftbot_auto_reboot: true

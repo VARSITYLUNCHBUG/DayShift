@@ -19,9 +19,9 @@ from league.domain.standing import (
 from league.models import Community, Match, OutboxEffect, Penalty, Player
 from league.models.moderation import PenaltyKind
 from league.services import corrections, lobby, penalties, standing, subs
-from league.services.common import captain_of
 from tests.conftest import Clock, make_player
-from tests.helpers import fresh, play_full_match, ready_all, run_player_draft, vote_captains
+from tests.factories import played
+from tests.helpers import fresh, ready_all, run_player_draft, vote_captains
 
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 POLICY = StrikePolicy(points={"dodge": 2, "missed_ready": 1}, games_per_strike=3, decay_days=14)
@@ -222,7 +222,7 @@ def test_clean_matches_play_strikes_off(
     penalties.issue(league, player, PenaltyKind.DODGE)
     clock.advance(3700)  # Past the hour's cooldown.
     for number in range(1, 4):
-        play_full_match(league, players, "A", number)
+        played(league, players, "A", number)
     assert standing.standing(league, player).strikes == 1
     # A note for them alone: a DM, never a ping in the match channel.
     dms = OutboxEffect.objects.filter(kind="dm_player", payload__heading="One strike off")
@@ -261,7 +261,7 @@ def test_two_eligible_players_are_appointed_without_a_vote(
     _allow(captain_rule, players[4], players[9])
     match = ready_all(ruled_popped)
     assert match.status == Status.CAPTAIN_CHECKIN
-    captains = {captain_of(match, team).player_id for team in ("A", "B")}
+    captains = {match.captain_of(team).player_id for team in ("A", "B")}
     assert captains == {players[4].pk, players[9].pk}
 
 
@@ -283,7 +283,7 @@ def test_a_barred_player_cannot_captain(
     standing.set_override(captain_rule, players[0], "bar", None, "troll picks")
     match = ready_all(ruled_popped)
     assert match.status == Status.CAPTAIN_CHECKIN  # Only two left eligible, so no vote.
-    captains = {captain_of(match, team).player_id for team in ("A", "B")}
+    captains = {match.captain_of(team).player_id for team in ("A", "B")}
     assert players[0].pk not in captains
 
 
@@ -306,14 +306,14 @@ def test_an_ineligible_sub_hands_the_captaincy_to_a_teammate(
 ) -> None:
     _allow(captain_rule, *players[:3])
     match = run_player_draft(vote_captains(ready_all(ruled_popped)))
-    captain = captain_of(match, "A")
+    captain = match.captain_of("A")
     teammate = (
         match.participants.filter(team="A", is_active=True, is_captain=False).order_by("id").first()
     )
     _allow(captain_rule, teammate.player)
     _sub_in(match, captain.player, 60)
     match = fresh(match)
-    assert captain_of(match, "A").player_id == teammate.player_id
+    assert match.captain_of("A").player_id == teammate.player_id
     sub_row = match.participants.get(player__discord_user_id=10_000_060)
     assert not sub_row.is_captain and sub_row.team == "A"
 
@@ -321,7 +321,7 @@ def test_an_ineligible_sub_hands_the_captaincy_to_a_teammate(
 def test_completed_matches_count_and_a_void_takes_one_back(
     league: Community, players: list[Player]
 ) -> None:
-    match = play_full_match(league, players, "A", 1)
+    match = played(league, players, "A", 1)
     assert standing.completed_matches(league, [players[0].pk]) == {players[0].pk: 1}
     corrections.apply_outcome_correction(match.pk, "void", None, "test")
     assert standing.completed_matches(league, [players[0].pk]) == {players[0].pk: 0}
@@ -332,7 +332,7 @@ def test_five_completed_matches_make_a_player_eligible(
     captain_rule: Community, players: list[Player]
 ) -> None:
     for number in range(1, 6):
-        play_full_match(captain_rule, players, "A", number)
+        played(captain_rule, players, "A", number)
     from league.domain.mode_schema import parse_mode
 
     mode = parse_mode(captain_rule.active_mode.body)

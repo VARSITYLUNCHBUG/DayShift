@@ -2,8 +2,7 @@
 
 Answered before ALLOWED_HOSTS is checked and before the HTTPS redirect, so a container
 healthcheck can ask 127.0.0.1 over plain HTTP whatever the public host is. `/readyz` queries
-through the same connection settings as every request, so behind pgbouncer it proves the whole
-path to Postgres.
+through the same connection settings as every request, so it proves the whole path to Postgres.
 """
 
 from __future__ import annotations

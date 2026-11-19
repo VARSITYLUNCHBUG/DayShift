@@ -56,7 +56,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "channels",
     "league",
 ]
 
@@ -64,6 +63,7 @@ MIDDLEWARE = [
     # /healthz and /readyz, before ALLOWED_HOSTS and the HTTPS redirect (config.health).
     "config.health.health_middleware",
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "config.csp.csp_middleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -91,63 +91,20 @@ TEMPLATES = [
     },
 ]
 
-# In compose, web, bot and scheduler reach Postgres through pgbouncer (DATABASE_URL). Migrations,
-# and anything that needs a session of its own such as LISTEN, connect directly instead:
-# DATABASE_DIRECT_URL, which is DATABASE_URL when there is no pgbouncer. Code that needs that
-# session uses the `direct` alias below (connections["direct"]); nothing is routed to it.
+# One Postgres login for everything. A handful of connections at most: the bot keeps one (all its
+# database work runs on one thread, league.asyncdb), and web opens one per request in flight.
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgres://draftbot:change-me@127.0.0.1:55432/draftbot"
 )
-DATABASE_DIRECT_URL = os.environ.get("DATABASE_DIRECT_URL") or DATABASE_URL
-# Seconds a connection is kept for reuse. The bot and the scheduler keep theirs (league.asyncdb
-# runs all their database work on one thread). The web process wants 0, which compose.yaml sets:
-# under ASGI each request's synchronous work runs on a thread of its own, and a connection kept
-# after the request would be stranded with that thread, open until garbage collection (measured:
-# one pgbouncer client per concurrent request, left behind). pgbouncer makes connecting cheap.
+# Seconds a connection is kept for reuse. The bot keeps its own. The web process wants 0, which
+# compose.yaml sets: under ASGI each request's synchronous work runs on a thread of its own, and a
+# connection kept after the request would be stranded with that thread.
 DB_CONN_MAX_AGE = int(os.environ.get("DB_CONN_MAX_AGE") or 60)
 DATABASES: dict[str, Any] = {
     "default": dj_database_url.parse(
         DATABASE_URL, conn_max_age=DB_CONN_MAX_AGE, conn_health_checks=True
     ),
-    # Straight to Postgres, never through pgbouncer: a session-level LISTEN on a
-    # transaction-pooled connection would lose its notifications. Opened only when asked for; the
-    # test suite treats it as `default` (the same database there).
-    "direct": {
-        **dj_database_url.parse(DATABASE_DIRECT_URL, conn_max_age=0, conn_health_checks=True),
-        "TEST": {"MIRROR": "default"},
-    },
 }
-DATABASE_ROUTERS = ["config.db_router.DefaultOnly"]
-
-# Only without pgbouncer (DB_POOL below): the size of psycopg's pool in the web process, which is
-# WEB_DB_THREADS + 2. Behind pgbouncer it changes nothing; pgbouncer.ini's default_pool_size is
-# the limit there.
-WEB_DB_THREADS = int(os.environ.get("WEB_DB_THREADS") or 8)
-
-# Behind pgbouncer in transaction mode, a server connection is only this client's for one
-# transaction, so no state may outlive one. Django's .iterator() would hold a server-side cursor
-# across transactions: turn those off. Parameters are already bound on the client (Django sends
-# no server-side prepared statements unless OPTIONS sets server_side_binding), and Django only
-# sends SET TIME ZONE when the server isn't in UTC (compose runs Postgres in UTC). Persistent
-# client connections stay, health-checked: pgbouncer does the pooling, so psycopg's pool would
-# be a second pool on top, and DB_POOL is refused.
-DB_PGBOUNCER = env_bool("DB_PGBOUNCER")
-if DB_PGBOUNCER:
-    if env_bool("DB_POOL"):
-        raise RuntimeError("DB_POOL and DB_PGBOUNCER both pool connections. Set only one.")
-    DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
-
-# Without pgbouncer, the web process can pool its own connections with psycopg. Django refuses a
-# pool alongside persistent connections, and the pool checks its own connections.
-if env_bool("DB_POOL"):
-    DATABASES["default"]["CONN_MAX_AGE"] = 0
-    DATABASES["default"]["CONN_HEALTH_CHECKS"] = False
-    DATABASES["default"].setdefault("OPTIONS", {})["pool"] = {
-        "min_size": 1,
-        # One per database thread, plus Django's own thread for sync views.
-        "max_size": WEB_DB_THREADS + 2,
-        "timeout": 10,
-    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LANGUAGE_CODE = "en-gb"
@@ -157,11 +114,10 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-# The edge serves static files from disk (infra/nginx/snippets/app.conf); Django only names them.
-# collectstatic (in the image build) writes each file under a content hash too, which the edge
-# lets browsers cache for good, and a .gz copy the edge serves as is. Pages link the hashed names
-# from its manifest; with DEBUG on, the plain ones. The test suite runs no collectstatic, so it
-# has no manifest and links plain names.
+# web serves the static files itself, through WhiteNoise. collectstatic (in the image build)
+# writes each file under a content hash, which WhiteNoise lets browsers cache for good, and a .gz
+# copy it serves as is. Pages link the hashed names from its manifest; with DEBUG on, the plain
+# ones. The test suite runs no collectstatic, so it has no manifest and links plain names.
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {
@@ -172,10 +128,7 @@ STORAGES = {
 }
 
 # What pages may load (config.csp). Only this origin, nothing inline except with the response's
-# nonce ("'nonce'"), never framed. Extend a directive here for a new source, such as the player
-# web UI's websocket or an image host. A page served as a file, which can't carry the nonce (the
-# player web UI's index.html and its inline theme script), needs that script's hash here
-# ("'sha256-...'") or the nonce injected when it is served.
+# nonce ("'nonce'"), never framed. Extend a directive here for a new source.
 CONTENT_SECURITY_POLICY: dict[str, list[str]] = {
     "default-src": ["'self'"],
     "script-src": ["'self'", "'nonce'"],
@@ -253,15 +206,11 @@ ERROR_LOG_CHANNEL_ID = int(os.environ.get("ERROR_LOG_CHANNEL_ID") or 0)
 # Optional. Only needed to link Steam accounts by a custom profile URL (/id/name).
 STEAM_WEB_API_KEY = os.environ.get("STEAM_WEB_API_KEY", "")
 
-# --- Metrics -----------------------------------------------------------------------------------
-# Prometheus metrics (league.observability, bot.metrics). The web process answers /metrics itself,
-# outermost, so it times every request; the edge never forwards that path. The bot and the
-# scheduler serve theirs on METRICS_ADDR:METRICS_PORT; 0 turns that off. The address is loopback
-# for a run on this machine; compose sets 0.0.0.0, so Prometheus can reach it over the container
-# network (nothing publishes the port).
-MIDDLEWARE.insert(0, "league.observability.metrics.metrics_middleware")
-METRICS_PORT = int(os.environ.get("METRICS_PORT") or 9108)
-METRICS_ADDR = os.environ.get("METRICS_ADDR") or "127.0.0.1"
+# --- Health ------------------------------------------------------------------------------------
+# Optional. A dead man's switch (healthchecks.io or any service like it): the bot's watchdog pings
+# it every minute, and pings URL/fail when the league isn't keeping up (league.services.health).
+# A host that goes down stops the pings, which the service reports.
+HEALTHCHECK_PING_URL = os.environ.get("HEALTHCHECK_PING_URL", "").strip()
 
 # --- Local dev and simulator -------------------------------------------------------------------
 # The dev control API (fake players, ratings, picks, phase control) under /_control/. Local only:
@@ -290,16 +239,3 @@ if DISCORD_SIM_URL and not DEBUG:
 # Against the simulator, lobbies come from its deadlock-api stand-in, never the real service.
 if DISCORD_SIM_URL and "DEADLOCK_API_BASE" not in os.environ:
     DEADLOCK_API_BASE = f"{DISCORD_SIM_URL}/deadlock-api"
-
-# --- Player web UI ----------------------------------------------------------------------------
-# The Discord server the web UI plays in. One server per deployment.
-WEB_GUILD_ID = int(os.environ.get("WEB_GUILD_ID") or DISCORD_GUILD_ID)
-# Where players reach the web UI. Sign-in redirects are built from this, never from the Host header.
-PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://localhost:8000").rstrip("/")
-# The Discord application's OAuth2 client, for "Sign in with Discord".
-DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
-DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
-# Sign in as any player without Discord, for local testing only.
-WEB_DEV_LOGIN = env_bool("WEB_DEV_LOGIN")
-if WEB_DEV_LOGIN and not DEBUG:
-    raise RuntimeError("WEB_DEV_LOGIN only works with DEBUG on.")

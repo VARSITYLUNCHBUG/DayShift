@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+# OnFailure=draftbot-notify@%n.service on a unit posts its failure and last log lines.
+[Unit]
+Description=Report that %i failed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/draftbot-notify --unit %i
