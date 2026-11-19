@@ -13,6 +13,8 @@ repos:
       # Both keep a CRLF file's CRLF line endings: .gitattributes owns line endings.
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
+        # The fonts' licences stay word for word as their authors ship them.
+        exclude: ^bot/assets/fonts/.*-OFL\.txt$
       - id: end-of-file-fixer
       - id: mixed-line-ending
         args: [--fix=no]
