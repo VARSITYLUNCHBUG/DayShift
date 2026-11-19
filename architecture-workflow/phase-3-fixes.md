@@ -201,3 +201,38 @@ Fixes that touch the same files went into the same commit, which says which find
   Playwright, with no pgbouncer or scheduler): **15 passed in 250 s**. The stack was healthy in
   75 s, and the whole run took 329 s, against 6–7 min before.
 - Diff from `origin/main`: 301 files, +3,351 / −18,597.
+
+## On the VMs (R1, R2, R8)
+
+**The Windows dev VM, `scripts\dev-vm.ps1`, 6 CPUs and 8 GB.**
+
+- **What broke, and the fixes:**
+  - Windows PowerShell 5.1 turned multipass's stderr into an error, so the script now checks exit
+    codes instead.
+  - Multipass ships with mounts off, and turning them on is a host security setting. The script
+    now copies the checkout onto the VM's disk before each command, in about 2 s.
+  - The dev stack refused the VM's address with a 400; it now accepts any host name.
+  - The test image lacked the simulator package that one test imports.
+  - The Makefile's `-u` tripped on `PS1` from the bashrc that SSH sessions load.
+- **Result:**
+  - `make test`: 770 passed, 3 skipped, in 183 s, the sync included.
+  - `make dev`: up in 100 s, and 26 s on a rerun. The admin, panel, control API and simulator
+    answered 200 from Windows, and the bot was connected to the simulator.
+  - `make clean`: 0 containers, volumes and networks left.
+
+**bebot-sim, moved from the old 14-container stack with the branch's image.**
+
+- **Moving it:**
+  - The first `site.yml` run: 31 ok, 0 failed. It removed the old containers, units, scripts,
+    config folders and volumes, and kept the database.
+  - Caddy served `bebot-sim.test` with its own CA (`draftbot_tls_internal`). HTTPS `/readyz` and
+    the admin returned 200, and HTTP got a 308 to HTTPS.
+  - The bot connected to the test guild.
+- **Re-runs:**
+  - After the role learned to treat `migrate`'s rerun as no change, `site.yml` reported
+    `changed=0`.
+  - `deploy.yml` backed up first, then restarted.
+- **Restore:** `restore.yml` refused without `confirm=yes`, then restored the newest dump. Afterwards
+  `check_ledger` was OK and all 10 append-only triggers were present.
+- **Health alerts:** with web stopped, `draftbot-health` reported it once over two runs, and
+  reported the recovery once.

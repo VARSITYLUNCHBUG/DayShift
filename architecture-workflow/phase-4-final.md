@@ -58,12 +58,12 @@ insertions, 18,597 deletions.** The current architecture is in
 
 | ID | Item | Priority |
 |---|---|---|
-| R1 | Run `make site` against a test server (the bebot-sim VM) and confirm Caddy gets a certificate. Moving an existing install also needs these removed from the host: the old timers and units (`draftbot-certbot-renew.*`, `draftbot.service`) and `/opt/draftbot/{infra,letsencrypt,acme-challenge,edge,.env.observability}`. The database volume is kept; `remove_orphans` stops the old containers | HIGH, before the next deploy |
-| R2 | Run `scripts\dev-vm.ps1` end to end. The Multipass service has to be started from an elevated shell first | HIGH |
+| R1 | ~~Deploy to a test server~~. **Done:** `site.yml` moved bebot-sim from the old 14-container stack in place, a re-run changed nothing, and the upgrade, the restore and the health alerts all worked (phase-3-fixes.md, "On the VMs"). Still to do once: a real domain getting a Let's Encrypt certificate | LOW |
+| R2 | ~~Run `scripts\dev-vm.ps1`~~. **Done:** it now copies the checkout into the VM instead of mounting it. `make test` passed 770 in 183 s, `make dev` was reachable from Windows, and `make clean` left nothing | — |
 | R3 | The first GitHub Actions run of the new `ci.yml`. Keep `CI OK` as the required check (same name as before); check Scorecard's next result | MEDIUM |
 | R4 | Admin login brute force: nginx rate-limited it, and Caddy core has no rate limit. Set `draftbot_admin_cidrs` on servers whose admin is only for known addresses, or add a login throttle in Django if it must be public | MEDIUM |
 | R5 | About 150 transactional tests (`test_bot`, `test_handlers`, `test_permissions`) flush and reseed per test, because handlers reach the database from the async `db()` thread. A same-thread `db()` under tests would let most of them roll back instead | MEDIUM |
 | R6 | Split the largest services (`boards` 814 lines, `subs` 798, `lobby` 725, `draft` 639). This needs the file-split protocol | LOW |
 | R7 | `bot/effects/handlers.py` reads the ORM about 10 times to render; read models in `league/services/boards.py` would finish thinning it | LOW |
-| R8 | A restore drill on a test server: `backup.yml`, then `restore.yml -e confirm=yes` | MEDIUM |
+| R8 | ~~Restore drill~~. **Done** on bebot-sim. The database there was empty; repeat it on a server with real history | LOW |
 | R9 | Scorecard's Branch-Protection and Code-Review stay capped by one maintainer, and Fuzzing doesn't count Hypothesis. Accepted | — |
