@@ -62,6 +62,7 @@ services:
     environment:
       EDGE_SITE: ${EDGE_SITE:-:8080}
       EDGE_ADMIN_CIDRS: ${EDGE_ADMIN_CIDRS:-0.0.0.0/0 ::/0}
+      EDGE_TLS: ${EDGE_TLS:-}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       # Certificates and the ACME account, kept across restarts.

@@ -54,13 +54,19 @@ What ends up on the server:
    ```bash
    cd deploy/ansible && .venv/bin/ansible-playbook -i inventories/acme site.yml --ask-vault-pass -e ansible_user=root
    ```
-   It ends by checking `https://<domain>/readyz` answers.
+   It ends by checking `https://<domain>/readyz` answers. On a server that ran the older stack
+   (nginx, pgbouncer, Prometheus), the same run removes that stack's containers, timers, config
+   folders and volumes, and keeps the database.
 5. In Discord, run `/setup pug_role:@PUGS` as the server owner, then `/permissions grant` for the
    staff roles.
 6. Create an admin login:
    ```bash
    ssh deploy@<server> 'cd /opt/draftbot && sudo docker compose exec web python manage.py createsuperuser'
    ```
+
+A test server whose name isn't public (`play.example.test`, say) can't get a Let's Encrypt
+certificate: set `draftbot_tls_internal: true` and Caddy signs one with its own CA, and
+`draftbot_check_https: false` if the controller can't resolve the name.
 
 ## Running it
 

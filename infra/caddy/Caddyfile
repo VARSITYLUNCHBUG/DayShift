@@ -7,6 +7,8 @@
 #                     and renews the certificate from Let's Encrypt by itself, keeps it in the
 #                     caddy-data volume, and redirects HTTP to HTTPS.
 #   EDGE_ADMIN_CIDRS  who may open /admin/, space separated. Everyone by default.
+#   EDGE_TLS          empty by default. `tls internal` has Caddy sign the certificate with its own
+#                     CA, for a test server whose name Let's Encrypt can't reach.
 #
 # Inside the container Caddy listens on 8080 and 8443, so it needs no capabilities; compose maps
 # the host's ports onto those.
@@ -17,6 +19,7 @@
 }
 
 {$EDGE_SITE::8080} {
+	{$EDGE_TLS:}
 	encode zstd gzip
 
 	# Report screenshots are the largest uploads.

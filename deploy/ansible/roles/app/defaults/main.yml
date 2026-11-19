@@ -14,6 +14,9 @@ draftbot_pull: missing
 # After starting, check https://<domain>/readyz answers from the controller. Off for a test server
 # whose name only resolves on the server itself.
 draftbot_check_https: true
+# A test server whose name Let's Encrypt can't reach (a .test domain, say): Caddy signs the
+# certificate with its own CA instead.
+draftbot_tls_internal: false
 
 draftbot_discord_guild_id: ""
 draftbot_error_log_channel_id: ""

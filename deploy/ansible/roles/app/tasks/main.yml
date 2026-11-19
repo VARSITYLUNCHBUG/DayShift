@@ -14,6 +14,63 @@
       (16+ letters and digits) in the vault.
     quiet: true
 
+# --- What an install from before the cleanup left on the host ----------------------------------------
+# Its boot unit, certificate renewal and notify units, and the config folders of nginx, pgbouncer and
+# the observability stack. Its containers go with `remove_orphans` below; the database volume stays.
+- name: Stop and disable the old units
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: [draftbot.service, draftbot-certbot-renew.timer, draftbot-certbot-renew.service]
+  failed_when: false
+
+- name: Remove the old units, scripts and config folders
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/draftbot.service
+    - /etc/systemd/system/draftbot-certbot-renew.service
+    - /etc/systemd/system/draftbot-certbot-renew.timer
+    - /usr/local/sbin/draftbot-certbot-renew
+    - /usr/local/sbin/draftbot-notify
+    - /usr/local/sbin/draftbot-backup
+    - /etc/draftbot
+    - "{{ draftbot_root }}/infra/nginx"
+    - "{{ draftbot_root }}/infra/pgbouncer"
+    - "{{ draftbot_root }}/infra/observability"
+    - "{{ draftbot_root }}/compose.observability.yaml"
+    - "{{ draftbot_root }}/compose.grafana.yaml"
+    - "{{ draftbot_root }}/.env.observability"
+    - "{{ draftbot_root }}/edge"
+    - "{{ draftbot_root }}/acme-challenge"
+    - "{{ draftbot_root }}/letsencrypt"
+    - "{{ draftbot_root }}/.migrated-image"
+  notify: Reload systemd
+
+# Stopping the old boot unit leaves it marked failed even once its file is gone.
+- name: Forget the old units' state
+  ansible.builtin.command: systemctl reset-failed draftbot.service draftbot-certbot-renew.service
+  changed_when: false
+  failed_when: false
+
+# Overrides an older install listed in COMPOSE_FILE (a CPU limit, say); .env no longer names them.
+- name: Find compose overrides other than the two this role installs
+  ansible.builtin.find:
+    paths: "{{ draftbot_root }}"
+    patterns: ["compose*.yaml", "compose*.yml"]
+    excludes: [compose.yaml, compose.prod.yaml]
+  register: app_stray_compose
+
+- name: Remove them
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ app_stray_compose.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
 # --- The compose project: two compose files and the Caddyfile from this checkout, and .env ----------
 - name: Create the project directory
   ansible.builtin.file:
@@ -65,6 +122,17 @@
     remove_orphans: true
     wait: true
     wait_timeout: 300
+  register: app_up
+  # migrate runs again on every `up`, by design; only the other services count as a change.
+  changed_when: app_up.actions | default([]) | rejectattr('id', 'search', 'migrate') | list | length > 0
+
+# The older install's volumes: its static files, and Prometheus', Grafana's and Alertmanager's
+# data. Their containers went with remove_orphans just now. Never the database's.
+- name: Remove the volumes only an older install used
+  community.docker.docker_volume:
+    name: "dl-mm-discord_{{ item }}"
+    state: absent
+  loop: [static, prometheus-data, grafana-data, alertmanager-data]
 
 - name: Check the site answers over HTTPS
   ansible.builtin.uri:
