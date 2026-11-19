@@ -33,6 +33,7 @@ class Penalty(models.Model):
 
     class Meta:
         db_table = "penalties"
+        verbose_name_plural = "penalties"
         ordering = ("-starts_at",)
         indexes = [models.Index(fields=("player", "expires_at"), name="penalty_active_idx")]
 

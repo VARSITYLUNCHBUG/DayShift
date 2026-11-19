@@ -94,7 +94,7 @@ TEMPLATES = [
 # One Postgres login for everything. A handful of connections at most: the bot keeps one (all its
 # database work runs on one thread, league.asyncdb), and web opens one per request in flight.
 DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgres://draftbot:change-me@127.0.0.1:55432/draftbot"
+    "DATABASE_URL", "postgres://dayshift:change-me@127.0.0.1:55432/dayshift"
 )
 # Seconds a connection is kept for reuse. The bot keeps its own. The web process wants 0, which
 # compose.yaml sets: under ASGI each request's synchronous work runs on a thread of its own, and a
@@ -108,6 +108,8 @@ DATABASES: dict[str, Any] = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LANGUAGE_CODE = "en-gb"
+# Our date formats, which label every time UTC (config/formats/en_GB/formats.py).
+FORMAT_MODULE_PATH = ["config.formats"]
 TIME_ZONE = "UTC"
 USE_I18N = False
 USE_TZ = True
@@ -141,6 +143,9 @@ CONTENT_SECURITY_POLICY: dict[str, list[str]] = {
     "form-action": ["'self'"],
     "frame-ancestors": ["'none'"],
 }
+
+# Every player is a user: the bot makes one per Discord account, and admin logins are players too.
+AUTH_USER_MODEL = "league.Player"
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

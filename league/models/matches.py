@@ -131,6 +131,7 @@ class Match(models.Model):
 
     class Meta:
         db_table = "matches"
+        verbose_name_plural = "matches"
         ordering = ("-id",)
         indexes = [
             models.Index(
@@ -235,6 +236,8 @@ class MatchParticipant(models.Model):
     player = models.ForeignKey("league.Player", on_delete=models.PROTECT, related_name="matches")
     queue_joined_at = models.DateTimeField()
     ready_at = models.DateTimeField(null=True, blank=True)
+    # Their Ready Up DM, edited once they're ready so its button can't be pressed again.
+    ready_dm_message_id = models.BigIntegerField(null=True, blank=True)
     team = models.CharField(max_length=1, choices=Team.choices, blank=True)
     is_captain = models.BooleanField(default=False)
     # A captain pressed I'm here before the player draft.
@@ -276,7 +279,6 @@ class MatchParticipant(models.Model):
 
 class ResourceKind(models.TextChoices):
     TEXT = "text", "Lobby text channel"
-    LOBBY_VOICE = "lobby_voice", "Lobby voice channel"
     TEAM_A_VOICE = "team_a_voice", "Team A voice channel"
     TEAM_B_VOICE = "team_b_voice", "Team B voice channel"
     BOARD_MESSAGE = "board_message", "Board message"

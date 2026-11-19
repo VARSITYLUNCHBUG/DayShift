@@ -59,6 +59,7 @@ EXEMPT: dict[str, str] = {
     "league.staffalert": _PLAYED,
     "league.penalty": _PLAYED,
     "league.strikeadjustment": "a staff correction to a player's strikes, made from Discord",
+    "league.steamaccount": "a Steam account a player links with /link, never seeded",
     "league.interimrating": "the NeatQueue import, uploaded as a CSV in the admin",
     "league.interimpointschange": "rebuilt from the NeatQueue import on every result",
     "devtools.matchscript": _DEVTOOLS,

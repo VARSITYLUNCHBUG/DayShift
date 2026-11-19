@@ -8,8 +8,9 @@ When the metadata arrives:
 
 - **Winner.** Team 0 is Hidden King. A different winner disputes an unconfirmed result, or asks
   staff about a confirmed one. Nothing is overturned automatically.
-- **Roster.** Each linked Steam account should be on its player's team. A linked account seen on
-  the right team becomes verified; one on the other team, or absent, goes to staff.
+- **Roster.** A player may link several Steam accounts, and plays on one of them. A linked account
+  seen on its player's team becomes verified. A player seen on the other team, or with none of
+  their accounts in the match, goes to staff.
 - **Awards.** The game's `mvp_rank` 1, 2 and 3 are the MVP and the two key players. When all three
   are linked players on the roster, they become the match's awards.
 """
@@ -25,7 +26,7 @@ from django.db import transaction
 from django.db.models import Count
 
 from league.domain.engine import Status
-from league.models import ApiMatchCheck, Community, Match, MatchParticipant, Player
+from league.models import ApiMatchCheck, Community, Match, MatchParticipant, SteamAccount
 from league.models.alerts import AlertKind
 from league.models.api import CheckStatus
 from league.models.permissions import Area
@@ -46,8 +47,8 @@ def status_lines(community: Community) -> list[str]:
     settings_ = runtime.of(community)
     checks = ApiMatchCheck.objects.filter(match__community=community)
     by_status = dict(checks.values("status").annotate(n=Count("id")).values_list("status", "n"))
-    linked = Player.objects.filter(steam_account_id__isnull=False)
-    verified = linked.exclude(steam_verified_at=None).count()
+    linked = SteamAccount.objects.all()
+    verified = linked.exclude(verified_at=None).count()
     lines = [
         "Lobbies: deadlock-api's bot creates each one; the host enters a code if it can't "
         f"(region: {settings_.lobby_region or 'automatic'}).",
@@ -191,18 +192,26 @@ def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any])
     )
 
     rows = list(match.participants.roster().select_related("player"))
-    linked = {row.player.steam_account_id: row for row in rows if row.player.steam_account_id}
+    by_player = {row.player_id: row for row in rows}
+    # Every linked account of the roster. A player with several is in the match on whichever
+    # one deadlock-api shows; they're missing only if it shows none of them.
+    linked = {
+        account_id: by_player[player_id]
+        for account_id, player_id in steam.accounts_of(by_player).items()
+    }
     wrong_team: list[int] = []
-    missing: list[int] = []
     seen_right: list[int] = []
+    present: set[int] = set()
     for account_id, row in linked.items():
         found = api_players.get(int(account_id))
         if found is None:
-            missing.append(row.player_id)
-        elif letters.get(found["team"]) != row.team:
+            continue
+        present.add(row.player_id)
+        if letters.get(found["team"]) != row.team:
             wrong_team.append(row.player_id)
         else:
-            seen_right.append(row.player_id)
+            seen_right.append(account_id)
+    missing = sorted({row.player_id for row in linked.values()} - present)
     unlinked = sorted(a for a in api_players if a not in linked)
     _note_abandons(match, api_players, linked)
 
@@ -210,7 +219,7 @@ def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any])
     claimed = _claimed_winner(match)
     if api_winner and claimed and api_winner != claimed:
         problems.append("deadlock-api shows the other team won")
-    if linked and not seen_right and len(missing) == len(linked):
+    if linked and not present:
         problems.append(f"none of the linked players were in Deadlock match {deadlock_match_id}")
     if wrong_team:
         problems.append(f"{len(wrong_team)} linked player(s) were on the other team")
@@ -322,14 +331,10 @@ def api_stat_lines(match: Match) -> dict[int, str]:
     heroes = dict(Champion.objects.values_list("pk", "name"))
     by_account = {p["account_id"]: p for p in check.summary.get("players", [])}
     lines = {}
-    accounts = dict(
-        Player.objects.filter(pk__in=match.participants.roster().values("player_id"))
-        .exclude(steam_account_id__isnull=True)
-        .values_list("pk", "steam_account_id")
-    )
-    for player_id, account_id in accounts.items():
+    roster = match.participants.roster().values_list("player_id", flat=True)
+    for account_id, player_id in steam.accounts_of(roster).items():
         p = by_account.get(account_id)
-        if p is None:
+        if p is None or player_id in lines:
             continue
         hero = heroes.get(p.get("hero_id"), "")
         kda = f"{p.get('kills', '?')}/{p.get('deaths', '?')}/{p.get('assists', '?')}"

@@ -19,6 +19,7 @@ class PrioEntry(models.Model):
 
     class Meta:
         db_table = "prio_entries"
+        verbose_name_plural = "prio entries"
         ordering = ("queued_at", "id")
         constraints = [
             models.UniqueConstraint(
