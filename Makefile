@@ -2,7 +2,8 @@
 # (scripts/dev-vm.ps1 makes one with Multipass). `make` alone lists the targets.
 
 SHELL := /bin/bash
-.SHELLFLAGS := -eu -o pipefail -c
+# No -u: multipass and SSH run bash with ~/.bashrc, which reads unset variables such as PS1.
+.SHELLFLAGS := -e -o pipefail -c
 .DEFAULT_GOAL := help
 MAKEFLAGS += --no-print-directory
 

@@ -13,16 +13,23 @@ Everything goes through the Makefile; `make` lists the targets.
 - **Windows:** [Multipass](https://canonical.com/multipass) (`winget install Canonical.Multipass`),
   then:
   ```powershell
-  scripts\dev-vm.ps1                 # once: makes the draftbot-dev VM, mounts this checkout
-  scripts\dev-vm.ps1 make dev        # any make target, run in the VM
-  scripts\dev-vm.ps1 shell           # a shell there, in the repo
+  scripts\dev-vm.ps1                 # once: makes the draftbot-dev VM and copies this checkout in
+  scripts\dev-vm.ps1 make dev        # copy the checkout in again, then run any make target there
+  scripts\dev-vm.ps1 shell           # a shell there, in its copy (`sync` first after editing)
   ```
   The VM is Ubuntu 24.04 with Docker, make and uv, and gets half this PC's CPUs and memory and a
-  60 GB disk (`-Cpus`, `-MemoryGB`, `-DiskGB` change that when it's made). The dev stack's ports
-  answer on the VM's address, which the script prints. Commit from the VM's shell, so the
-  pre-commit hooks run where they were installed.
+  60 GB disk (`-Cpus`, `-MemoryGB`, `-DiskGB` change that when it's made). Before each command
+  the script brings the VM's copy in line with this checkout, in about two seconds: every file Git
+  tracks or would track, plus `.env`, `.env.dev` and your deploy inventories. The copy lives on
+  the VM's own disk, so builds and tests run at native speed and Multipass needs no shared
+  folders. The dev stack's ports answer on the VM's address, which the script prints.
 
-Then, once:
+  Edit and commit on Windows. `scripts\dev-vm.ps1 make check` runs every hook in the VM before
+  you push. Installed on Windows, the hooks run there too, except two that need Linux
+  (`compose`, which uses make, and `ansible-lint`): `uv run pre-commit install`, then
+  `set SKIP=compose,ansible-lint` in that shell.
+
+Then, once (on Linux):
 
 ```bash
 make setup          # uv sync, and the pre-commit hooks

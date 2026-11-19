@@ -25,7 +25,9 @@ x-dev-env: &dev-env
   BOT_HEARTBEAT_FILE: /tmp/bot-heartbeat
   DEBUG: "true"
   DEV_CONTROL: "true"
-  ALLOWED_HOSTS: localhost,127.0.0.1,web
+  # Any name: the dev stack is DEBUG-only and on 127.0.0.1, unless the Windows dev VM opens it
+  # to this PC by the VM's address (DEV_BIND).
+  ALLOWED_HOSTS: "*"
   LOG_FORMAT: ${LOG_FORMAT:-text}
 
 # The dev-only services get the same hardening as the app.

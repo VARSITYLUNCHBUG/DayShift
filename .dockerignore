@@ -9,11 +9,13 @@
 !presets/
 !scoreocr/
 # The unit suite, for the `test` target only: the runtime and dev targets copy named folders.
-# The two control-panel sources are what tests/test_devtools_panel_contract.py checks.
+# Two control-panel sources (tests/test_devtools_panel_contract.py checks them) and the Discord
+# simulator's package (tests/test_devtools_sim_heroes.py serves its heroes).
 !tests/
 tests/e2e/
 !services/control-panel/src/api/control.ts
 !services/control-panel/src/lib/match.ts
+!services/discord-sim/src/
 !manage.py
 !pyproject.toml
 !uv.lock

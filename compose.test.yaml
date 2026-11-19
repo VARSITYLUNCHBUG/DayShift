@@ -73,6 +73,8 @@ services:
       DATABASE_URL: postgres://draftbot:test@db:5432/draftbot
       DJANGO_SECRET_KEY: test-only-not-secret
       HYPOTHESIS_PROFILE: ${HYPOTHESIS_PROFILE:-dev}
+      # The image is read-only: no pytest cache.
+      PYTEST_ADDOPTS: -p no:cacheprovider
     depends_on:
       db:
         condition: service_healthy
