@@ -235,7 +235,9 @@ bot claimed an effect in between, the reset goes round again. After 30 s of that
 (`busy`) and changes nothing. Holding the locks, it resets the simulator (`POST /_sim/reset`),
 empties every league table except champions and draft modes (ids restart at 1, except outbox
 effect ids, which keep counting), drops all devtools state, and runs `dev_seed` (with `"none"`:
-only the community and season, no players), which lays the guild out again. Logins in `/admin` survive. The bot reconnects to the reset simulator by itself
+only the community and season, no players), which lays the guild out again. Logins in `/admin`
+survive: they're players, so the reset puts each one back, merged into the fixture player with the
+same Discord ID if there is one. The bot reconnects to the reset simulator by itself
 within a few seconds; `GET /_sim/health` says when (`bot_connected`).
 
 Response: `{"ok": true, "seed": {"fixtures_loaded": true, "players": 14, "ratings_seeded": 14,
@@ -492,4 +494,4 @@ Steps without a `via` use the default, so a scenario runs through the bot whenev
 simulator is up. Write your own as `devtools/scenarios/<name>.json`:
 `{"description": "...", "steps": [...]}`, and give it an end-state check in
 `tests/test_devtools_scenarios.py` and `tests/e2e/test_scenarios.py` (see the
-[developer guide](../docs/dev/README.md#adding-a-scenario)).
+[developer guide](../docs/dev/README.md#the-control-panel-and-scenarios)).

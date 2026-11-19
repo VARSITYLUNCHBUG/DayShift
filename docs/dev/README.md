@@ -13,7 +13,7 @@ Everything goes through the Makefile; `make` lists the targets.
 - **Windows:** [Multipass](https://canonical.com/multipass) (`winget install Canonical.Multipass`),
   then:
   ```powershell
-  scripts\dev-vm.ps1                 # once: makes the draftbot-dev VM and copies this checkout in
+  scripts\dev-vm.ps1                 # once: makes the dayshift-dev VM and copies this checkout in
   scripts\dev-vm.ps1 make dev        # copy the checkout in again, then run any make target there
   scripts\dev-vm.ps1 shell           # a shell there, in its copy (`sync` first after editing)
   ```
@@ -39,7 +39,7 @@ make setup          # uv sync, and the pre-commit hooks
 
 ```bash
 make dev            # build, start, migrate, seed fixtures/dev, print the URLs
-make superuser      # an admin login
+make superuser      # an admin login: asks for a Discord ID (a fixture player's gives them the login)
 make dev-logs       # follow the logs
 make dev-stop       # stop, keeping the data
 make dev-reset      # drop the database and start again from the fixtures
@@ -55,7 +55,7 @@ edge and the control panel, and waits for each to be healthy.
 | Control panel | http://localhost:18091 |
 | Dev control API | http://localhost:18000/_control/api/ |
 | Discord simulator | http://localhost:18090/_sim/state |
-| Postgres | `127.0.0.1:15432`, user `draftbot`, password `dev` |
+| Postgres | `127.0.0.1:15432`, user `dayshift`, password `dev` |
 
 `dev_seed` loads `fixtures/dev/*.json` (a community, a season, staff grants, 14 players, their
 dev profiles and a ping), lays the simulator's guild out the way `/setup` would, and seeds the
@@ -81,7 +81,7 @@ and the simulator's ([services/discord-sim/README.md](../../services/discord-sim
 4. **Scenarios**: the presets in `devtools/scenarios/` (a full match, a missed ready check, a
    dispute, a sub mid-draft and more), one step at a time or to the end.
 
-From a shell: `docker compose -p draftbot-dev -f compose.yaml -f compose.dev.yaml exec web python
+From a shell: `docker compose -p dayshift-dev -f compose.yaml -f compose.dev.yaml exec web python
 manage.py dev_scenario full_match`. A new scenario needs its end-state check in
 `tests/test_devtools_scenarios.py` and `tests/e2e/test_scenarios.py`; both fail without one.
 
@@ -138,5 +138,5 @@ with a default, and remove a column one release after the code stops using it.
 - **An effect is stuck.** The admin's Outbox effects page, filtered to `failed` or `pending`.
 - **Timers move on while you look.** Pause them in the panel's header.
 - **Fault injection.** `POST /_sim/faults` makes the next matching REST calls fail.
-- **A shell.** `make shell`; psql with `docker compose -p draftbot-dev -f compose.yaml -f
-  compose.dev.yaml exec db psql -U draftbot`.
+- **A shell.** `make shell`; psql with `docker compose -p dayshift-dev -f compose.yaml -f
+  compose.dev.yaml exec db psql -U dayshift`.
