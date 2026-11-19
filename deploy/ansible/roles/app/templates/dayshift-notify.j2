@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # {{ ansible_managed }}
 # Posts a message to the alert webhook (vault_alert_webhook_url), and always logs it to the journal.
-#   draftbot-notify "message"        draftbot-notify --unit <unit>   (a failed unit, with its log)
+#   dayshift-notify "message"        dayshift-notify --unit <unit>   (a failed unit, with its log)
 set -euo pipefail
 
 if [ "${1:-}" = "--unit" ]; then
@@ -10,9 +10,9 @@ if [ "${1:-}" = "--unit" ]; then
 else
     message=$1
 fi
-logger --tag draftbot-notify --priority user.warning "$message"
+logger --tag dayshift-notify --priority user.warning "$message"
 
-webhook={{ draftbot_alert_webhook_url | quote }}
+webhook={{ dayshift_alert_webhook_url | quote }}
 if [ -n "$webhook" ]; then
     # Discord caps a message at 2000 characters.
     jq --null-input --arg content "${message:0:1900}" '{content: $content}' \

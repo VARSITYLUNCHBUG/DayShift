@@ -4,6 +4,6 @@ exclude_paths:
   - collections/
   - .cache/
 skip_list:
-  # One namespace for the whole install (draftbot_*), shared by the inventory and both roles,
+  # One namespace for the whole install (dayshift_*), shared by the inventory and both roles,
   # instead of a prefix per role mapped from the inventory's names.
   - var-naming[no-role-prefix]

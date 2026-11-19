@@ -16,7 +16,7 @@
 # Every service runs on a read-only root filesystem with no Linux capabilities, and the app's as
 # a non-root user. `.env` (from .env.example) is the app's environment file.
 
-name: dl-mm-discord
+name: dayshift
 
 x-logging: &logging
   driver: json-file
@@ -41,12 +41,12 @@ x-app: &app
       # server's Score OCR setting.
       INSTALL_OCR: ${INSTALL_OCR:-false}
   # Published to the repo's packages. `docker compose pull` fetches it; `--build` builds it here.
-  image: ${DRAFTBOT_IMAGE:-ghcr.io/varsitylunchbug/dl-mm-discord}:${DRAFTBOT_IMAGE_TAG:-latest}
+  image: ${DAYSHIFT_IMAGE:-ghcr.io/varsitylunchbug/dayshift}:${DAYSHIFT_IMAGE_TAG:-latest}
   env_file:
     - path: .env
       required: false
   environment: &app-env
-    DATABASE_URL: postgres://draftbot:${POSTGRES_PASSWORD:-change-me}@db:5432/draftbot
+    DATABASE_URL: postgres://dayshift:${POSTGRES_PASSWORD:-change-me}@db:5432/dayshift
     BOT_HEARTBEAT_FILE: /tmp/bot-heartbeat
   # Sized, so a burst of uploads (Django spools bodies over 2.5 MB here) fails a request rather
   # than filling the container's memory limit, which tmpfs pages count against.
@@ -93,9 +93,9 @@ services:
     # The image's postgres user; the data volume is already its own.
     user: "70:70"
     environment:
-      POSTGRES_USER: draftbot
+      POSTGRES_USER: dayshift
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-      POSTGRES_DB: draftbot
+      POSTGRES_DB: dayshift
       # Page checksums, so disk corruption is reported rather than read back. Only applies when
       # the data volume is created.
       POSTGRES_INITDB_ARGS: --data-checksums
@@ -123,7 +123,7 @@ services:
     stop_grace_period: 60s
     healthcheck:
       # Over TCP: the first-boot server only listens on its socket.
-      test: ["CMD", "pg_isready", "-q", "-h", "127.0.0.1", "-U", "draftbot", "-d", "draftbot"]
+      test: ["CMD", "pg_isready", "-q", "-h", "127.0.0.1", "-U", "dayshift", "-d", "dayshift"]
       interval: 5s
       timeout: 3s
       retries: 20

@@ -298,7 +298,7 @@ def application(state: SimState) -> Payload:
         "id": str(state.application_id),
         "name": bot.display_name,
         "icon": None,
-        "description": "draft-bot running against discord-sim",
+        "description": "DayShift running against discord-sim",
         "summary": "",
         "type": None,
         "bot_public": False,

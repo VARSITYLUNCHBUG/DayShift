@@ -16,7 +16,7 @@
     -DiskGB when creating it.
 
     You edit and commit here, on Windows. Before each command the VM's copy at
-    /home/ubuntu/draft-bot is brought in line with this checkout: every file Git tracks or would
+    /home/ubuntu/dayshift is brought in line with this checkout: every file Git tracks or would
     track, plus .env, .env.dev and your deploy inventories, which Git ignores. It lives on the VM's
     own disk, so builds and tests run at native speed and no host folder is shared with the VM. Its
     caches (.venv and the like) are kept between runs. make runs there with DEV_BIND=0.0.0.0, so
@@ -33,7 +33,7 @@ param(
     [string]$Action = "up",
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
     [string[]]$Rest = @(),
-    [string]$Name = "draftbot-dev",
+    [string]$Name = "dayshift-dev",
     [int]$Cpus = 0,
     [int]$MemoryGB = 0,
     [int]$DiskGB = 60
@@ -44,7 +44,7 @@ param(
 # call below checks $LASTEXITCODE instead.
 $ErrorActionPreference = "Continue"
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$Copy = "/home/ubuntu/draft-bot"
+$Copy = "/home/ubuntu/dayshift"
 
 function Fail([string]$Message) {
     Write-Host "ERROR: $Message" -ForegroundColor Red
@@ -77,10 +77,10 @@ runcmd:
 # its own, which pre-commit needs. Commits belong in the Windows checkout, not in this one.
 $Unpack = @'
 set -eu
-copy=/home/ubuntu/draft-bot
+copy=/home/ubuntu/dayshift
 mkdir -p "$copy"
-tar -xf /home/ubuntu/draftbot-sync.tar -C "$copy"
-tar -tf /home/ubuntu/draftbot-sync.tar | sed 's#^\./##' | sort > /tmp/draftbot-sync.list
+tar -xf /home/ubuntu/dayshift-sync.tar -C "$copy"
+tar -tf /home/ubuntu/dayshift-sync.tar | sed 's#^\./##' | sort > /tmp/dayshift-sync.list
 cd "$copy"
 find . -type f \
     -not -path './.venv/*' -not -path './.git/*' -not -path './test-results/*' \
@@ -89,10 +89,10 @@ find . -type f \
     -not -path './deploy/ansible/.venv/*' -not -path './deploy/ansible/collections/*' \
     -not -path './deploy/ansible/backups/*' -not -path './services/discord-sim/.venv/*' \
     -not -name '.env.dev' \
-    | sed 's#^\./##' | sort | comm -23 - /tmp/draftbot-sync.list | xargs -r -d '\n' rm -f
+    | sed 's#^\./##' | sort | comm -23 - /tmp/dayshift-sync.list | xargs -r -d '\n' rm -f
 [ -d .git ] || git init -q
 git add -A
-rm -f /home/ubuntu/draftbot-sync.tar
+rm -f /home/ubuntu/dayshift-sync.tar
 '@
 
 function Get-State {
@@ -115,9 +115,9 @@ function Sync-Repo {
             Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
             Sort-Object -Unique
         $temp = [IO.Path]::GetTempPath()
-        $list = Join-Path $temp "draftbot-sync.list"
+        $list = Join-Path $temp "dayshift-sync.list"
         [IO.File]::WriteAllLines($list, [string[]]$files)
-        tar.exe -cf (Join-Path $temp "draftbot-sync.tar") -T $list
+        tar.exe -cf (Join-Path $temp "dayshift-sync.tar") -T $list
         if ($LASTEXITCODE -ne 0) { Fail "tar failed." }
     } finally {
         Pop-Location
@@ -126,10 +126,10 @@ function Sync-Repo {
     # relative name from inside the temp folder.
     Push-Location $temp
     try {
-        multipass transfer draftbot-sync.tar "${Name}:/home/ubuntu/draftbot-sync.tar"
+        multipass transfer dayshift-sync.tar "${Name}:/home/ubuntu/dayshift-sync.tar"
         if ($LASTEXITCODE -ne 0) { Fail "multipass transfer failed." }
     } finally {
-        Remove-Item draftbot-sync.tar, draftbot-sync.list -ErrorAction SilentlyContinue
+        Remove-Item dayshift-sync.tar, dayshift-sync.list -ErrorAction SilentlyContinue
         Pop-Location
     }
     multipass exec $Name -- bash -c ($Unpack -replace "`r", "")

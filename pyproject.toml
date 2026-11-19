@@ -1,5 +1,5 @@
 [project]
-name = "dl-mm-discord"
+name = "dayshift"
 version = "1.0.0"
 description = "Discord bot that runs queue, captain draft, champion pick/ban and Elo for 6v6 Deadlock."
 requires-python = ">=3.13,<3.14"
@@ -13,6 +13,8 @@ dependencies = [
     "pyyaml>=6",
     "whitenoise>=6.9",
     "openskill>=6.2,<7",
+    # The leaderboard images (bot/renderers/leaderboard_image.py).
+    "pillow>=13.0.0",
     "uvicorn[standard]>=0.30,<1",
 ]
 

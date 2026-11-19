@@ -16,7 +16,7 @@ import httpx
 from django.conf import settings
 
 TIMEOUT = httpx.Timeout(10.0, read=60.0)  # Lobby creation waits for Deadlock to make the party.
-USER_AGENT = "dl-mm-discord (Deadlock inhouse bot)"
+USER_AGENT = "DayShift (Deadlock inhouse bot)"
 
 GAME_MODES = ("normal", "street_brawl")
 SERVER_REGIONS = (

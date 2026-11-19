@@ -1,8 +1,8 @@
 {
-  "name": "draftbot-control-panel",
+  "name": "dayshift-control-panel",
   "private": true,
   "version": "0.1.0",
-  "description": "Dev-only control panel for the draft-bot local stack and Discord simulator.",
+  "description": "Dev-only control panel for the DayShift local stack and Discord simulator.",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"

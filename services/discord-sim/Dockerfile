@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-edi
 FROM python:3.13.18-slim-trixie
 
 LABEL org.opencontainers.image.title="discord-sim" \
-      org.opencontainers.image.description="Fake Discord REST v10 + gateway + control API for draft-bot dev and tests."
+      org.opencontainers.image.description="Fake Discord REST v10 + gateway + control API for DayShift dev and tests."
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

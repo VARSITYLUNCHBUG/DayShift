@@ -111,5 +111,5 @@ npm run typecheck
 npm run lint
 npm test             # vitest
 npm run build        # into dist/
-docker build -t draftbot-dev/control-panel:local .
+docker build -t dayshift-dev/control-panel:local .
 ```

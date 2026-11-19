@@ -2,10 +2,10 @@
 - name: Check the deploy user can still log in once root and passwords are refused
   ansible.builtin.assert:
     that:
-      - draftbot_authorized_keys | length > 0
-      - draftbot_authorized_keys | reject('match', '^(ssh-|ecdsa-|sk-)\S+ [A-Za-z0-9+/=]{40,}') | list | length == 0
+      - dayshift_authorized_keys | length > 0
+      - dayshift_authorized_keys | reject('match', '^(ssh-|ecdsa-|sk-)\S+ [A-Za-z0-9+/=]{40,}') | list | length == 0
     fail_msg: >-
-      draftbot_authorized_keys needs your real public keys (the contents of ~/.ssh/id_ed25519.pub).
+      dayshift_authorized_keys needs your real public keys (the contents of ~/.ssh/id_ed25519.pub).
       This role turns off root and password logins, so without one you would be locked out.
     quiet: true
 
@@ -18,12 +18,12 @@
 
 - name: Set the timezone
   community.general.timezone:
-    name: "{{ draftbot_timezone }}"
+    name: "{{ dayshift_timezone }}"
 
 # --- The deploy user and SSH --------------------------------------------------------------------
 - name: Create the deploy user
   ansible.builtin.user:
-    name: "{{ draftbot_deploy_user }}"
+    name: "{{ dayshift_deploy_user }}"
     shell: /bin/bash
     # Locked: it logs in with keys only and sudo needs no password.
     password: "!"
@@ -31,14 +31,14 @@
 
 - name: Install the deploy user's SSH keys
   ansible.posix.authorized_key:
-    user: "{{ draftbot_deploy_user }}"
-    key: "{{ draftbot_authorized_keys | join('\n') }}"
+    user: "{{ dayshift_deploy_user }}"
+    key: "{{ dayshift_authorized_keys | join('\n') }}"
     exclusive: true
 
 - name: Give the deploy user passwordless sudo
   ansible.builtin.copy:
-    dest: /etc/sudoers.d/90-draftbot-deploy
-    content: "{{ draftbot_deploy_user }} ALL=(ALL:ALL) NOPASSWD: ALL\n"
+    dest: /etc/sudoers.d/90-dayshift-deploy
+    content: "{{ dayshift_deploy_user }} ALL=(ALL:ALL) NOPASSWD: ALL\n"
     owner: root
     group: root
     mode: "0440"
@@ -48,7 +48,7 @@
 # 50-cloud-init.conf some images ship with PasswordAuthentication yes.
 - name: Turn off root and password logins
   ansible.builtin.copy:
-    dest: /etc/ssh/sshd_config.d/10-draftbot.conf
+    dest: /etc/ssh/sshd_config.d/10-dayshift.conf
     content: |
       # Managed by Ansible (roles/host).
       PermitRootLogin no
@@ -87,14 +87,14 @@
 # --- Unattended upgrades, Docker's repository included --------------------------------------------
 - name: Turn on unattended upgrades
   ansible.builtin.copy:
-    dest: /etc/apt/apt.conf.d/52draftbot-unattended-upgrades
+    dest: /etc/apt/apt.conf.d/52dayshift-unattended-upgrades
     content: |
       // Managed by Ansible (roles/host).
       APT::Periodic::Update-Package-Lists "1";
       APT::Periodic::Unattended-Upgrade "1";
       Unattended-Upgrade::Origins-Pattern { "origin=Docker,label=Docker CE"; };
       Unattended-Upgrade::Remove-Unused-Dependencies "true";
-      Unattended-Upgrade::Automatic-Reboot "{{ draftbot_auto_reboot | ternary('true', 'false') }}";
+      Unattended-Upgrade::Automatic-Reboot "{{ dayshift_auto_reboot | ternary('true', 'false') }}";
       Unattended-Upgrade::Automatic-Reboot-Time "04:00";
     owner: root
     group: root

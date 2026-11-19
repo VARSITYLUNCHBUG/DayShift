@@ -20,7 +20,7 @@ make e2e                    # build, start the test stack, run, tear down
 make e2e ARGS="-k timers"   # arguments for pytest
 ```
 
-`make e2e` starts the `draftbot-test` stack from `compose.test.yaml` (web, the bot, Postgres,
+`make e2e` starts the `dayshift-test` stack from `compose.test.yaml` (web, the bot, Postgres,
 the simulator, the control panel and a `chrome` service running a Playwright server), runs this
 folder in the `e2e` container, and removes everything afterwards, pass or fail. Nothing is
 published on the host. It runs on a dev machine, not on every pull request; the E2E workflow

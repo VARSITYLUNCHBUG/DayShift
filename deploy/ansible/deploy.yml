@@ -1,14 +1,14 @@
 ---
 # Upgrade to another image tag: back up, then pull and restart. migrate runs before web and bot.
-#   ansible-playbook -i inventories/<client> deploy.yml --ask-vault-pass -e draftbot_image_tag=sha-<commit>
+#   ansible-playbook -i inventories/<client> deploy.yml --ask-vault-pass -e dayshift_image_tag=sha-<commit>
 # To roll back, deploy the old tag; if the new one migrated the database, restore the backup this
 # run took first (restore.yml).
-- name: Deploy a dl-mm-discord image
-  hosts: draftbot
+- name: Deploy a DayShift image
+  hosts: dayshift
   become: true
   tasks:
     - name: Back up before the upgrade
-      ansible.builtin.command: /usr/local/bin/draftbot-backup
+      ansible.builtin.command: /usr/local/bin/dayshift-backup
       changed_when: true
       failed_when: false
       register: deploy_backup
@@ -21,4 +21,4 @@
       ansible.builtin.include_role:
         name: app
       vars:
-        draftbot_pull: always
+        dayshift_pull: always

@@ -2,79 +2,22 @@
 - name: Check the inventory and the vault
   ansible.builtin.assert:
     that:
-      - draftbot_domain | length > 0
-      - draftbot_image_tag | length > 0
-      - draftbot_discord_guild_id is match('^[0-9]{17,20}$')
-      - draftbot_discord_token | length > 0
-      - draftbot_django_secret_key | length >= 50
-      - draftbot_postgres_password is match('^[A-Za-z0-9]{16,}$')
+      - dayshift_domain | length > 0
+      - dayshift_image_tag | length > 0
+      - dayshift_discord_guild_id is match('^[0-9]{17,20}$')
+      - dayshift_discord_token | length > 0
+      - dayshift_django_secret_key | length >= 50
+      - dayshift_postgres_password is match('^[A-Za-z0-9]{16,}$')
     fail_msg: >-
-      Set draftbot_domain, draftbot_image_tag and draftbot_discord_guild_id in group_vars/all/main.yml,
+      Set dayshift_domain, dayshift_image_tag and dayshift_discord_guild_id in group_vars/all/main.yml,
       and vault_discord_token, vault_django_secret_key (50+ characters) and vault_postgres_password
       (16+ letters and digits) in the vault.
     quiet: true
 
-# --- What an install from before the cleanup left on the host ----------------------------------------
-# Its boot unit, certificate renewal and notify units, and the config folders of nginx, pgbouncer and
-# the observability stack. Its containers go with `remove_orphans` below; the database volume stays.
-- name: Stop and disable the old units
-  ansible.builtin.systemd_service:
-    name: "{{ item }}"
-    state: stopped
-    enabled: false
-  loop: [draftbot.service, draftbot-certbot-renew.timer, draftbot-certbot-renew.service]
-  failed_when: false
-
-- name: Remove the old units, scripts and config folders
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /etc/systemd/system/draftbot.service
-    - /etc/systemd/system/draftbot-certbot-renew.service
-    - /etc/systemd/system/draftbot-certbot-renew.timer
-    - /usr/local/sbin/draftbot-certbot-renew
-    - /usr/local/sbin/draftbot-notify
-    - /usr/local/sbin/draftbot-backup
-    - /etc/draftbot
-    - "{{ draftbot_root }}/infra/nginx"
-    - "{{ draftbot_root }}/infra/pgbouncer"
-    - "{{ draftbot_root }}/infra/observability"
-    - "{{ draftbot_root }}/compose.observability.yaml"
-    - "{{ draftbot_root }}/compose.grafana.yaml"
-    - "{{ draftbot_root }}/.env.observability"
-    - "{{ draftbot_root }}/edge"
-    - "{{ draftbot_root }}/acme-challenge"
-    - "{{ draftbot_root }}/letsencrypt"
-    - "{{ draftbot_root }}/.migrated-image"
-  notify: Reload systemd
-
-# Stopping the old boot unit leaves it marked failed even once its file is gone.
-- name: Forget the old units' state
-  ansible.builtin.command: systemctl reset-failed draftbot.service draftbot-certbot-renew.service
-  changed_when: false
-  failed_when: false
-
-# Overrides an older install listed in COMPOSE_FILE (a CPU limit, say); .env no longer names them.
-- name: Find compose overrides other than the two this role installs
-  ansible.builtin.find:
-    paths: "{{ draftbot_root }}"
-    patterns: ["compose*.yaml", "compose*.yml"]
-    excludes: [compose.yaml, compose.prod.yaml]
-  register: app_stray_compose
-
-- name: Remove them
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    state: absent
-  loop: "{{ app_stray_compose.files }}"
-  loop_control:
-    label: "{{ item.path | basename }}"
-
 # --- The compose project: two compose files and the Caddyfile from this checkout, and .env ----------
 - name: Create the project directory
   ansible.builtin.file:
-    path: "{{ draftbot_root }}/infra/caddy"
+    path: "{{ dayshift_root }}/infra/caddy"
     state: directory
     owner: root
     group: root
@@ -83,7 +26,7 @@
 - name: Install the compose files and the Caddyfile
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../../{{ item.src }}"
-    dest: "{{ draftbot_root }}/{{ item.dest }}"
+    dest: "{{ dayshift_root }}/{{ item.dest }}"
     owner: root
     group: root
     mode: "0644"
@@ -98,7 +41,7 @@
 - name: Write .env
   ansible.builtin.template:
     src: env.j2
-    dest: "{{ draftbot_root }}/.env"
+    dest: "{{ dayshift_root }}/.env"
     owner: root
     group: root
     mode: "0600"
@@ -108,17 +51,17 @@
 # --- The image ----------------------------------------------------------------------------------
 - name: Log in to the registry, for a private image
   community.docker.docker_login:
-    registry_url: "{{ draftbot_registry }}"
-    username: "{{ draftbot_registry_username }}"
-    password: "{{ draftbot_registry_password }}"
-  when: draftbot_registry_username | length > 0
+    registry_url: "{{ dayshift_registry }}"
+    username: "{{ dayshift_registry_username }}"
+    password: "{{ dayshift_registry_password }}"
+  when: dayshift_registry_username | length > 0
   no_log: true
 
 # migrate runs first (web and bot wait for it), then everything waits to be healthy.
 - name: Pull the images and start the stack
   community.docker.docker_compose_v2:
-    project_src: "{{ draftbot_root }}"
-    pull: "{{ draftbot_pull }}"
+    project_src: "{{ dayshift_root }}"
+    pull: "{{ dayshift_pull }}"
     remove_orphans: true
     wait: true
     wait_timeout: 300
@@ -126,17 +69,9 @@
   # migrate runs again on every `up`, by design; only the other services count as a change.
   changed_when: app_up.actions | default([]) | rejectattr('id', 'search', 'migrate') | list | length > 0
 
-# The older install's volumes: its static files, and Prometheus', Grafana's and Alertmanager's
-# data. Their containers went with remove_orphans just now. Never the database's.
-- name: Remove the volumes only an older install used
-  community.docker.docker_volume:
-    name: "dl-mm-discord_{{ item }}"
-    state: absent
-  loop: [static, prometheus-data, grafana-data, alertmanager-data]
-
 - name: Check the site answers over HTTPS
   ansible.builtin.uri:
-    url: "https://{{ draftbot_domain }}/readyz"
+    url: "https://{{ dayshift_domain }}/readyz"
     status_code: 200
   register: app_ready
   retries: 10
@@ -144,7 +79,7 @@
   until: app_ready.status == 200
   delegate_to: localhost
   become: false
-  when: draftbot_check_https | bool
+  when: dayshift_check_https | bool
 
 # --- Backups and the host's health checks, which post to the alert webhook --------------------------
 - name: Install the backup, health and notify scripts
@@ -154,7 +89,7 @@
     owner: root
     group: root
     mode: "0700"
-  loop: [draftbot-backup, draftbot-health, draftbot-notify]
+  loop: [dayshift-backup, dayshift-health, dayshift-notify]
 
 - name: Install the systemd units
   ansible.builtin.template:
@@ -164,11 +99,11 @@
     group: root
     mode: "0644"
   loop:
-    - draftbot-backup.service
-    - draftbot-backup.timer
-    - draftbot-health.service
-    - draftbot-health.timer
-    - draftbot-notify@.service
+    - dayshift-backup.service
+    - dayshift-backup.timer
+    - dayshift-health.service
+    - dayshift-health.timer
+    - dayshift-notify@.service
   notify: Reload systemd
 
 - name: Load changed units before starting their timers
@@ -179,4 +114,4 @@
     name: "{{ item }}"
     state: started
     enabled: true
-  loop: [draftbot-backup.timer, draftbot-health.timer]
+  loop: [dayshift-backup.timer, dayshift-health.timer]

@@ -1,6 +1,6 @@
 # discord-sim
 
-A small fake Discord for running draft-bot on your own machine and in tests. One aiohttp process
+A small fake Discord for running DayShift on your own machine and in tests. One aiohttp process
 on one port (8090) serves:
 
 - **REST v10** under `/api/v10/...`, the routes the bot calls, with Discord's JSON, status codes,
@@ -59,7 +59,7 @@ stack, `compose.dev.yaml` builds it as the `discord-sim` service and publishes i
 | `SIM_BOT_TOKEN` | `sim-token` | The bot token it accepts (REST `Authorization: Bot ...` and IDENTIFY). `*` accepts any non-empty token. |
 | `SIM_PUBLIC_URL` | empty | Base for attachment and gateway URLs. Empty means "from each request's Host header", so the bot (`http://discord-sim:8090`) and your shell (`http://127.0.0.1:18090`) both get URLs they can reach. |
 | `SIM_SEED_USERS` | `0` | Fake members to create at start, `player1` to `playerN`. |
-| `SIM_GUILD_NAME` / `SIM_BOT_NAME` | `Draft Sim` / `Draft Bot` | Display names. |
+| `SIM_GUILD_NAME` / `SIM_BOT_NAME` | `Draft Sim` / `DayShift` | Display names. |
 | `SIM_INTERACTION_ACK_SECONDS` | `3` | How long the bot has to answer an interaction, as on Discord. A late callback gets 10062. `0` turns it off. |
 | `SIM_INTERACTION_TOKEN_SECONDS` | `900` | How long followups and `@original` edits work. After that, 10015. |
 | `SIM_STRICT` | `true` | Discord's validation of message bodies: component limits, no `content` with Components V2, `attachment://` must name a file. Errors come back as 50035 with an `errors` tree. |
@@ -79,8 +79,8 @@ real time. Every ID is clear of the stand-in players (< 1000) and the test helpe
 |---|---|
 | Owner, `sim-owner` ("Sim Owner"), the guild owner | `1100000000000000000` |
 | Guild "Draft Sim", and its `@everyone` role | `1100000000000000001` |
-| Bot user, `draft-bot`, and the application | `1100000000000000002` |
-| Role "Draft Bot" (managed, Administrator), held by the bot | `1100000000000000003` |
+| Bot user, `DayShift`, and the application | `1100000000000000002` |
+| Role "DayShift" (managed, Administrator), held by the bot | `1100000000000000003` |
 | Role "Staff" (mentionable) | `1100000000000000004` |
 | Category "Text Channels" | `1100000000000000010` |
 | Text channel `#general` | `1100000000000000011` |

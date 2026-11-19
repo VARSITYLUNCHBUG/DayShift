@@ -1,17 +1,17 @@
 ---
 # Back up the database now, and copy the dump to the controller's backups/<host>/.
 #   ansible-playbook -i inventories/<client> backup.yml
-- name: Back up dl-mm-discord
-  hosts: draftbot
+- name: Back up DayShift
+  hosts: dayshift
   become: true
   tasks:
     - name: Take a backup
-      ansible.builtin.command: /usr/local/bin/draftbot-backup
+      ansible.builtin.command: /usr/local/bin/dayshift-backup
       register: backup_run
       changed_when: true
 
     - name: Find the newest dump
-      ansible.builtin.shell: set -o pipefail && ls -1t /var/backups/draftbot/draftbot-*.dump | head -n 1
+      ansible.builtin.shell: set -o pipefail && ls -1t /var/backups/dayshift/dayshift-*.dump | head -n 1
       args:
         executable: /bin/bash
       register: backup_newest

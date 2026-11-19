@@ -4,21 +4,21 @@
 
 # The public hostname. Point its A (and AAAA) record at the server first: the edge gets its
 # certificate from Let's Encrypt for this name on its first start.
-draftbot_domain: play.example.com
+dayshift_domain: play.example.com
 # The image to run: `sha-<commit>` pins one build of main, `latest` follows main. Pin a sha tag and
-# change it here (or pass -e draftbot_image_tag=...) to upgrade with deploy.yml.
-draftbot_image_tag: latest
+# change it here (or pass -e dayshift_image_tag=...) to upgrade with deploy.yml.
+dayshift_image_tag: latest
 
 # Right-click the server in Discord with Developer Mode on, and Copy Server ID.
-draftbot_discord_guild_id: "000000000000000000"
+dayshift_discord_guild_id: "000000000000000000"
 # Optional: a channel ID where the bot posts every error's traceback and the health watchdog's
 # alerts, for whoever runs it.
-draftbot_error_log_channel_id: ""
+dayshift_error_log_channel_id: ""
 
 # Public SSH keys allowed to log in as the deploy user. Root and password logins are switched off,
 # so this must hold at least one key you have.
-draftbot_authorized_keys:
+dayshift_authorized_keys:
   - ssh-ed25519 REPLACE_ME you@laptop
 
 # Optional: only these addresses may open /admin/ (empty: anyone, behind Django's own login).
-draftbot_admin_cidrs: []
+dayshift_admin_cidrs: []

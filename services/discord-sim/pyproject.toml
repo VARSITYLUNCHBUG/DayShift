@@ -1,7 +1,7 @@
 [project]
 name = "discord-sim"
 version = "1.0.0"
-description = "A small fake Discord (REST v10, gateway, control API) for running draft-bot locally and in tests."
+description = "A small fake Discord (REST v10, gateway, control API) for running DayShift locally and in tests."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [

@@ -1,4 +1,4 @@
-# dl-mm-discord: every dev, test and deploy task. Run it on Linux, or inside the dev VM on Windows
+# DayShift: every dev, test and deploy task. Run it on Linux, or inside the dev VM on Windows
 # (scripts/dev-vm.ps1 makes one with Multipass). `make` alone lists the targets.
 
 SHELL := /bin/bash
@@ -9,11 +9,11 @@ MAKEFLAGS += --no-print-directory
 
 export DOCKER_BUILDKIT := 1
 # The e2e suite writes test-results/ as you.
-export DRAFTBOT_UID := $(shell id -u)
-export DRAFTBOT_GID := $(shell id -g)
+export DAYSHIFT_UID := $(shell id -u)
+export DAYSHIFT_GID := $(shell id -g)
 
-DEV := docker compose -p draftbot-dev -f compose.yaml -f compose.dev.yaml
-TEST := docker compose -p draftbot-test -f compose.yaml -f compose.test.yaml
+DEV := docker compose -p dayshift-dev -f compose.yaml -f compose.dev.yaml
+TEST := docker compose -p dayshift-test -f compose.yaml -f compose.test.yaml
 WAIT := --wait --wait-timeout 300
 # Anything after the target for pytest, e.g. make test ARGS="tests/test_flow.py -k ready".
 ARGS ?=
@@ -24,10 +24,10 @@ CLIENT ?= example
 ANSIBLE := cd deploy/ansible && .venv/bin/ansible-playbook -i inventories/$(CLIENT)
 
 ifeq ($(REAL_DISCORD),1)
-DEV_ENV := DRAFTBOT_ENV_FILE=.env
+DEV_ENV := DAYSHIFT_ENV_FILE=.env
 DEV_PROFILE :=
 else
-DEV_ENV := DRAFTBOT_ENV_FILE=.env.dev
+DEV_ENV := DAYSHIFT_ENV_FILE=.env.dev
 DEV_PROFILE := --profile sim
 endif
 
@@ -62,7 +62,7 @@ endif
 	@echo "  Control panel   http://localhost:$${DEV_PANEL_PORT:-18091}"
 	@echo "  Dev control API http://localhost:$${DEV_WEB_PORT:-18000}/_control/api/"
 	@echo "  Discord sim     http://localhost:$${DEV_SIM_PORT:-18090}/_sim/state"
-	@echo "  Postgres        127.0.0.1:$${DEV_DB_PORT:-15432} (draftbot / dev)"
+	@echo "  Postgres        127.0.0.1:$${DEV_DB_PORT:-15432} (dayshift / dev)"
 
 dev-logs: ## Follow the dev stack's logs
 	$(DEV_ENV) $(DEV) $(DEV_PROFILE) logs -f --tail 50
@@ -116,7 +116,7 @@ panel-test: ## The control panel's types, lint, tests and build, in a Node conta
 compose-check: ## Check every way the compose files combine (a pre-commit hook)
 	@for files in "-f compose.yaml" "-f compose.yaml -f compose.dev.yaml" \
 		"-f compose.yaml -f compose.test.yaml" "-f compose.yaml -f deploy/compose.prod.yaml"; do \
-		DRAFTBOT_IMAGE_TAG=check EDGE_SITE=play.example.com \
+		DAYSHIFT_IMAGE_TAG=check EDGE_SITE=play.example.com \
 			docker compose --env-file .env.example $$files --profile '*' config --quiet; \
 	done
 
@@ -125,8 +125,8 @@ compose-check: ## Check every way the compose files combine (a pre-commit hook)
 clean: ## Remove every container, volume, network and local image the dev and test stacks made
 	-$(DEV) --profile '*' down -v --remove-orphans --rmi local
 	-$(TEST) --profile '*' down -v --remove-orphans --rmi local
-	@# Anything left by a run that was killed, or by an older compose file.
-	@for project in draftbot-dev draftbot-test; do \
+	@# Anything left by a run that was killed.
+	@for project in dayshift-dev dayshift-test; do \
 		docker ps -aq --filter label=com.docker.compose.project=$$project | xargs -r docker rm -f; \
 		docker volume ls -q --filter label=com.docker.compose.project=$$project | xargs -r docker volume rm; \
 		docker network ls -q --filter label=com.docker.compose.project=$$project | xargs -r docker network rm; \
@@ -144,7 +144,7 @@ site: ## Install or update a server: make site CLIENT=acme
 
 deploy: ## Upgrade a server to an image: make deploy CLIENT=acme TAG=sha-1234567
 	@test -n "$(TAG)" || { echo "Set TAG, e.g. TAG=sha-1234567"; exit 1; }
-	$(ANSIBLE) deploy.yml --ask-vault-pass -e draftbot_image_tag=$(TAG)
+	$(ANSIBLE) deploy.yml --ask-vault-pass -e dayshift_image_tag=$(TAG)
 
 backup: ## Back up a server's database and fetch the dump: make backup CLIENT=acme
 	$(ANSIBLE) backup.yml --ask-vault-pass
