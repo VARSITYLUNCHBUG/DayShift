@@ -16,13 +16,14 @@ import pytest
 from discord import app_commands
 from django.db import connections
 
-from bot.client import DraftBot
+from bot.client import DayShiftBot
 from bot.commands import player as player_commands
 from bot.commands import staff
 from bot.commands.registry import all_commands
 from bot.db import db
 from bot.handlers.draft import LobbyCodeModal
 from bot.handlers.results import DisputeModal, ReportModal, process_report
+from bot.renderers.leaderboard import page_text
 from bot.routing import Context, _dispatch
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
@@ -528,7 +529,9 @@ def test_stats_and_leaderboard_commands(wired: Community) -> None:
     player = make_player(1)
     interaction = fake_interaction(player)
     run_command(player_commands.stats_command, interaction)
-    assert "Bronze" in replies(interaction)[0]
+    (card,) = [call.kwargs["view"] for call in interaction.followup.send.call_args_list]
+    text = page_text(card)
+    assert "Bronze" in text and "Not on the leaderboard yet" in text
     interaction = fake_interaction(player)
     run_command(player_commands.leaderboard_command, interaction)
     assert "not on the leaderboard yet" in replies(interaction)[0]
@@ -755,7 +758,7 @@ def test_every_command_serialises_for_discord() -> None:
 
 
 def test_bot_uses_only_unprivileged_intents() -> None:
-    bot = DraftBot()
+    bot = DayShiftBot()
     assert bot.intents.value == 641  # Guilds, voice states and guild messages.
     assert not bot.intents.members
     assert not bot.intents.message_content

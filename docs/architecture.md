@@ -45,7 +45,7 @@ flowchart LR
 - **Networks.** `edge` holds the edge and web only, so the edge can reach nothing else. `backend`
   holds Postgres and the app's services; the bot reaches Discord from there. Only the edge
   publishes ports (80 and 443 in production, 127.0.0.1 elsewhere).
-- **Database.** One login, `draftbot`, from `POSTGRES_PASSWORD`. The bot keeps one connection
+- **Database.** One login, `dayshift`, from `POSTGRES_PASSWORD`. The bot keeps one connection
   (all its database work runs on one thread, `league/asyncdb.py`); web opens one per request in
   flight and closes it after. The rating ledger's append-only rule is enforced by triggers
   (`league/db_guards.py`), installed after every `migrate`, whoever logs in.
@@ -102,7 +102,7 @@ Just enough to know when something needs a person:
 
 | Signal | Catches | Where it goes |
 |---|---|---|
-| Container healthchecks (`/readyz`, the bot's heartbeat file, `pg_isready`, the edge) | A process that died or stuck | `docker compose ps`; on a server, `draftbot-health.timer` posts a change to the alert webhook |
+| Container healthchecks (`/readyz`, the bot's heartbeat file, `pg_isready`, the edge) | A process that died or stuck | `docker compose ps`; on a server, `dayshift-health.timer` posts a change to the alert webhook |
 | The bot's watchdog (`league/services/health.py`), every minute | Timers that stopped firing; Discord work piling up | The operator's error channel, once when it starts and once when it clears |
 | `HEALTHCHECK_PING_URL`, pinged by the watchdog | The whole server or the bot going away | Your dead man's switch (healthchecks.io or similar) |
 | The error log (`bot/error_log.py`) | Every ERROR, such as an effect that failed for good | Each server's `/seterrorchannel` channel, and the operator's |
@@ -114,15 +114,68 @@ Logs are JSON on stdout, rotated by Docker; `docker compose logs` is enough at t
 
 | Environment | Compose files | Project | What differs |
 |---|---|---|---|
-| Quickstart | `compose.yaml` | `dl-mm-discord` | HTTP on 127.0.0.1:8000, Postgres on 127.0.0.1:55432 for host tools |
-| Dev | `+ compose.dev.yaml` | `draftbot-dev` | The `dev` target, `DEBUG`, the dev control API, the simulator and the control panel (profile `sim`), every port an env var ([dev/README.md](dev/README.md)) |
-| Test | `+ compose.test.yaml` | `draftbot-test` | Postgres on tmpfs, nothing published, the `unit` and `e2e` profiles |
+| Quickstart | `compose.yaml` | `dayshift` | HTTP on 127.0.0.1:8000, Postgres on 127.0.0.1:55432 for host tools |
+| Dev | `+ compose.dev.yaml` | `dayshift-dev` | The `dev` target, `DEBUG`, the dev control API, the simulator and the control panel (profile `sim`), every port an env var ([dev/README.md](dev/README.md)) |
+| Test | `+ compose.test.yaml` | `dayshift-test` | Postgres on tmpfs, nothing published, the `unit` and `e2e` profiles |
 | Production | `+ deploy/compose.prod.yaml` | per client | The published image at a pinned tag, HTTPS for the domain, `DEBUG` forced off, Postgres unpublished ([../deploy/README.md](../deploy/README.md)) |
 
 The app refuses to start with a combination that only makes sense on your machine: an empty
 `DJANGO_SECRET_KEY` with `DEBUG` off, or `DEV_CONTROL`, `DISCORD_SIM_URL`, `DISCORD_API_BASE` or
 `DISCORD_GATEWAY_URL` without `DEBUG`. `manage.py check --deploy` is clean with the production
 settings (`tests/test_settings.py`).
+
+## Code layout
+
+```
+league/domain/    Pure rules, no Django or Discord: ratings (openskill_v1), strikes and
+                  captain eligibility (standing), Steam IDs, mode schema, draft plan, engine
+                  (statuses, transitions per kind, the captain coinflip), copy (what players read)
+league/models/    The tables (docs/database.md). Player is Django's user model (AUTH_USER_MODEL)
+league/services/  Transactions: queue, lobby, draft, results, ratings, corrections, awards,
+                  standing, penalties, ocr, steam, api_results, calibration, deadlines,
+                  permissions, alerts (the staff channel), runtime (each server's settings),
+                  and Bebot's tools: scrims, prio, pings
+league/integrations/  The deadlock-api client. Network only, no database
+league/web/       The staff calibration dashboard
+league/admin/     Django admin
+bot/handlers/     Clicks and modals: validate, call a service, acknowledge. permissions.py holds
+                  the staff area checks every command and button uses
+bot/commands/     Slash commands
+bot/renderers/    State to Discord components, with no I/O. style.py is the one look (Bebot's
+                  colours, titles and turn strip); board.py renders ranked matches and scrims;
+                  names.py names the channels the bot creates
+bot/effects/      Runs Discord side effects from the outbox, with retries
+bot/error_log.py  Posts ERROR logs to each server's /seterrorchannel channel
+config/           Django settings, the ASGI app, health probes (/healthz, /readyz), logging
+scoreocr/         Scoreboard screenshot reader, used through league/services/ocr.py when installed
+presets/          Draft modes, hero emojis and draft GIFs, loaded by load_presets
+
+devtools/         Dev only: the /_control/ API, the autopilot that plays matches, scenarios
+fixtures/dev/     Dev only: the community, season, staff grants and players dev_seed loads
+services/discord-sim/    Dev and test only: a fake Discord (REST, gateway) and deadlock-api
+services/control-panel/  Dev and test only: the control panel over the two APIs above
+tests/            The unit suite (pytest, Postgres)
+tests/e2e/        The browser suite: Playwright against the whole stack and the simulator
+
+infra/caddy/      The edge's Caddyfile: HTTPS, headers, uploads, the admin allowlist
+compose*.yaml     The stack, and an override per environment (dev, test)
+Makefile          Every dev, test and deploy task: `make` lists them
+deploy/           Ansible for a client's server, and the production compose overrides
+scripts/          dev-vm.ps1: the Multipass dev VM for Windows
+docs/             The host and staff guides, architecture and the developer guide
+```
+
+### The rules that keep it reliable
+
+- **Handlers are stateless.** A `custom_id` holds the action, match and step, and the rest comes
+  from the database. Old buttons survive a restart, and a stale click gets a polite refusal.
+- **Races end in the database.** Row locks, `version` and `step_index` checks, and unique keys.
+- **Timers are rows.** A poller applies timeouts through the same path as a click. After downtime,
+  past-due deadlines get 60 s of grace.
+- **Discord calls happen after commit.** State changes write `outbox_effects` in the same
+  transaction, and a worker runs them in order per lane, retrying on server errors. Each match (or
+  scrim) is a lane, and other work gets one lane per kind and server, so one that keeps failing
+  never holds up another.
 
 ## Design decisions
 

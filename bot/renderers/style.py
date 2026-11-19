@@ -7,7 +7,7 @@ community knows it. Every renderer takes its colours from here. Pure: no I/O.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 HIDDEN_KING = "The Hidden King"
 ARCHMOTHER = "The Archmother"
@@ -30,6 +30,11 @@ DONE_COLOUR = 0x00FF00
 ATTENTION_COLOUR = 0xF1C40F
 VOID_COLOUR = 0x95A5A6
 ALERT_COLOUR = 0xE74C3C
+# DayShift's own bubblegum, for the league's own pages: the leaderboard and a player's stats.
+BRAND_COLOUR = 0xFF8DC3
+# No real timer runs this long. One further out was paused by the dev tools, which park
+# deadlines ten years ahead; say so instead of "in 10 years".
+PAUSED_BEYOND = timedelta(days=365)
 # What Bebot appended to a hero chosen for the captain.
 RANDOM_CHOICE = " (random choice)"
 RANDOMED = " (randomed)"
@@ -54,11 +59,22 @@ def draft_title(number: int, name: str = "") -> str:
     return f"🏆 Draft #{number}: {name} 🏆" if name else f"🏆 Draft #{number} 🏆"
 
 
+def is_paused(moment: datetime) -> bool:
+    return moment - datetime.now(UTC) > PAUSED_BEYOND
+
+
+def relative(moment: datetime, fmt: str = "R") -> str:
+    """A Discord timestamp ("in 40 seconds"), or "paused" for a timer the dev tools parked."""
+    if fmt == "R" and is_paused(moment):
+        return "(paused)"
+    return f"<t:{int(moment.timestamp())}:{fmt}>"
+
+
 def countdown(deadline_at: datetime | None) -> str:
     """Bebot's " ⌛ 40s remaining", as a timestamp Discord counts down without edits."""
     if deadline_at is None:
         return ""
-    return f" ⌛ <t:{int(deadline_at.timestamp())}:R>"
+    return f" ⌛ {relative(deadline_at)}"
 
 
 def hero_emoji_text(unicode_emoji: str) -> str:

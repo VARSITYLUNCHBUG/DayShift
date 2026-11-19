@@ -7,7 +7,7 @@
 #   e2e profile:  db, migrate (+ dev_seed), web, bot, discord-sim, control-panel, chrome (a
 #                 Playwright server) and e2e (tests/e2e against them). `make e2e`.
 
-name: draftbot-test
+name: dayshift-test
 
 x-test-app: &test-app
   # The image's dev target: the published one plus devtools/ and fixtures/ (Dockerfile).
@@ -19,7 +19,7 @@ x-test-app: &test-app
   # service, not here: Compose v2 drops a !reset that arrives through `<<:`.
 
 x-test-env: &test-env
-  DATABASE_URL: postgres://draftbot:test@db:5432/draftbot
+  DATABASE_URL: postgres://dayshift:test@db:5432/dayshift
   BOT_HEARTBEAT_FILE: /tmp/bot-heartbeat
   DEBUG: "true"
   DJANGO_SECRET_KEY: test-only-not-secret
@@ -70,7 +70,7 @@ services:
       target: test
     image: ${COMPOSE_PROJECT_NAME}/tests:local
     environment:
-      DATABASE_URL: postgres://draftbot:test@db:5432/draftbot
+      DATABASE_URL: postgres://dayshift:test@db:5432/dayshift
       DJANGO_SECRET_KEY: test-only-not-secret
       HYPOTHESIS_PROFILE: ${HYPOTHESIS_PROFILE:-dev}
       # The image is read-only: no pytest cache.
@@ -189,7 +189,7 @@ services:
     mem_limit: 1g
     pids_limit: 256
     # The host user (the Makefile sets these), so test-results/ stays yours.
-    user: "${DRAFTBOT_UID:-1001}:${DRAFTBOT_GID:-1001}"
+    user: "${DAYSHIFT_UID:-1001}:${DAYSHIFT_GID:-1001}"
     environment:
       HOME: /tmp
       PW_WS_ENDPOINT: ws://chrome:3000/

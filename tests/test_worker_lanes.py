@@ -229,7 +229,7 @@ def test_sigterm_shuts_the_bot_down_like_ctrl_c(monkeypatch: pytest.MonkeyPatch)
     installed: list[object] = []
     monkeypatch.setattr(client_module.settings, "DISCORD_TOKEN", "test-token")
     monkeypatch.setattr(
-        client_module.DraftBot,
+        client_module.DayShiftBot,
         "run",
         lambda self, *a, **k: installed.append(signal.getsignal(signal.SIGTERM)),
     )

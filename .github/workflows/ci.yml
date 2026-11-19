@@ -24,7 +24,7 @@ permissions:
 env:
   UV_VERSION: "0.13.7"
   PYTHON_VERSION: "3.13"
-  IMAGE: ghcr.io/varsitylunchbug/dl-mm-discord
+  IMAGE: ghcr.io/varsitylunchbug/dayshift
 
 jobs:
   checks:
@@ -56,15 +56,15 @@ jobs:
       db:
         image: postgres:17.12-alpine3.24@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
         env:
-          POSTGRES_USER: draftbot
+          POSTGRES_USER: dayshift
           POSTGRES_PASSWORD: test
-          POSTGRES_DB: draftbot
+          POSTGRES_DB: dayshift
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U draftbot" --health-interval 2s --health-retries 30
+          --health-cmd "pg_isready -U dayshift" --health-interval 2s --health-retries 30
           --tmpfs /var/lib/postgresql/data
     env:
-      DATABASE_URL: postgres://draftbot:test@127.0.0.1:5432/draftbot
+      DATABASE_URL: postgres://dayshift:test@127.0.0.1:5432/dayshift
       DJANGO_SECRET_KEY: ci-only-not-secret
       DJANGO_DOTENV: "off"
     steps:
@@ -180,6 +180,6 @@ jobs:
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
-          cp "$BUNDLE" "$RUNNER_TEMP/dl-mm-discord.sigstore.json"
+          cp "$BUNDLE" "$RUNNER_TEMP/dayshift.sigstore.json"
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
-            --notes "Image: $IMAGE@$DIGEST" "$RUNNER_TEMP/dl-mm-discord.sigstore.json"
+            --notes "Image: $IMAGE@$DIGEST" "$RUNNER_TEMP/dayshift.sigstore.json"

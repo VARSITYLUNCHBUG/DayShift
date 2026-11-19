@@ -28,7 +28,7 @@ class Config:
     public_url: str = ""
     seed_users: int = 0
     guild_name: str = "Draft Sim"
-    bot_name: str = "Draft Bot"
+    bot_name: str = "DayShift"
     # Seconds the bot has to answer an interaction, as on Discord. 0 turns the check off.
     interaction_ack_seconds: float = 3.0
     # Seconds the interaction token stays valid for followups and edits.

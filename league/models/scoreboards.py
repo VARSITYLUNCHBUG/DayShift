@@ -159,6 +159,7 @@ class PlayerAlias(models.Model):
 
     class Meta:
         db_table = "player_aliases"
+        verbose_name_plural = "player aliases"
         constraints = [
             models.UniqueConstraint(fields=("player", "name_norm"), name="uniq_player_alias"),
         ]

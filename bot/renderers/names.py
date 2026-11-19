@@ -1,8 +1,8 @@
 """Names for the channels the bot creates for a match. Pure: no I/O.
 
 One pattern for every match so its channels read alike and sort together in the channel list:
-the text channel `match-12`, then voice `Match 12 · Lobby` and `Match 12 · Kestrel's Team`,
-which is the team's name on the board.
+the text channel `match-12`, then each team's voice, `Match 12 · Kestrel's Team`, which is the
+team's name on the board.
 """
 
 from __future__ import annotations
@@ -22,10 +22,6 @@ def _clean(name: str) -> str:
 
 def match_text(match_id: int) -> str:
     return f"match-{match_id}"
-
-
-def lobby_voice(match_id: int) -> str:
-    return f"Match {match_id} · Lobby"
 
 
 def team_voice(match_id: int, captain: str) -> str:

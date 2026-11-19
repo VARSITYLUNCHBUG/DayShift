@@ -27,7 +27,7 @@ PRODUCTION = {
     "CSRF_TRUSTED_ORIGINS": "https://draft.example.com",
     "BEHIND_TLS_PROXY": "true",
     "SECURE_COOKIES": "true",
-    "DATABASE_URL": "postgres://draftbot:secret@db:5432/draftbot",
+    "DATABASE_URL": "postgres://dayshift:secret@db:5432/dayshift",
 }
 
 

@@ -148,6 +148,27 @@ def test_a_disagreed_early_leave_goes_to_staff(game_on: Match) -> None:
     assert StaffAlert.objects.filter(kind="early_leave", text__icontains="leave early").exists()
 
 
+def test_the_early_leave_card_voids_with_one_press(game_on: Match) -> None:
+    """Staff can void from the card, naming nobody: the reported player is the leaver, even one
+    who has since left the server (so /match early_leave can't name them)."""
+    from bot.renderers.alerts import render_alert
+    from league.services import alerts
+
+    leaver = _leaver(game_on)
+    early_leave.report(game_on.pk, game_on.captain_of("A").player, leaver.pk)
+    early_leave.answer(game_on.pk, game_on.captain_of("B").player, False)
+    alert = StaffAlert.objects.get(kind="early_leave")
+    payload = str(render_alert(alerts.card(alert.pk)).to_components())
+    assert f"Void: {leaver.display_name} left early" in payload
+    staff = make_player(70)
+    assert early_leave.void_from_alert(game_on.pk, staff) == leaver.display_name
+    assert fresh(game_on).status == Status.VOIDED
+    assert fresh(game_on).participants.get(player=leaver).left_early
+    alert.refresh_from_db()
+    assert alert.status == "resolved"
+    assert "Void:" not in str(render_alert(alerts.card(alert.pk)).to_components())
+
+
 def test_an_unanswered_early_leave_goes_to_staff(game_on: Match, clock: Clock) -> None:
     early_leave.report(game_on.pk, game_on.captain_of("A").player, _leaver(game_on).pk)
     clock.advance(121)
@@ -234,7 +255,11 @@ def staff_client(league: Community) -> Any:
     from django.test import Client
 
     client = Client()
-    client.force_login(get_user_model().objects.create_user("staff-rules", is_staff=True))
+    client.force_login(
+        get_user_model().objects.create_user(
+            "staff-rules", is_staff=True, discord_user_id=900_000_000_000_000_005
+        )
+    )
     return client
 
 

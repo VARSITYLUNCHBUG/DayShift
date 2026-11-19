@@ -13,6 +13,7 @@ import httpx
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+from django.contrib.auth.admin import UserAdmin
 from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import QuerySet
@@ -22,6 +23,7 @@ from django.urls import URLPattern, path, reverse
 from django.utils.html import format_html_join
 from django.utils.safestring import SafeString, mark_safe
 
+from league.domain.copy import plural
 from league.domain.errors import DomainError, InvalidAction
 from league.domain.mode_schema import ModeValidationError
 from league.integrations import deadlock_api
@@ -59,11 +61,13 @@ from league.models import (
     ScoreboardRead,
     Season,
     StaffAlert,
+    SteamAccount,
     StrikeAdjustment,
 )
 from league.services import (
     api_results,
     champions,
+    effects,
     integrity,
     interim,
     modes,
@@ -187,12 +191,36 @@ class DraftModeVersionAdmin(admin.ModelAdmin):
     def save_model(
         self, request: HttpRequest, obj: DraftModeVersion, form: Any, change: bool
     ) -> None:
+        before = obj.version if change else None
         published = modes.publish(form.cleaned_data["body"], created_by=request.user)
-        # Point the admin's success message at the new row; the old row is left untouched.
+        # Point the admin's redirect at the new row; the old row is left untouched.
         obj.pk = published.pk
         obj.slug = published.slug
         obj.version = published.version
         obj._state.adding = False
+        if before is not None and published.version == before:
+            note = f"Nothing changed: {published.slug} v{published.version} already says this."
+        else:
+            note = (
+                f"Saved as {published.slug} v{published.version}. Choose it as a server's active "
+                "mode to use it; matches already running keep the version they started with."
+            )
+        request._mode_note = note  # type: ignore[attr-defined]
+
+    def message_user(self, request: HttpRequest, message: Any, *args: Any, **kwargs: Any) -> None:
+        """Django's "was changed successfully" reads wrong for a save that makes a new version."""
+        note = getattr(request, "_mode_note", None)
+        super().message_user(request, note or message, *args, **kwargs)
+
+    def response_change(self, request: HttpRequest, obj: DraftModeVersion) -> HttpResponse:
+        """ "Save and continue editing" opens the version the save made, not the one it came
+        from (Django would go back to the same page)."""
+        response = super().response_change(request, obj)
+        if "_continue" in request.POST:
+            return HttpResponseRedirect(
+                reverse("admin:league_draftmodeversion_change", args=[obj.pk])
+            )
+        return response
 
 
 class RoleGrantInline(admin.TabularInline):
@@ -455,21 +483,48 @@ class SeasonAdmin(admin.ModelAdmin):
         return False
 
 
+class SteamAccountInline(admin.TabularInline):
+    model = SteamAccount
+    extra = 0
+    fields = ("account_id", "steam_name", "linked_at", "verified_at")
+    readonly_fields = ("account_id", "linked_at", "verified_at")
+
+    def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False  # Players link their own accounts with /link.
+
+
 @admin.register(Player)
-class PlayerAdmin(admin.ModelAdmin):
+class PlayerAdmin(UserAdmin):
+    """Every player is a user. Most only ever have a Discord account; an admin login is a player
+    with a password and staff status, made with `createsuperuser` or given here."""
+
     list_display = (
         "display_name",
         "discord_user_id",
-        "steam_account_id",
-        "steam_name",
-        "steam_verified_at",
+        "steam_count",
+        "is_staff",
         "created_at",
     )
-    search_fields = ("display_name", "discord_user_id")
-    readonly_fields = ("discord_user_id",)
+    list_filter = ("is_staff", "is_superuser", "is_active")
+    search_fields = ("display_name", "discord_user_id", "username", "steam_accounts__steam_name")
+    ordering = ("display_name",)
+    readonly_fields = ("discord_user_id", "created_at", "last_login")
+    fieldsets = (
+        (None, {"fields": ("display_name", "discord_user_id", "created_at")}),
+        ("Admin login", {"fields": ("username", "password", "email", "last_login")}),
+        (
+            "Admin access",
+            {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")},
+        ),
+    )
+    inlines = (SteamAccountInline,)
+
+    @admin.display(description="Steam accounts")
+    def steam_count(self, obj: Player) -> int:
+        return obj.steam_accounts.count()
 
     def has_add_permission(self, request: HttpRequest) -> bool:
-        return False  # Players are created by the bot on first interaction.
+        return False  # The bot makes players; `createsuperuser` makes admin logins.
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
@@ -483,8 +538,8 @@ IMPORT_MAX_AGE = 30 * 60  # A preview older than this has to be uploaded again.
 class InterimImportForm(forms.Form):
     community = forms.ModelChoiceField(queryset=Community.objects.order_by("name"))
     file = forms.FileField(
-        help_text="CSV of discord_id, rating, wins, losses. A header row may name the columns; "
-        "a name column is optional."
+        help_text="NeatQueue's leaderboard export as it comes, or a CSV of discord_id, rating, "
+        "wins, losses. A header row may name the columns; a name column is optional."
     )
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -542,8 +597,9 @@ class InterimRatingAdmin(ReadOnlyAdmin):
             count = interim.apply_import(community, rows)
             messages.success(
                 request,
-                f"Imported {count} players for {community}. The interim is on: players see "
-                "NeatQueue points until you turn Interim points off in Runtime settings.",
+                f"Imported {plural(count, 'player')} for {community}. The interim is on: "
+                "players see NeatQueue points until you turn Interim points off in Runtime "
+                "settings.",
             )
             return HttpResponseRedirect(_changelist(self))
 
@@ -575,12 +631,22 @@ class InterimRatingAdmin(ReadOnlyAdmin):
         "points",
         "wins",
         "losses",
-        "games",
+        "games_played",
+        "games_here",
         "imported_points",
         "imported_at",
     )
     list_filter = ("season",)
     search_fields = ("player__display_name", "player__discord_user_id")
+
+    @admin.display(description="Games")
+    def games_played(self, obj: InterimRating) -> int:
+        """Wins plus losses, NeatQueue's included, so it agrees with the record beside it."""
+        return obj.wins + obj.losses
+
+    @admin.display(description="Games here", ordering="games")
+    def games_here(self, obj: InterimRating) -> int:
+        return obj.games
 
 
 @admin.register(PlayerSwap)
@@ -745,6 +811,25 @@ class MatchResourceAdmin(ReadOnlyAdmin):
 class OutboxEffectAdmin(ReadOnlyAdmin):
     list_display = ("id", "kind", "match", "lane", "status", "attempts", "run_after", "last_error")
     list_filter = ("status", "kind")
+    actions = ("retry",)
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        # Rows stay read-only (no change form); this lets the Retry action show.
+        return obj is None and request.user.has_perm("league.change_outboxeffect")
+
+    @admin.action(description="Retry the selected failed effects")
+    def retry(self, request: HttpRequest, queryset: QuerySet[OutboxEffect]) -> None:
+        # The IDs first: on a list filtered to failed ones, the queryset no longer holds them once
+        # they're pending again.
+        selected = list(queryset.values_list("pk", flat=True))
+        count = effects.retry_failed(selected)
+        skipped = len(selected) - count
+        note = (
+            f" Left {plural(skipped, 'effect')} alone: only failed ones run again."
+            if skipped
+            else ""
+        )
+        messages.success(request, f"Queued {plural(count, 'effect')} to run again.{note}")
 
 
 @admin.register(ScoreboardRead)

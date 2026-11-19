@@ -18,7 +18,15 @@ from league.domain import steam as steam_ids
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.integrations import deadlock_api
-from league.models import ApiMatchCheck, Community, Match, OutboxEffect, Player, StaffAlert
+from league.models import (
+    ApiMatchCheck,
+    Community,
+    Match,
+    OutboxEffect,
+    Player,
+    StaffAlert,
+    SteamAccount,
+)
 from league.models.api import CheckStatus
 from league.services import (
     api_results,
@@ -85,17 +93,28 @@ def test_a_steam_account_links_to_one_player_only(league: Community) -> None:
     steam.link(first, 100000004, "Vexa")
     with pytest.raises(InvalidAction, match="already linked"):
         steam.link(second, 100000004)
-    assert steam.unlink(first)
+    assert steam.unlink(first) == 1
     steam.link(second, 100000004)
-    assert Player.objects.get(pk=second.pk).steam_account_id == 100000004
+    assert SteamAccount.objects.get(account_id=100000004).player_id == second.pk
 
 
-def test_relinking_another_account_clears_verification(league: Community) -> None:
+def test_a_player_can_link_several_accounts(league: Community) -> None:
     player = make_player(1)
-    steam.link(player, 1)
-    steam.mark_verified([player.pk])
-    steam.link(player, 2)
-    assert Player.objects.get(pk=player.pk).steam_verified_at is None
+    steam.link(player, 1, "Main")
+    steam.link(player, 2, "Smurf")
+    steam.link(player, 1, "Main renamed")  # Linking again only refreshes the name.
+    assert list(player.steam_accounts.values_list("account_id", "steam_name")) == [
+        (1, "Main renamed"),
+        (2, "Smurf"),
+    ]
+    assert steam.mark_verified([1]) == 1
+    verified = {row.account_id: row.verified_at is not None for row in player.steam_accounts.all()}
+    assert verified == {1: True, 2: False}
+    assert "2 accounts" in steam.describe(player)
+    assert steam.unlink(player, 2) == 1
+    assert steam.unlink(player, 99) == 0
+    assert steam.unlink(player) == 1
+    assert not player.steam_accounts.exists()
 
 
 # --- Client ----------------------------------------------------------------------------------
@@ -172,7 +191,7 @@ def live(league: Community, players: list[Player]) -> Match:
 
 
 def _player_for(account: int) -> Player:
-    return Player.objects.get(steam_account_id=account)
+    return SteamAccount.objects.get(account_id=account).player
 
 
 def _report(match: Match, winner: str, deadlock_id: int | None = DEADLOCK_ID) -> None:
@@ -192,7 +211,7 @@ def test_an_agreeing_match_verifies_links_and_sets_awards(live: Match) -> None:
     check = api_results.record_metadata(live.pk, DEADLOCK_ID, metadata())
     assert check.status == CheckStatus.OK and check.api_winner == hk
     assert check.wrong_team == [] and check.missing == []
-    assert Player.objects.filter(steam_verified_at__isnull=False).count() == 12
+    assert SteamAccount.objects.filter(verified_at__isnull=False).count() == 12
     assert ratings.current_awards(live) == {
         _player_for(100000004).pk: "mvp",
         _player_for(100000103).pk: "key",
@@ -211,12 +230,35 @@ def test_the_other_winner_disputes_an_unconfirmed_report(live: Match) -> None:
     assert ratings.current_awards(live) == {}  # A mismatch never sets awards.
 
 
+def test_a_second_account_a_player_didnt_play_on_changes_nothing(live: Match) -> None:
+    hk = live.hidden_king_team
+    player = live.participants.filter(team=hk).order_by("id").first().player
+    steam.link(player, 123456789, "Smurf")  # Not in the match: they played on their main.
+    _report(live, hk)
+    check = api_results.record_metadata(live.pk, DEADLOCK_ID, metadata())
+    assert check.status == CheckStatus.OK and check.missing == [] and check.wrong_team == []
+    assert SteamAccount.objects.get(account_id=123456789).verified_at is None
+    assert player.steam_accounts.exclude(account_id=123456789).get().verified_at is not None
+
+
+def test_a_player_none_of_whose_accounts_played_is_missing(live: Match) -> None:
+    hk = live.hidden_king_team
+    player = live.participants.filter(team=hk).order_by("id").first().player
+    steam.unlink(player)
+    steam.link(player, 123456789)
+    steam.link(player, 123456790)
+    _report(live, hk)
+    check = api_results.record_metadata(live.pk, DEADLOCK_ID, metadata())
+    assert check.missing == [player.pk]
+
+
 def test_a_linked_player_on_the_wrong_team_goes_to_staff(live: Match) -> None:
     hk = live.hidden_king_team
     # Swap two players' links across the teams.
     a = live.participants.filter(team=hk).order_by("id").first().player
     b = live.participants.exclude(team=hk).order_by("id").first().player
-    a_account, b_account = a.steam_account_id, b.steam_account_id
+    a_account = a.steam_accounts.get().account_id
+    b_account = b.steam_accounts.get().account_id
     steam.unlink(a)
     steam.unlink(b)
     steam.link(a, b_account)
@@ -343,7 +385,9 @@ def test_the_started_lobby_match_id_is_kept_and_checked_after_the_report(
 def staff_client(league: Community) -> Client:
     from django.contrib.auth import get_user_model
 
-    user = get_user_model().objects.create_user("staff-test", is_staff=True)
+    user = get_user_model().objects.create_user(
+        "staff-test", is_staff=True, discord_user_id=900_000_000_000_000_001
+    )
     client = Client()
     client.force_login(user)
     return client

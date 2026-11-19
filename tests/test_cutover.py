@@ -4,9 +4,10 @@ and the leaderboard."""
 from __future__ import annotations
 
 import pytest
+from django.utils import timezone
 
 from bot.renderers.board import render_board
-from bot.renderers.leaderboard import PAGE_CHARS, own_text, pages
+from bot.renderers.leaderboard import own_text, page_text, pages
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.models import Community, InterimRating, Match, OutboxEffect, Player, PlayerSwap, Season
@@ -168,6 +169,14 @@ def test_an_api_lobby_starts_the_game(popped: Match) -> None:
     match = fresh(match)
     assert match.status == Status.IN_PROGRESS
     assert match.lobby_code == "XYZ999"
+    # Found in the live run: the lobby came back before the board showed the draft's end, so
+    # nobody saw its name and GLHF. They stay up until a captain starts the match.
+    from league.domain.engine import draft_name
+
+    text = _texts(render_board(boards.board_state(match.pk)))
+    assert draft_name(match.rng_seed) in text and "# GLHF" in text
+    draft.mark_api_started(match.pk, match.captain_of("A").player)
+    assert "# GLHF" not in _texts(render_board(boards.board_state(match.pk)))
 
 
 def test_a_failed_api_lobby_asks_the_host_with_a_fresh_clock(popped: Match, clock: Clock) -> None:
@@ -290,6 +299,24 @@ def test_the_csv_reads_with_or_without_a_header() -> None:
     assert plain.problems
 
 
+def test_the_csv_reads_neatqueues_own_leaderboard_export() -> None:
+    # The header and cell shapes of NeatQueue's "player_stats_alltime_leaderboard.csv": IDs
+    # wrapped as ="..." so spreadsheets keep every digit, MMR with decimals, extra columns.
+    parsed = interim.parse_csv(
+        "Rank,Player Name,IGN,MMR,Wins,Losses,Total Games,Win Rate,Streak,Peak MMR,"
+        "Peak Streak,Player ID,Stats Key,Row Version\n"
+        '1,"Kestrel",,1545.6,78,48,126,61.9%,3,1545.6,12,"=""308000000000000001""",'
+        '"player_stats","v48582eb3"\n'
+        '2,"Pike",,980.2,5,9,14,35.7%,-1,1010.0,2,"=""1025000000000000002""",'
+        '"player_stats","v986ca6c7"\n'
+    )
+    assert not parsed.problems
+    assert [(r.discord_user_id, r.points, r.wins, r.losses, r.name) for r in parsed.rows] == [
+        (308000000000000001, 1546, 78, 48, "Kestrel"),
+        (1025000000000000002, 980, 5, 9, "Pike"),
+    ]
+
+
 def test_import_carries_points_and_matches_move_them(
     league: Community, players: list[Player]
 ) -> None:
@@ -351,14 +378,72 @@ def test_the_leaderboard_lists_everyone_with_a_record(
     assert "<#55>" in own_text(None, total, "Rating", 55)
 
 
-def test_leaderboard_pages_fit_in_discord_messages() -> None:
-    rows = [leaderboards.Row(i, i, f"Player number {i}", 1000 - i, i, 3) for i in range(1, 301)]
-    texts = pages(rows, "Points", "Leaderboard")
-    assert len(texts) > 1
-    assert all(len(text) < 2000 for text in texts)
-    assert all(len(text) <= PAGE_CHARS + 200 for text in texts)
-    assert texts[0].startswith("## Leaderboard")
-    assert "Win%" in texts[0] and "75%" in texts[0]
+def _png_size(data: bytes) -> tuple[int, int]:
+    assert data.startswith(b"\x89PNG")
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+def test_the_leaderboard_shares_players_evenly_over_same_size_images() -> None:
+    rows = [leaderboards.Row(i, i, f"Player number {i}", 2000 - i, i, 3) for i in range(1, 24)]
+    out = pages(rows, "Points", "Season 1", timezone.now())
+    names = [image[0] for _view, image in out]
+    assert names == ["leaderboard-1.png", "leaderboard-2.png", "leaderboard-3.png"]
+    sizes = set()
+    for view, (name, png) in out:
+        assert f"attachment://{name}" in str(view.to_components())
+        sizes.add(_png_size(png))
+    assert sizes == {(2200, 1320)}  # One size for every image, wider than tall.
+    assert "`/stats`" in page_text(out[-1][0])
+    assert page_text(out[0][0]) == ""  # Only the last message has the footer.
+
+
+@pytest.mark.parametrize(
+    ("players", "groups"),
+    [(0, [0]), (7, [7]), (10, [10]), (11, [6, 5]), (13, [7, 6]), (23, [8, 8, 7]), (30, [10] * 3)],
+)
+def test_players_are_shared_out_as_evenly_as_ten_an_image_allows(
+    players: int, groups: list[int]
+) -> None:
+    from bot.renderers.leaderboard_image import split
+
+    rows = [leaderboards.Row(i, i, f"P{i}", 2000 - i, 1, 1) for i in range(1, players + 1)]
+    parts = split(rows)
+    assert [len(part) for part in parts] == groups
+    assert [row for part in parts for row in part] == rows  # Everyone, in order, once.
+
+
+def test_an_empty_leaderboard_is_still_one_image() -> None:
+    ((_view, (name, png)),) = pages([], "Rating", "Season 1", timezone.now())
+    assert name == "leaderboard-1.png" and _png_size(png) == (2200, 1320)
+
+
+def test_the_leaderboard_lists_everyone_in_the_league(
+    league: Community, players: list[Player]
+) -> None:
+    """Players who haven't played yet are on it at the start rating, highest first; a login that
+    never joined the league isn't."""
+    played(league, players[:12], "A", 1)
+    season = Season.objects.open_for(league)
+    newcomer = make_player(40)
+    Player.objects.create_superuser("admin", password="pw", discord_user_id=900_000_000_000_000_009)
+    from league.services import ratings
+
+    ratings.seed_player(season, newcomer, "mid", actor=None)  # Seeded by staff, not yet played.
+    rows = leaderboards.table(season)
+    by_id = {row.player_id: row for row in rows}
+    assert newcomer.pk in by_id and (by_id[newcomer.pk].wins, by_id[newcomer.pk].losses) == (0, 0)
+    assert not Player.objects.filter(username="admin", pk__in=by_id).exists()
+    assert [row.rating for row in rows] == sorted((row.rating for row in rows), reverse=True)
+
+
+def test_the_hourly_refresh_asks_for_every_leaderboard(league: Community) -> None:
+    from league.services import community as community_service
+
+    community_service.save_wiring(league.pk, leaderboard_channel_id=4_444)
+    OutboxEffect.objects.filter(kind="render_leaderboard").delete()
+    assert leaderboards.request_all() == 1
+    assert OutboxEffect.objects.filter(community=league, kind="render_leaderboard").exists()
+    assert leaderboards.REFRESH_SECONDS == 3600
 
 
 def test_a_pug_role_guards_the_leaderboard_command() -> None:

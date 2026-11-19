@@ -18,14 +18,16 @@ with all of them. Run `make setup` once, so the checks run before each commit.
   `services/discord-sim/tests/` for the simulator, and `tests/e2e/` for flows players see.
 - A model change needs its migration, and a new model needs rows in `fixtures/dev` (or a
   written reason it can't have any): see [models and fixtures](docs/dev/README.md#models-and-fixtures).
-- Update the docs your change affects: `README.md` for players and admins, `docs/` for
-  developers and operators.
+- Update the docs your change affects: the page under `docs/` that covers it (the
+  [index](docs/README.md) lists them), the [deploy guide](deploy/README.md) for hosting, and the
+  [wiki](https://github.com/VARSITYLUNCHBUG/DayShift/wiki) if players see the change. Keep
+  `README.md` short: it's the landing page, not the reference.
 - Never commit secrets, real tokens, `.env` files or server inventories. Secret scanning blocks
   pushes that contain known token formats, but don't rely on it.
 - `.gitattributes` sets line endings; leave them as they are.
 
 Before you open the pull request, run the checks CI runs:
-[tests](docs/dev/README.md#tests) and [lint and type checks](docs/dev/README.md#lint-and-type-checks).
+[checks and tests](docs/dev/README.md#checks-and-tests).
 
 ## Review
 

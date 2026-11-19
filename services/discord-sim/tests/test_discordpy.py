@@ -1,4 +1,4 @@
-"""A real discord.py 2.7.1 client against the sim: the paths draft-bot depends on."""
+"""A real discord.py 2.7.1 client against the sim: the paths DayShift depends on."""
 
 from __future__ import annotations
 

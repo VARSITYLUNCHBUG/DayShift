@@ -42,6 +42,7 @@ from league.models import (
     PlayerMatchStat,
     ResultSubmission,
     ScoreboardRead,
+    SteamAccount,
 )
 from league.models.alerts import AlertKind
 from league.models.permissions import Area
@@ -256,11 +257,15 @@ def _candidates(match: Match) -> dict[str, list[Candidate]]:
         by_team.setdefault(row.team, []).append(row.player_id)
         names[row.player_id] = row.player.display_name
         confirmed[row.player_id], seen[row.player_id] = set(), set()
-        # The scoreboard shows Steam names, so a linked one is the best clue there is.
-        steam_name = normalise(row.player.steam_name)
-        if steam_name:
-            verified = row.player.steam_verified_at is not None
-            (confirmed if verified else seen)[row.player_id].add(steam_name)
+    # The scoreboard shows Steam names, so a linked one is the best clue there is: every account
+    # a player linked, since they may have played on any of them.
+    accounts = SteamAccount.objects.filter(player_id__in=list(names)).exclude(steam_name="")
+    for player_id, steam_name, verified_at in accounts.values_list(
+        "player_id", "steam_name", "verified_at"
+    ):
+        name_norm = normalise(steam_name)
+        if name_norm:
+            (confirmed if verified_at is not None else seen)[player_id].add(name_norm)
     aliases = PlayerAlias.objects.filter(player_id__in=list(names))
     for player_id, name_norm, is_confirmed in aliases.values_list(
         "player_id", "name_norm", "confirmed"

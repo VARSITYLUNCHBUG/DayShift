@@ -3,12 +3,14 @@ the NeatQueue import and the ledger check all run through the services, not raw 
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
+from django.utils import timezone
 
 from league.domain.mode_schema import ModeValidationError
 from league.models import (
@@ -28,7 +30,9 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def host(league: Community) -> Client:
-    user = get_user_model().objects.create_superuser("host", "host@example.test", "pw")
+    user = get_user_model().objects.create_superuser(
+        "host", "host@example.test", "pw", discord_user_id=900_000_000_000_000_001
+    )
     client = Client()
     client.force_login(user)
     return client
@@ -37,7 +41,9 @@ def host(league: Community) -> Client:
 @pytest.fixture
 def staff_only(league: Community) -> Client:
     """A staff login with no model permissions."""
-    user = get_user_model().objects.create_user("helper", is_staff=True)
+    user = get_user_model().objects.create_user(
+        "helper", is_staff=True, discord_user_id=900_000_000_000_000_002
+    )
     client = Client()
     client.force_login(user)
     return client
@@ -347,6 +353,86 @@ def test_a_changed_or_bad_import_is_refused(host: Client, league: Community) -> 
 
 
 # --- Ledger --------------------------------------------------------------------------------------
+
+
+def test_interim_games_agree_with_the_record_and_times_say_utc(
+    host: Client, league: Community
+) -> None:
+    done = host.post(
+        "/admin/league/interimrating/import/",
+        {"payload": _upload(host, league).context["payload"]},
+        follow=True,
+    )
+    assert "Imported 2 players" in done.content.decode()
+    body = host.get("/admin/league/interimrating/").content.decode()
+    assert "Games here" in body
+    assert '<td class="field-games_played">62</td>' in body  # Kestrel: 40 + 22, NeatQueue's.
+    assert " UTC</td>" in body  # Imported at, labelled so it can't be read as local time.
+
+
+def test_saving_a_mode_says_which_version_it_made(host: Client, league: Community) -> None:
+    current = league.active_mode
+    url = f"/admin/league/draftmodeversion/{current.pk}/change/"
+    data = _form_data(host.get(url))
+    body = {**current.body, "name": "Renamed"}
+    data["body"] = json.dumps(body)
+    done = host.post(url, data, follow=True).content.decode()
+    newer = DraftModeVersion.objects.get(slug=current.slug, version=current.version + 1)
+    assert f"Saved as {newer.slug} v{newer.version}." in done
+    assert "changed successfully" not in done
+    same = host.post(f"/admin/league/draftmodeversion/{newer.pk}/change/", data, follow=True)
+    assert "Nothing changed" in same.content.decode()
+    # "Save and continue editing" opens the version the save made.
+    data["body"] = json.dumps({**body, "name": "Renamed again"})
+    kept = host.post(url, {**data, "_continue": "1"})
+    newest = DraftModeVersion.objects.get(slug=current.slug, version=newer.version + 1)
+    assert kept.url == f"/admin/league/draftmodeversion/{newest.pk}/change/"
+
+
+def test_failed_effects_can_be_retried(host: Client, league: Community) -> None:
+    from league.models.outbox import EffectStatus
+
+    failed = OutboxEffect.objects.create(
+        community=league,
+        kind="render_queue",
+        status=EffectStatus.FAILED,
+        attempts=8,
+        last_error="403 Missing Access",
+        run_after=timezone.now(),
+        created_at=timezone.now(),
+        done_at=timezone.now(),
+    )
+    done = OutboxEffect.objects.create(
+        community=league,
+        kind="render_queue",
+        status=EffectStatus.DONE,
+        run_after=timezone.now(),
+        created_at=timezone.now(),
+        done_at=timezone.now(),
+    )
+    listing = host.get("/admin/league/outboxeffect/").content.decode()
+    assert "Retry the selected failed effects" in listing
+    response = host.post(
+        "/admin/league/outboxeffect/",
+        {"action": "retry", "_selected_action": [failed.pk, done.pk]},
+        follow=True,
+    )
+    text = response.content.decode()
+    assert "Queued 1 effect to run again. Left 1 effect alone" in text
+    failed.refresh_from_db()
+    assert (failed.status, failed.attempts, failed.done_at) == (EffectStatus.PENDING, 0, None)
+    done.refresh_from_db()
+    assert done.status == EffectStatus.DONE
+
+    # From the list filtered to failed ones, as staff use it: the message counts what was chosen,
+    # not what the filter still shows afterwards (found in the live run as "Left -1 effects").
+    OutboxEffect.objects.filter(pk=failed.pk).update(status=EffectStatus.FAILED)
+    filtered = host.post(
+        "/admin/league/outboxeffect/?status__exact=failed",
+        {"action": "retry", "_selected_action": [failed.pk]},
+        follow=True,
+    ).content.decode()
+    assert "Queued 1 effect to run again." in filtered and "alone" not in filtered
 
 
 def test_the_ledger_check_reports_a_clean_ledger(host: Client, league: Community) -> None:

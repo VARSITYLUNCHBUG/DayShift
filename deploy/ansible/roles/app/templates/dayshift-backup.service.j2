@@ -1,12 +1,12 @@
 # {{ ansible_managed }}
 [Unit]
-Description=Back up the draftbot database
+Description=Back up the DayShift database
 Requires=docker.service
 After=docker.service
-OnFailure=draftbot-notify@%n.service
+OnFailure=dayshift-notify@%n.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/draftbot-backup
+ExecStart=/usr/local/bin/dayshift-backup
 Nice=10
 IOSchedulingClass=idle

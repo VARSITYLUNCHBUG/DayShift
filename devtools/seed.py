@@ -223,7 +223,12 @@ def _wire_members(
             len(missing), names=[p.display_name for p in missing], roles=[pug_role_id]
         )
         for player, user in zip(missing, users, strict=True):
-            Player.objects.filter(pk=player.pk).update(discord_user_id=int(user["id"]))
+            new_id = int(user["id"])
+            fields: dict[str, Any] = {"discord_user_id": new_id}
+            # The username the bot gave them follows their Discord ID; one staff chose stays.
+            if player.username == f"discord-{player.discord_user_id}":
+                fields["username"] = f"discord-{new_id}"
+            Player.objects.filter(pk=player.pk).update(**fields)
     DevProfile.objects.filter(player_id__in=player_ids).update(sim_user=True)
 
 

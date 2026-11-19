@@ -5,11 +5,11 @@ from __future__ import annotations
 import re
 
 import pytest
-from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.test import Client, RequestFactory
 
 from config import csp
+from league.models import Player
 
 
 @pytest.mark.django_db
@@ -30,7 +30,9 @@ def test_admin_pages_carry_the_policy_with_a_fresh_nonce_each() -> None:
 
 @pytest.mark.django_db
 def test_the_calibration_page_marks_its_inline_code_with_the_nonce() -> None:
-    staff = User.objects.create_superuser("staff", password="pw-for-tests-only")
+    staff = Player.objects.create_superuser(
+        "staff", password="pw-for-tests-only", discord_user_id=900_000_000_000_000_004
+    )
     client = Client()
     client.force_login(staff)
     response = client.get("/admin/calibration/")

@@ -351,7 +351,8 @@ def _tables() -> list[str]:
         grew = False
         for model in models:
             table = model._meta.db_table
-            if table in tables:
+            # A kept table that names a player keeps its rows: the reset clears that column.
+            if table in tables or table in KEEP_TABLES:
                 continue
             targets = {
                 f.related_model._meta.db_table
@@ -446,7 +447,10 @@ def reset(fixture: str = "dev_default") -> seed.SeedReport:
             if sim_client.reachable():
                 with sim_client.client() as sim:
                     sim.reset()
-            names = ", ".join(connection.ops.quote_name(table) for table in tables)
+            # Players are emptied apart from the rest: a kept table (a draft mode's created_by)
+            # refers to them, and TRUNCATE ... CASCADE would empty it too.
+            players = Player._meta.db_table
+            names = ", ".join(connection.ops.quote_name(t) for t in tables if t != players)
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT pg_get_serial_sequence(%s, 'id')", [OutboxEffect._meta.db_table]
@@ -456,7 +460,61 @@ def reset(fixture: str = "dev_default") -> seed.SeedReport:
                 (last_id,) = cursor.fetchone()
                 # Settle deferred foreign key checks first: TRUNCATE refuses while any are pending.
                 cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+                logins = _admin_logins()
                 cursor.execute(f"TRUNCATE {names} RESTART IDENTITY CASCADE")
+                _empty_players(cursor)
                 cursor.execute("SET CONSTRAINTS ALL DEFERRED")
                 cursor.execute("SELECT setval(%s, %s)", [outbox_ids, last_id])
-            return seed.run(players=fixture == "dev_default")
+            report = seed.run(players=fixture == "dev_default")
+            _restore_admin_logins(logins)
+            return report
+
+
+# What a reset keeps of each admin login: players are the user model, so the wipe takes them too.
+ADMIN_LOGIN_FIELDS = (
+    "discord_user_id",
+    "display_name",
+    "username",
+    "password",
+    "email",
+    "is_staff",
+    "is_superuser",
+    "is_active",
+)
+
+
+def _empty_players(cursor: Any) -> None:
+    """Every player but those a kept row still names (whoever saved a draft mode: those rows are
+    append-only), then ids from just past whoever stayed."""
+    keep = [
+        (model._meta.db_table, field.column)
+        for model in apps.get_app_config("league").get_models()
+        if model._meta.db_table in KEEP_TABLES
+        for field in model._meta.concrete_fields
+        if field.is_relation and field.related_model is Player and field.column
+    ]
+    quote = connection.ops.quote_name
+    players = quote(Player._meta.db_table)
+    named = " UNION ".join(
+        f"SELECT {quote(column)} FROM {quote(table)} WHERE {quote(column)} IS NOT NULL"
+        for table, column in keep
+    )
+    cursor.execute(f"DELETE FROM {players}" + (f" WHERE id NOT IN ({named})" if named else ""))
+    cursor.execute(
+        f"SELECT setval(pg_get_serial_sequence(%s, 'id'), "
+        f"COALESCE((SELECT max(id) FROM {players}), 0) + 1, false)",
+        [Player._meta.db_table],
+    )
+
+
+def _admin_logins() -> list[dict[str, Any]]:
+    staff = Player.objects.filter(is_staff=True) | Player.objects.filter(is_superuser=True)
+    return list(staff.values(*ADMIN_LOGIN_FIELDS))
+
+
+def _restore_admin_logins(logins: list[dict[str, Any]]) -> None:
+    """Every admin login back after a reset, merged into the fixture player with the same Discord
+    ID if there is one. Its groups and permissions don't survive; staff areas live in Discord."""
+    for login in logins:
+        discord_user_id = login.pop("discord_user_id")
+        Player.objects.update_or_create(discord_user_id=discord_user_id, defaults=login)

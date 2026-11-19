@@ -24,7 +24,7 @@ from django.utils import timezone
 
 import config.logging
 from bot import client as client_module
-from bot.client import DraftBot, Heartbeat, Watchdog, deadline_loop, point_at_discord
+from bot.client import DayShiftBot, Heartbeat, Watchdog, deadline_loop, point_at_discord
 from bot.db import db
 from bot.effects import worker as worker_module
 from league.domain.engine import Status
@@ -99,7 +99,7 @@ def test_the_bot_runs_every_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     beat = tmp_path / "beat"
 
     async def scenario() -> set[str]:
-        bot = DraftBot(beat)
+        bot = DayShiftBot(beat)
         await bot.on_ready()
         await asyncio.sleep(0.05)
         names = {task.get_name() for task in bot._tasks}
@@ -108,7 +108,7 @@ def test_the_bot_runs_every_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         await asyncio.gather(*bot._tasks, return_exceptions=True)
         return names
 
-    assert asyncio.run(scenario()) == {"deadlines", "effects", "watchdog"}
+    assert asyncio.run(scenario()) == {"deadlines", "effects", "leaderboard", "watchdog"}
     assert beat.exists()
 
 

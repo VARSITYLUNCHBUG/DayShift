@@ -127,6 +127,16 @@ def mark_ready(match_id: int, player: Player) -> None:
         raise InvalidAction(copy.ALREADY_READY)
     participant.ready_at = now()
     participant.save(update_fields=["ready_at"])
+    if participant.ready_dm_message_id is not None:
+        add_effect(
+            match.community,
+            "ready_dm_done",
+            {
+                "discord_user_id": player.discord_user_id,
+                "message_id": participant.ready_dm_message_id,
+            },
+            match=match,
+        )
     match.bump()
     if match.participants.active().filter(ready_at__isnull=True).exists():
         effects.request_ready_ping(match)
@@ -343,6 +353,10 @@ def _ping_captains(match: Match, captains: Sequence[MatchParticipant], text: str
 
 
 CHECKIN_PING = "you're captain. Press **I'm here** on the board to start the player draft."
+# Both captains at once: one line that reads right to two people.
+CHECKIN_PING_BOTH = (
+    "you're the captains. Each press **I'm here** on the board to start the player draft."
+)
 
 
 def begin_captain_checkin(match: Match, source: str) -> None:
@@ -355,7 +369,8 @@ def begin_captain_checkin(match: Match, source: str) -> None:
         deadline_at=seconds_from_now(mode.captains.checkin_seconds),
     )
     match.save_transition()
-    _ping_captains(match, _captains(match), CHECKIN_PING)
+    captains = _captains(match)
+    _ping_captains(match, captains, CHECKIN_PING_BOTH if len(captains) > 1 else CHECKIN_PING)
     render_board(match)
 
 
@@ -506,7 +521,6 @@ def void_live(
 # A restart's successor takes these over; the old match's team voices go back to the lobby.
 HANDED_OVER = (
     ResourceKind.TEXT,
-    ResourceKind.LOBBY_VOICE,
     ResourceKind.BOARD_MESSAGE,
     ResourceKind.PICKER_MESSAGE,
     ResourceKind.PICKER_MESSAGE_2,

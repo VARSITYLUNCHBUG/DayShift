@@ -30,7 +30,6 @@ class Season(models.Model):
     name = models.CharField(max_length=100)
     # OpenSkill parameters, over `openskill_v1.DEFAULT_PARAMS`. Fixed once the season rates.
     rating_params = models.JSONField(default=dict, blank=True)
-    leaderboard_min_games = models.PositiveSmallIntegerField(default=10)
     started_at = models.DateTimeField()
     ended_at = models.DateTimeField(null=True, blank=True)
 

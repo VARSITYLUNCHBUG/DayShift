@@ -16,6 +16,7 @@ class QueueEntry(models.Model):
 
     class Meta:
         db_table = "queue_entries"
+        verbose_name_plural = "queue entries"
         ordering = ("joined_at", "id")
         constraints = [
             models.UniqueConstraint(fields=("community", "player"), name="uniq_queue_player"),

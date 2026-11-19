@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from django.conf import settings
+
 from devtools import control, lookup, sim_client, timers
 from devtools.models import DevProfile, MatchScript
 from league.domain.draft_plan import build_plan, team_for_role
@@ -25,6 +27,8 @@ from league.models import (
 from league.models.matches import ResourceKind
 from league.services import draft, lobby, runtime, swaps
 from league.services.common import now
+
+PUBLIC_DISCORD_API = "https://discord.com/api/v10"
 
 JSON = dict[str, Any]
 
@@ -311,6 +315,9 @@ def state() -> JSON:
         "configured": sim_client.configured(),
         "reachable": sim_client.reachable(),
         "url": sim_client.url(),
+        # False when the bot talks to real Discord: the simulator (kept for the deadlock-api
+        # stand-in) can't see its gateway session, so the panel mustn't call it down.
+        "bot_on_sim": settings.DISCORD_API_BASE != PUBLIC_DISCORD_API,
     }
     timer_state = {"paused_all": timers.paused_all(), "frozen_matches": timers.frozen_ids()}
     if league is None:

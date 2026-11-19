@@ -111,7 +111,7 @@ function botMessage(channelId, content, components = []) {
     id,
     channel_id: channelId,
     author_id: BOT,
-    author_name: "Draft Bot",
+    author_name: "DayShift",
     content,
     text: [],
     flags: 0,
@@ -121,7 +121,7 @@ function botMessage(channelId, content, components = []) {
     edited_at: null,
     components,
     attachments: [],
-    raw: { id, channel_id: channelId, content, author: { id: BOT, username: "Draft Bot", bot: true }, embeds: [] },
+    raw: { id, channel_id: channelId, content, author: { id: BOT, username: "DayShift", bot: true }, embeds: [] },
   };
   db.messages.push(message);
   emit("rest", { method: "POST", path: `/api/v10/channels/${channelId}/messages`, status: 200 });
@@ -408,7 +408,7 @@ function simCall(method, path, body, query) {
       bot: { user_id: BOT, application_id: BOT, connected: true },
       roles: [],
       channels: CHANNELS.map((c) => ({ ...c, voice_members: c.type === 2 ? members.filter((x) => x.voice_channel_id === c.id).map((x) => x.id) : [], message_count: 0 })),
-      members: [{ id: BOT, name: "Draft Bot", username: "draftbot", is_bot: true, dm_open: false, voice_channel_id: null }, ...members],
+      members: [{ id: BOT, name: "DayShift", username: "dayshift", is_bot: true, dm_open: false, voice_channel_id: null }, ...members],
       commands: ["setup"],
     };
   }

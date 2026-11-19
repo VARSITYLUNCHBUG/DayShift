@@ -116,6 +116,14 @@ def mark_retry(effect_id: int, error: str) -> str:
     return effect.status
 
 
+def retry_failed(effect_ids: list[int]) -> int:
+    """Staff fixed what made these fail (a permission, a deleted channel): run them again from
+    the first attempt. Only failed effects are touched. Returns how many were queued."""
+    return OutboxEffect.objects.filter(pk__in=effect_ids, status=EffectStatus.FAILED).update(
+        status=EffectStatus.PENDING, attempts=0, run_after=now(), done_at=None
+    )
+
+
 def mark_failed(effect_id: int, error: str) -> None:
     OutboxEffect.objects.filter(pk=effect_id).update(
         status=EffectStatus.FAILED, last_error=error[:2000], done_at=now()
@@ -149,6 +157,13 @@ def mark_resource_deleted(match_id: int, kind: str) -> None:
 
 def record_notice(match_id: int, message_id: int) -> None:
     MatchResource.objects.create(match_id=match_id, kind=ResourceKind.NOTICE, discord_id=message_id)
+
+
+def record_ready_dm(match_id: int, discord_user_id: int, message_id: int) -> None:
+    """The player's Ready Up DM, so readying anywhere can take its button off."""
+    MatchParticipant.objects.filter(
+        match_id=match_id, player__discord_user_id=discord_user_id, is_active=True
+    ).update(ready_dm_message_id=message_id)
 
 
 READY_PING_KIND = "refresh_ready_ping"
@@ -317,7 +332,6 @@ def on_voice_join(discord_user_id: int, joined_channel_id: int) -> tuple[int, in
     - Joining your team's voice records that you've arrived.
     - Once teams have their own voice, the Waiting Room sends you on to yours only until you've
       arrived. After that, coming back to the Waiting Room (to requeue, say) leaves you there.
-    - A lobby voice, left from before the Waiting Room was the lobby, sends you on to your team's.
 
     Anyone else is left alone, wherever they are.
     """
@@ -334,20 +348,16 @@ def on_voice_join(discord_user_id: int, joined_channel_id: int) -> tuple[int, in
         participant.team
     )
     team_channel = channels.get(team_kind) if team_kind else None
-    lobby_channel = channels.get(ResourceKind.LOBBY_VOICE)
-    match_voice = {channel for channel in (team_channel, lobby_channel) if channel is not None}
     arrived = participant.voice_joined_at is not None
-    if joined_channel_id in match_voice and not arrived:
+    if joined_channel_id == team_channel and not arrived:
         # Moved in by the bot or joined through the invite: either way, they've arrived.
         MatchParticipant.objects.filter(pk=participant.pk, voice_joined_at__isnull=True).update(
             voice_joined_at=now()
         )
         arrived = True
-    target = team_channel or lobby_channel
+    target = team_channel
     if target is None or target == joined_channel_id:
         return None
-    if joined_channel_id == lobby_channel:
-        return match.community.discord_guild_id, target  # The lobby voice is on its way out.
     if joined_channel_id != match.community.waiting_room_channel_id or arrived:
         return None
     return match.community.discord_guild_id, target
@@ -366,7 +376,7 @@ def stale_resources() -> list[tuple[int, str, int]]:
     rows = MatchResource.objects.filter(
         match_id__in=failed,
         deleted_at__isnull=True,
-        kind__in=("text", "lobby_voice", "team_a_voice", "team_b_voice"),
+        kind__in=("text", "team_a_voice", "team_b_voice"),
     )
     return list(rows.values_list("match_id", "kind", "discord_id"))
 

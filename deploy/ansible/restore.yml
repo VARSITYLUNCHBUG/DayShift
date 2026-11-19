@@ -1,12 +1,12 @@
 ---
 # Replace the live database with a dump. Destructive: it needs -e confirm=yes.
 #   ansible-playbook -i inventories/<client> restore.yml -e confirm=yes            (the newest dump)
-#   ansible-playbook -i inventories/<client> restore.yml -e confirm=yes -e dump=/var/backups/draftbot/<file>
-- name: Restore dl-mm-discord from a dump
-  hosts: draftbot
+#   ansible-playbook -i inventories/<client> restore.yml -e confirm=yes -e dump=/var/backups/dayshift/<file>
+- name: Restore DayShift from a dump
+  hosts: dayshift
   become: true
   vars:
-    restore_dir: "{{ draftbot_root | default('/opt/draftbot') }}"
+    restore_dir: "{{ dayshift_root | default('/opt/dayshift') }}"
   tasks:
     - name: Refuse without confirm=yes
       ansible.builtin.assert:
@@ -15,7 +15,7 @@
         quiet: true
 
     - name: Find the newest dump
-      ansible.builtin.shell: set -o pipefail && ls -1t /var/backups/draftbot/draftbot-*.dump | head -n 1
+      ansible.builtin.shell: set -o pipefail && ls -1t /var/backups/dayshift/dayshift-*.dump | head -n 1
       args:
         executable: /bin/bash
       register: restore_newest
@@ -32,7 +32,7 @@
       ansible.builtin.shell:
         cmd: >-
           set -o pipefail &&
-          docker compose exec -T db pg_restore -U draftbot -d draftbot --clean --if-exists
+          docker compose exec -T db pg_restore -U dayshift -d dayshift --clean --if-exists
           --no-owner --exit-on-error < {{ (dump | default(restore_newest.stdout)) | quote }}
         chdir: "{{ restore_dir }}"
         executable: /bin/bash

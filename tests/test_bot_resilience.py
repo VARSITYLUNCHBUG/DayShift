@@ -12,7 +12,7 @@ import pytest
 from django.db import OperationalError
 
 from bot import client as client_module
-from bot.client import DraftBot, Heartbeat, LoopErrors, deadline_loop
+from bot.client import DayShiftBot, Heartbeat, LoopErrors, deadline_loop
 from bot.effects import worker as worker_module
 from league.services import deadlines
 
@@ -44,7 +44,7 @@ def test_startup_recovery_waits_for_the_database_then_starts_the_loops(
     beat = tmp_path / "beat"
 
     async def scenario() -> set[str]:
-        bot = DraftBot(beat)
+        bot = DayShiftBot(beat)
         await asyncio.wait_for(bot.on_ready(), 5)
         await bot.on_ready()  # A reconnect's on_ready: nothing is started twice.
         await asyncio.sleep(0.05)
@@ -56,7 +56,7 @@ def test_startup_recovery_waits_for_the_database_then_starts_the_loops(
         return set(names)
 
     with caplog.at_level(logging.INFO, logger="bot.client"):
-        assert asyncio.run(scenario()) == {"deadlines", "effects", "watchdog"}
+        assert asyncio.run(scenario()) == {"deadlines", "effects", "leaderboard", "watchdog"}
     assert beat.exists()
     assert flaky.calls.count(deadlines.extend_past_due) == 4
     failed = [r for r in caplog.records if r.getMessage() == "Startup recovery failed, retrying"]

@@ -225,6 +225,10 @@ def test_dev_seed_lays_out_the_guild_as_setup_does(presets: None, sim: FakeSim) 
     assert list(fixture_ids.values_list("discord_user_id", flat=True)) == [
         int(user["id"]) for user in sim.members[-2:]
     ]
+    # The username the bot gave them follows the new Discord ID.
+    assert [p.username for p in fixture_ids] == [
+        f"discord-{p.discord_user_id}" for p in fixture_ids
+    ]
     assert DevProfile.objects.filter(sim_user=True).count() == 14
 
     calls = len(sim.calls)
@@ -252,6 +256,26 @@ def test_reset_goes_back_to_the_fixtures_and_restarts_ids(presets: None, sim: Fa
     assert body["players"][0]["id"] == 15
     made = [call for call in sim.calls if call[:2] == ("POST", "/_sim/users")][-1]
     assert made[2]["roles"] == [str(Community.objects.get().pug_role_id)]
+
+
+def test_a_reset_keeps_admin_logins(presets: None) -> None:
+    dev_seed()
+    ash = Player.objects.get(pk=1)
+    Player.objects.create_superuser(
+        "ash-admin", None, "pw-for-tests", discord_user_id=ash.discord_user_id
+    )
+    Player.objects.create_superuser(
+        "host", None, "pw-for-tests", discord_user_id=900_000_000_000_000_006
+    )
+    status, body = api.call("POST", "reset", {})
+    assert status == 200, body
+    # Ash is the fixture player again, and still has the login; the host is back on their own.
+    ash = Player.objects.get(discord_user_id=ash.discord_user_id)
+    assert ash.username == "ash-admin" and ash.check_password("pw-for-tests") and ash.is_superuser
+    host = Player.objects.get(username="host")
+    assert host.check_password("pw-for-tests") and host.is_staff
+    assert Player.objects.count() == 15
+    assert DraftModeVersion.objects.exists()  # Presets stay.
 
 
 def test_reset_without_players(presets: None) -> None:

@@ -2,8 +2,8 @@
 # A fresh install, or bringing a server back in line with its inventory. Safe to run again.
 #   ansible-playbook -i inventories/<client> site.yml --ask-vault-pass
 # The very first run on a new server logs in as root: add -e ansible_user=root.
-- name: Install dl-mm-discord
-  hosts: draftbot
+- name: Install DayShift
+  hosts: dayshift
   become: true
   roles:
     - role: host

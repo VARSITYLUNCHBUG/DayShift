@@ -1,40 +1,40 @@
 ---
 # The compose project: where it lives, which image it runs, and its .env.
-draftbot_root: /opt/draftbot
-draftbot_domain: ""
-draftbot_image_tag: ""
-# Another image than ghcr.io/varsitylunchbug/dl-mm-discord (a private fork's, say), without a tag.
-draftbot_image: ""
+dayshift_root: /opt/dayshift
+dayshift_domain: ""
+dayshift_image_tag: ""
+# Another image than ghcr.io/varsitylunchbug/dayshift (a private fork's, say), without a tag.
+dayshift_image: ""
 # For a private image: the registry and a user whose token (vault_registry_password) can read it.
-draftbot_registry: ghcr.io
-draftbot_registry_username: ""
+dayshift_registry: ghcr.io
+dayshift_registry_username: ""
 # `missing` pulls only images the server doesn't have yet (right for a pinned sha- tag, so site.yml
 # changes nothing on a second run). deploy.yml uses `always`, which also fetches a moved tag.
-draftbot_pull: missing
+dayshift_pull: missing
 # After starting, check https://<domain>/readyz answers from the controller. Off for a test server
 # whose name only resolves on the server itself.
-draftbot_check_https: true
+dayshift_check_https: true
 # A test server whose name Let's Encrypt can't reach (a .test domain, say): Caddy signs the
 # certificate with its own CA instead.
-draftbot_tls_internal: false
+dayshift_tls_internal: false
 
-draftbot_discord_guild_id: ""
-draftbot_error_log_channel_id: ""
-draftbot_admin_cidrs: []
-draftbot_log_level: INFO
+dayshift_discord_guild_id: ""
+dayshift_error_log_channel_id: ""
+dayshift_admin_cidrs: []
+dayshift_log_level: INFO
 # Anything else for .env, as KEY: value.
-draftbot_env_extra: {}
+dayshift_env_extra: {}
 
-# Nightly pg_dump to /var/backups/draftbot, kept this many days.
-draftbot_backup_keep_days: 14
-draftbot_backup_on_calendar: "*-*-* 03:30:00"
+# Nightly pg_dump to /var/backups/dayshift, kept this many days.
+dayshift_backup_keep_days: 14
+dayshift_backup_on_calendar: "*-*-* 03:30:00"
 
 # The secrets, from vault.yml.
-draftbot_discord_token: "{{ vault_discord_token }}"
-draftbot_django_secret_key: "{{ vault_django_secret_key }}"
-draftbot_postgres_password: "{{ vault_postgres_password }}"
-draftbot_alert_webhook_url: "{{ vault_alert_webhook_url | default('') }}"
-draftbot_healthcheck_ping_url: "{{ vault_healthcheck_ping_url | default('') }}"
-draftbot_deadlock_api_key: "{{ vault_deadlock_api_key | default('') }}"
-draftbot_steam_web_api_key: "{{ vault_steam_web_api_key | default('') }}"
-draftbot_registry_password: "{{ vault_registry_password | default('') }}"
+dayshift_discord_token: "{{ vault_discord_token }}"
+dayshift_django_secret_key: "{{ vault_django_secret_key }}"
+dayshift_postgres_password: "{{ vault_postgres_password }}"
+dayshift_alert_webhook_url: "{{ vault_alert_webhook_url | default('') }}"
+dayshift_healthcheck_ping_url: "{{ vault_healthcheck_ping_url | default('') }}"
+dayshift_deadlock_api_key: "{{ vault_deadlock_api_key | default('') }}"
+dayshift_steam_web_api_key: "{{ vault_steam_web_api_key | default('') }}"
+dayshift_registry_password: "{{ vault_registry_password | default('') }}"

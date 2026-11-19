@@ -5,7 +5,7 @@
 Please don't open a public issue, pull request or discussion for a security problem.
 
 Report it privately on GitHub:
-[report a vulnerability](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/security/advisories/new)
+[report a vulnerability](https://github.com/VARSITYLUNCHBUG/DayShift/security/advisories/new)
 (the repository's Security tab, then "Report a vulnerability"). Only the maintainer sees it.
 
 Say what you found, how to reproduce it, which image tag or commit you tested, and what an
@@ -25,7 +25,7 @@ Please allow a reasonable time for a fix before you disclose publicly; 90 days i
 
 ## Supported versions
 
-Fixes land on `main` and ship in the next published image, `ghcr.io/varsitylunchbug/dl-mm-discord`
+Fixes land on `main` and ship in the next published image, `ghcr.io/varsitylunchbug/dayshift`
 (the `latest` tag, and the newest `v*` tag once there are releases). Older images get no fixes:
 upgrade as [deploy/README.md](deploy/README.md#running-it) describes.
 

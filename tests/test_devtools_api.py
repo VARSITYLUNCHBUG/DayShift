@@ -81,7 +81,15 @@ def test_state_before_any_community(http: Client) -> None:
     status, body = call(http, "GET", "state")
     assert status == 200
     assert body["community"] is None
-    assert body["sim"] == {"configured": False, "reachable": False, "url": None}
+    # The unit tests' bot points at real Discord, so the panel is told not to read the sim.
+    sim = {"configured": False, "reachable": False, "url": None, "bot_on_sim": False}
+    assert body["sim"] == sim
+
+
+def test_state_says_when_the_bot_is_on_the_simulator(http: Client, settings: Any) -> None:
+    settings.DISCORD_API_BASE = "http://discord-sim:8090/api/v10"
+    _status, body = call(http, "GET", "state")
+    assert body["sim"]["bot_on_sim"] is True
 
 
 def test_state_shows_the_queue_and_live_matches(http: Client, popped: Match) -> None:

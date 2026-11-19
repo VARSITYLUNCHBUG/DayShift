@@ -1,14 +1,14 @@
 # Production on top of the root compose.yaml, for a server with a public domain. The Ansible app
-# role puts both files in /opt/draftbot and writes .env there with COMPOSE_FILE set, so a plain
+# role puts both files in /opt/dayshift and writes .env there with COMPOSE_FILE set, so a plain
 # `docker compose ...` in that directory uses them together. What changes:
 #
-# - the app services run the published image at DRAFTBOT_IMAGE_TAG and never build;
+# - the app services run the published image at DAYSHIFT_IMAGE_TAG and never build;
 # - the edge serves the domain (EDGE_SITE) over HTTPS on 80 and 443; Caddy gets and renews the
 #   certificate itself;
 # - DEBUG is forced off, whatever .env says;
-# - Postgres is no longer published on the host. Backups run on the host (roles/app).
+# - Postgres isn't published on the host. Backups run on the host (roles/app).
 
-x-image: &image ${DRAFTBOT_IMAGE:-ghcr.io/varsitylunchbug/dl-mm-discord}:${DRAFTBOT_IMAGE_TAG:?Set DRAFTBOT_IMAGE_TAG}
+x-image: &image ${DAYSHIFT_IMAGE:-ghcr.io/varsitylunchbug/dayshift}:${DAYSHIFT_IMAGE_TAG:?Set DAYSHIFT_IMAGE_TAG}
 
 services:
   edge:

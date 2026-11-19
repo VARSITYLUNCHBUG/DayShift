@@ -17,7 +17,7 @@ from league.models.modes import DraftModeVersion
 from league.models.outbox import OutboxEffect
 from league.models.permissions import Area, CommunityRoleGrant
 from league.models.pings import ChannelPing
-from league.models.players import Player
+from league.models.players import Player, SteamAccount
 from league.models.prio import PrioEntry
 from league.models.queue import QueueEntry
 from league.models.ratings import PlayerRating, RatingEvent, RatingRun, Season
@@ -62,6 +62,7 @@ __all__ = [
     "ScoreboardRead",
     "Season",
     "StaffAlert",
+    "SteamAccount",
     "StrikeAdjustment",
     "SubOffer",
     "SubRequest",

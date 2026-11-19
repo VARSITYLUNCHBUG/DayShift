@@ -6,7 +6,7 @@ body:
     attributes:
       value: >-
         Thanks for the report. For a security problem, don't use this form: follow
-        [SECURITY.md](https://github.com/VARSITYLUNCHBUG/dl-mm-discord/blob/main/SECURITY.md).
+        [SECURITY.md](https://github.com/VARSITYLUNCHBUG/DayShift/blob/main/SECURITY.md).
   - type: dropdown
     id: area
     attributes:

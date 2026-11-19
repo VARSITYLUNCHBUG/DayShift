@@ -59,60 +59,89 @@ def _player_overwrites(
     return {guild.default_role: HIDDEN, role: allowed, me: own}
 
 
-async def ensure_channels(interaction: Interaction[Any], row: Community) -> None:
+CATEGORY_NAME = "Deadlock"
+# Every channel /setup makes, by the name it gives it.
+TEXT_CHANNELS = ("queue", "results", "leaderboard", "scoreboard-archive", "staff-alerts")
+WAITING_ROOM = "Waiting Room"
+
+
+def existing_category(guild: discord.Guild) -> Any:
+    """A Deadlock category an earlier setup made (on this server, before its database was
+    reset): the one holding most of our channels, as long as it has a #queue. None if there's
+    none, so setup makes one."""
+    best, best_count = None, 0
+    for category in guild.categories:
+        if category.name != CATEGORY_NAME:
+            continue
+        names = {channel.name for channel in category.channels}
+        if "queue" not in names:
+            continue
+        count = len(names & {*TEXT_CHANNELS, WAITING_ROOM})
+        if count > best_count:
+            best, best_count = category, count
+    return best
+
+
+def _in_category(category: Any, name: str, kind: type) -> Any:
+    return next(
+        (c for c in category.channels if c.name == name and isinstance(c, kind)),
+        None,
+    )
+
+
+async def ensure_channels(interaction: Interaction[Any], row: Community) -> bool:
+    """Fill in whatever is missing. Returns True when an existing category was reused."""
     guild = interaction.guild
     assert guild is not None
     me = _self(interaction.client)
     everyone = guild.default_role
     text_access = _player_overwrites(guild, me, row.pug_role_id, voice=False)
     wiring: dict[str, int | list[int] | None] = {}
+    reused = False
 
     category: Any = guild.get_channel(row.match_category_id or 0)
     if category is None:
-        category = await guild.create_category(
-            "Deadlock", overwrites={me: SELF_VOICE}, reason="Draft bot setup"
-        )
+        category = existing_category(guild)
+        reused = category is not None
+        if category is None:
+            category = await guild.create_category(
+                CATEGORY_NAME, overwrites={me: SELF_VOICE}, reason="DayShift setup"
+            )
         wiring["match_category_id"] = category.id
 
+    async def text(name: str, overwrites: dict[Any, discord.PermissionOverwrite]) -> int:
+        found = _in_category(category, name, discord.TextChannel) if reused else None
+        if found is not None:
+            return int(found.id)
+        channel = await guild.create_text_channel(name, category=category, overwrites=overwrites)
+        return int(channel.id)
+
     if not _is_live(guild, row.waiting_room_channel_id):
-        voice = await guild.create_voice_channel(
-            "Waiting Room",
-            category=category,
-            overwrites=_player_overwrites(guild, me, row.pug_role_id, voice=True),
-        )
-        wiring["waiting_room_channel_id"] = voice.id
+        found = _in_category(category, WAITING_ROOM, discord.VoiceChannel) if reused else None
+        if found is None:
+            found = await guild.create_voice_channel(
+                WAITING_ROOM,
+                category=category,
+                overwrites=_player_overwrites(guild, me, row.pug_role_id, voice=True),
+            )
+        wiring["waiting_room_channel_id"] = found.id
     if not _is_live(guild, row.queue_channel_id):
-        channel = await guild.create_text_channel(
-            "queue", category=category, overwrites=text_access
-        )
-        wiring["queue_channel_id"] = channel.id
+        wiring["queue_channel_id"] = await text("queue", text_access)
         wiring["queue_message_id"] = None
     if not _is_live(guild, row.results_channel_id):
-        channel = await guild.create_text_channel(
-            "results", category=category, overwrites=text_access
-        )
-        wiring["results_channel_id"] = channel.id
+        wiring["results_channel_id"] = await text("results", text_access)
     if not _is_live(guild, row.leaderboard_channel_id):
-        channel = await guild.create_text_channel(
-            "leaderboard", category=category, overwrites=text_access
-        )
-        wiring["leaderboard_channel_id"] = channel.id
+        wiring["leaderboard_channel_id"] = await text("leaderboard", text_access)
         wiring["leaderboard_message_ids"] = []
+    staff_only = {everyone: discord.PermissionOverwrite(view_channel=False), me: SELF_TEXT}
     if not _is_live(guild, row.archive_channel_id):
-        hidden = discord.PermissionOverwrite(view_channel=False)
-        channel = await guild.create_text_channel(
-            "scoreboard-archive", category=category, overwrites={everyone: hidden, me: SELF_TEXT}
-        )
-        wiring["archive_channel_id"] = channel.id
+        wiring["archive_channel_id"] = await text("scoreboard-archive", staff_only)
     if not _is_live(guild, row.staff_channel_id):
-        hidden = discord.PermissionOverwrite(view_channel=False)
-        channel = await guild.create_text_channel(
-            "staff-alerts", category=category, overwrites={everyone: hidden, me: SELF_TEXT}
-        )
-        wiring["staff_channel_id"] = channel.id
+        wiring["staff_channel_id"] = await text("staff-alerts", staff_only)
 
     if wiring:
         await db(community_service.save_wiring, row.pk, **wiring)
+    return reused
 
 
 async def sync_pug_access(guild: discord.Guild, community_id: int) -> None:
@@ -181,6 +210,26 @@ async def sync_staff_access(guild: discord.Guild, community_id: int) -> None:
         logger.warning("Couldn't update staff channel access", exc_info=True)
 
 
+async def _clear_old_panels(interaction: Interaction[Any], community_id: int) -> None:
+    """A reused #queue and #leaderboard still hold the old setup's panel and pages, whose
+    message IDs went with the old database. Delete the bot's own messages there so the fresh ones
+    are the only ones. A bot can always delete its own messages. Best effort."""
+    row = await db(Community.objects.get, pk=community_id)
+    me = interaction.client.user
+    guild = interaction.guild
+    assert guild is not None and me is not None
+    for channel_id in (row.queue_channel_id, row.leaderboard_channel_id):
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if not isinstance(channel, discord.TextChannel):
+            continue
+        try:
+            async for message in channel.history(limit=100):
+                if message.author.id == me.id:
+                    await message.delete()
+        except discord.HTTPException:
+            logger.warning("Couldn't clear an old panel", exc_info=True)
+
+
 def _refresh_queue(community_id: int) -> None:
     from league.services import leaderboards
 
@@ -213,7 +262,9 @@ async def setup_command(
         if pug_role is not None:
             await db(community_service.save_wiring, row.pk, pug_role_id=pug_role.id)
             row = await db(Community.objects.get, pk=row.pk)
-        await ensure_channels(interaction, row)
+        reused = await ensure_channels(interaction, row)
+        if reused:
+            await _clear_old_panels(interaction, row.pk)
         await sync_staff_access(guild, row.pk)
         await sync_pug_access(guild, row.pk)
         await db(_refresh_queue, row.pk)
@@ -224,10 +275,12 @@ async def setup_command(
             if row.pug_role_id is None
             else ""
         )
+        again = "It reused the Deadlock category already here. " if reused else ""
         await reply(
             interaction,
-            "Setup done. The queue is live, the leaderboard is in #leaderboard, and staff alerts "
-            f"go to #staff-alerts. Give staff roles their areas with /permissions grant. {access}",
+            f"Setup done. {again}The queue is live, the leaderboard is in #leaderboard, and staff "
+            "alerts go to #staff-alerts. Give staff roles their areas with /permissions grant. "
+            f"{access}",
         )
 
     await guarded(interaction, run)

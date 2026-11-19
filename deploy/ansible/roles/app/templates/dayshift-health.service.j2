@@ -1,9 +1,9 @@
 # {{ ansible_managed }}
 [Unit]
-Description=Check the draftbot containers are healthy
+Description=Check the DayShift containers are healthy
 Requires=docker.service
 After=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/draftbot-health
+ExecStart=/usr/local/bin/dayshift-health

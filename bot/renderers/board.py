@@ -78,7 +78,7 @@ TIMER_LABELS = {
 
 
 def _stamp(moment: datetime, fmt: str = "R") -> str:
-    return f"<t:{int(moment.timestamp())}:{fmt}>"
+    return style.relative(moment, fmt)
 
 
 def countdown(state: BoardState) -> str:
@@ -93,7 +93,9 @@ def countdown(state: BoardState) -> str:
     if state.deadline_at is None or state.status in {Status.DISPUTED, Status.IN_PROGRESS}:
         return ""
     label = TIMER_LABELS.get(state.status, "Ends")
-    return f"{label} <t:{int(state.deadline_at.timestamp())}:R>"
+    if style.is_paused(state.deadline_at):
+        return f"⏸ {label}: paused"
+    return f"{label} {_stamp(state.deadline_at)}"
 
 
 def _team(state: BoardState, team: str) -> list[PlayerLine]:
@@ -458,14 +460,19 @@ def _final_draft_summary(state: BoardState) -> str:
     return f"{draft_summary(state, final=True)}\n\n{teams}"
 
 
-def _lobby_code(state: BoardState, box: Container[Any]) -> None:
-    # The draft ends with a name, the summary, a GIF and GLHF.
+def _draft_end(state: BoardState, box: Container[Any], *, summary: bool) -> None:
+    """The draft ends with a name, the summary, a GIF and GLHF."""
     box.add_item(TextDisplay(f"### {style.draft_title(state.match_id, state.draft_name)}"))
-    box.add_item(TextDisplay(_final_draft_summary(state)))
+    if summary:
+        box.add_item(TextDisplay(_final_draft_summary(state)))
     if state.gif_url:
         box.add_item(MediaGallery(discord.MediaGalleryItem(state.gif_url)))
     box.add_item(TextDisplay("# GLHF"))
     box.add_item(Separator())
+
+
+def _lobby_code(state: BoardState, box: Container[Any]) -> None:
+    _draft_end(state, box, summary=True)
     if not state.api_lobby_failed:
         box.add_item(
             TextDisplay(
@@ -490,6 +497,10 @@ def _lobby_code(state: BoardState, box: Container[Any]) -> None:
 
 
 def _in_progress(state: BoardState, box: Container[Any]) -> None:
+    if state.api_lobby and not state.api_started:
+        # The bot's lobby often arrives the moment the draft ends, before anyone saw its
+        # name, GIF and GLHF: they stay up while the players join, until a captain starts it.
+        _draft_end(state, box, summary=False)
     box.add_item(TextDisplay(f"### Lobby code: `{state.lobby_code}`"))
     if state.api_lobby and not state.api_started:
         leaves = (

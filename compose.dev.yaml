@@ -1,13 +1,13 @@
 # Local dev stack: the app against the Discord simulator, seeded from fixtures/dev, with the dev
 # control panel. `make dev` starts it; see the Makefile and docs/dev/README.md.
 #
-#   docker compose -p draftbot-dev -f compose.yaml -f compose.dev.yaml --profile sim up -d
+#   docker compose -p dayshift-dev -f compose.yaml -f compose.dev.yaml --profile sim up -d
 #
 # Ports are on 127.0.0.1 only (DEV_BIND; the Windows dev VM sets 0.0.0.0, so the host's browser
 # reaches them), each set by an env var so two stacks can run side by side under another -p. Real-Discord mode: `make dev REAL_DISCORD=1` uses .env (a real token and guild id)
 # and leaves out the simulator.
 
-name: draftbot-dev
+name: dayshift-dev
 
 x-dev-app: &dev-app
   # The image's dev target: the published one plus devtools/ and fixtures/ (Dockerfile).
@@ -17,11 +17,11 @@ x-dev-app: &dev-app
   image: ${COMPOSE_PROJECT_NAME}/app:local
   env_file: !override
     # .env.dev (from .env.dev.example) points the app at the simulator.
-    - path: ${DRAFTBOT_ENV_FILE:-.env.dev}
+    - path: ${DAYSHIFT_ENV_FILE:-.env.dev}
       required: false
 
 x-dev-env: &dev-env
-  DATABASE_URL: postgres://draftbot:dev@db:5432/draftbot
+  DATABASE_URL: postgres://dayshift:dev@db:5432/dayshift
   BOT_HEARTBEAT_FILE: /tmp/bot-heartbeat
   DEBUG: "true"
   DEV_CONTROL: "true"

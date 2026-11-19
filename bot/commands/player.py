@@ -11,7 +11,8 @@ from bot.handlers.common import actor, community_of
 from bot.handlers.permissions import require_pug_role
 from bot.handlers.results import process_report
 from bot.renderers.leaderboard import own_text
-from bot.routing import guarded, reply
+from bot.renderers.stats import render_stats
+from bot.routing import guarded, reply, reply_view
 from league.domain import steam as steam_ids
 from league.domain.errors import InvalidAction, NotAllowed
 from league.integrations import deadlock_api
@@ -34,32 +35,9 @@ def _leaderboard(community: Community, player: Player) -> str:
     return own_text(row, total, label, community.leaderboard_channel_id)
 
 
-def _stats_text(community: Community, player: Player) -> str:
+def _stats_view(community: Community, player: Player) -> discord.ui.LayoutView:
     stats = boards.player_stats(Season.objects.open_for(community), player)
-    rank = f"#{stats.rank}" if stats.rank else "unranked"
-    tier = f" · {stats.tier}" if stats.tier else ""
-    lines = [
-        f"**{stats.name}**: {stats.rating} ({rank}){tier}",
-        f"{stats.games} games, {stats.wins} wins, {stats.losses} losses",
-    ]
-    if stats.placement:
-        done = stats.placement.removeprefix("placing ")
-        lines.append(f"Placement: {done} matches played. Your rating settles as you play.")
-    if stats.mvps or stats.keys:
-        lines.append(f"🏅 {stats.mvps} MVP · ⭐ {stats.keys} key player")
-    if stats.avg_kda is not None:
-        k, d, a = stats.avg_kda
-        damage = f", {stats.avg_damage / 1000:.1f}k damage" if stats.avg_damage else ""
-        lines.append(f"Scoreboards: {stats.scoreboards}, averaging {k:.1f}/{d:.1f}/{a:.1f}{damage}")
-    lines.append(f"{stats.strikes} Captain: {stats.captain}.")
-    lines.append(steam.describe(player))
-    if stats.recent:
-        rows = [
-            f"{'match ' + str(match_id) if match_id else 'staff':<12} {delta:+4d}  {after}"
-            for match_id, delta, after in stats.recent
-        ]
-        lines.append("```\n" + "\n".join(rows) + "\n```")
-    return "\n".join(lines)
+    return render_stats(stats, steam.describe(player))
 
 
 def _queue_text(community: Community, player: Player) -> str:
@@ -110,7 +88,7 @@ async def stats_command(
         await interaction.response.defer(ephemeral=True, thinking=True)
         community = await community_of(interaction)
         target = await _resolve_target(interaction, player)
-        await reply(interaction, await db(_stats_text, community, target))
+        await reply_view(interaction, await db(_stats_view, community, target))
 
     await guarded(interaction, run)
 
@@ -174,8 +152,8 @@ class LinkConfirm(discord.ui.View):
 
         async def run() -> None:
             await interaction.response.edit_message(view=None)
-            row = await db(steam.link, self.player, self.account_id, self.steam_name)
-            await reply(interaction, f"Linked. {steam.describe(row)}")
+            await db(steam.link, self.player, self.account_id, self.steam_name)
+            await reply(interaction, f"Linked. {await db(steam.describe, self.player)}")
 
         await guarded(interaction, run)
 
@@ -208,7 +186,9 @@ async def resolve_steam(text: str) -> int:
     return account
 
 
-@app_commands.command(name="link", description="Link your Steam account (optional)")
+@app_commands.command(
+    name="link", description="Link a Steam account (optional; you can link several)"
+)
 @app_commands.describe(account="Profile link, SteamID64 or friend code")
 async def link_command(interaction: Interaction[Any], account: str) -> None:
     async def run() -> None:
@@ -229,12 +209,22 @@ async def link_command(interaction: Interaction[Any], account: str) -> None:
     await guarded(interaction, run)
 
 
-@app_commands.command(name="unlink", description="Remove your linked Steam account")
-async def unlink_command(interaction: Interaction[Any]) -> None:
+def unlinked_text(removed: int, account: str | None, whose: str) -> str:
+    if removed:
+        return "Unlinked." if removed == 1 else f"Unlinked {removed} Steam accounts."
+    if account:
+        return f"That Steam account isn't linked to {whose}."
+    return f"{'You' if whose == 'you' else 'They'} had no Steam account linked."
+
+
+@app_commands.command(name="unlink", description="Remove a linked Steam account, or all of them")
+@app_commands.describe(account="The account to remove. Leave it empty to remove every one")
+async def unlink_command(interaction: Interaction[Any], account: str | None = None) -> None:
     async def run() -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
-        removed = await db(steam.unlink, await actor(interaction))
-        await reply(interaction, "Unlinked." if removed else "You had no Steam account linked.")
+        account_id = await resolve_steam(account) if account else None
+        removed = await db(steam.unlink, await actor(interaction), account_id)
+        await reply(interaction, unlinked_text(removed, account, "you"))
 
     await guarded(interaction, run)
 

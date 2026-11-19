@@ -119,10 +119,10 @@ FROM base AS runtime
 ARG VERSION=dev
 ARG REVISION=unknown
 ARG CREATED=unknown
-LABEL org.opencontainers.image.title="dl-mm-discord" \
+LABEL org.opencontainers.image.title="DayShift" \
       org.opencontainers.image.description="Discord bot that runs queue, captain draft, champion pick/ban and Elo for 6v6 Deadlock." \
-      org.opencontainers.image.source="https://github.com/VARSITYLUNCHBUG/dl-mm-discord" \
-      org.opencontainers.image.url="https://github.com/VARSITYLUNCHBUG/dl-mm-discord" \
+      org.opencontainers.image.source="https://github.com/VARSITYLUNCHBUG/DayShift" \
+      org.opencontainers.image.url="https://github.com/VARSITYLUNCHBUG/DayShift" \
       org.opencontainers.image.version="$VERSION" \
       org.opencontainers.image.revision="$REVISION" \
       org.opencontainers.image.created="$CREATED"

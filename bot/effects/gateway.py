@@ -10,6 +10,11 @@ from typing import Any, Literal, Protocol
 
 import discord
 
+# Discord errors that mean this person can't get a DM, so the caller mentions them in the match
+# channel instead: DMs closed (50007), or no such recipient, such as a deleted account (50033).
+UNREACHABLE_BY_DM = frozenset({50007, 50033})
+UNKNOWN_CHANNEL = 10003
+
 
 class ChannelGone(Exception):
     """The target channel or message no longer exists: treat deletion and edits as done."""
@@ -50,8 +55,13 @@ class Gateway(Protocol):
 
     async def create_invite(self, guild_id: int, channel_id: int, max_age: int) -> str | None: ...
 
-    async def send_dm(self, user_id: int, view: discord.ui.LayoutView) -> bool:
-        """False if the user can't be messaged (Discord error 50007). Not a failure."""
+    async def send_dm(self, user_id: int, view: discord.ui.LayoutView) -> int | None:
+        """The DM's message ID, or None if the user can't be messaged (DMs closed, or no such
+        user). Not a failure."""
+        ...
+
+    async def edit_dm(self, user_id: int, message_id: int, view: discord.ui.LayoutView) -> None:
+        """Rewrite a DM the bot sent. ChannelGone if it's been deleted."""
         ...
 
     async def send_view(
@@ -66,7 +76,11 @@ class Gateway(Protocol):
         """Post a view. Its mentions never ping, except the roles and members named here."""
         ...
 
-    async def edit_view(self, channel_id: int, message_id: int, view: Any) -> None: ...
+    async def edit_view(
+        self, channel_id: int, message_id: int, view: Any, *, file: tuple[str, bytes] | None = None
+    ) -> None:
+        """Rewrite a view. With `file`, the message's attachment is replaced by it."""
+        ...
 
     async def send_text(
         self,
@@ -249,17 +263,24 @@ class DiscordGateway:
         invite = await channel.create_invite(max_age=max_age, max_uses=0, unique=False)
         return invite.url
 
-    async def send_dm(self, user_id: int, view: discord.ui.LayoutView) -> bool:
+    async def send_dm(self, user_id: int, view: discord.ui.LayoutView) -> int | None:
         try:
             channel = await self.client.create_dm(discord.Object(id=user_id))
-            await channel.send(view=view)
-        except discord.Forbidden:
-            return False
+            message = await channel.send(view=view)
+        except (discord.Forbidden, discord.NotFound):
+            return None
         except discord.HTTPException as exc:
-            if exc.code == 50007:
-                return False
+            if exc.code in UNREACHABLE_BY_DM:
+                return None
             raise
-        return True
+        return int(message.id)
+
+    async def edit_dm(self, user_id: int, message_id: int, view: discord.ui.LayoutView) -> None:
+        try:
+            channel = await self.client.create_dm(discord.Object(id=user_id))
+            await channel.get_partial_message(message_id).edit(view=view)
+        except (discord.Forbidden, discord.NotFound) as exc:
+            raise ChannelGone(str(message_id)) from exc
 
     async def _messageable(self, channel_id: int) -> Any:
         channel = self.client.get_channel(channel_id)
@@ -296,12 +317,15 @@ class DiscordGateway:
             raise ChannelGone(str(channel_id)) from exc
         return message.id
 
-    async def edit_view(self, channel_id: int, message_id: int, view: Any) -> None:
+    async def edit_view(
+        self, channel_id: int, message_id: int, view: Any, *, file: tuple[str, bytes] | None = None
+    ) -> None:
         channel = await self._messageable(channel_id)
+        kwargs: dict[str, Any] = {"view": view, "allowed_mentions": discord.AllowedMentions.none()}
+        if file is not None:
+            kwargs["attachments"] = [discord.File(io.BytesIO(file[1]), filename=file[0])]
         try:
-            await channel.get_partial_message(message_id).edit(
-                view=view, allowed_mentions=discord.AllowedMentions.none()
-            )
+            await channel.get_partial_message(message_id).edit(**kwargs)
         except discord.NotFound as exc:
             raise ChannelGone(str(message_id)) from exc
 
@@ -370,9 +394,15 @@ class DiscordGateway:
         channel = await self._messageable(channel_id)
         perms = VOICE_MEMBER if isinstance(channel, discord.VoiceChannel) else TEXT_MEMBER
         allow, deny = perms.pair()
-        await self.client.http.edit_channel_permissions(
-            channel_id, user_id, str(allow.value), str(deny.value), MEMBER_OVERWRITE
-        )
+        try:
+            await self.client.http.edit_channel_permissions(
+                channel_id, user_id, str(allow.value), str(deny.value), MEMBER_OVERWRITE
+            )
+        except discord.NotFound as exc:
+            if exc.code == UNKNOWN_CHANNEL:
+                raise ChannelGone(str(channel_id)) from exc
+            # Anything else not found is the person (10009, 10013): they left the server or
+            # the account is gone, so there's nobody to let in.
 
     async def revoke_member(self, channel_id: int, user_id: int) -> None:
         await self._messageable(channel_id)  # A channel that's gone raises ChannelGone first.
