@@ -710,8 +710,11 @@ class PlayerStats:
     games: int
     wins: int
     losses: int
-    rank: int | None
+    rank: int | None  # Their place on the #leaderboard, which lists everyone with a record.
     recent: list[tuple[int, int, int]]  # (match ID, delta, rating after)
+    ranked: int = 0  # How many players the leaderboard lists.
+    season: str = ""
+    rating_label: str = "Rating"
     tier: str = ""  # OpenSkill seasons only.
     placement: str = ""
     mu: float | None = None
@@ -749,14 +752,9 @@ def player_stats(season: Season, player: Player, history: int = 10) -> PlayerSta
     row = PlayerRating.objects.filter(season=season, player=player).first()
     rating = row.rating if row else season.start_rating
     games = row.games if row else 0
-    rank = None
-    if row and games >= season.leaderboard_min_games:
-        rank = (
-            PlayerRating.objects.filter(
-                season=season, games__gte=season.leaderboard_min_games, rating__gt=rating
-            ).count()
-            + 1
-        )
+    # The same place the #leaderboard shows, so the two never disagree.
+    line, ranked = leaderboards.player_row(season, player)
+    rank = line.rank if line else None
     recent = RatingEvent.objects.filter(season=season, player=player).order_by("-id")[:history]
     stats = PlayerStats(
         name=player.display_name,
@@ -765,7 +763,10 @@ def player_stats(season: Season, player: Player, history: int = 10) -> PlayerSta
         wins=row.wins if row else 0,
         losses=row.losses if row else 0,
         rank=rank,
+        ranked=ranked,
         recent=[(event.match_id or 0, event.delta, event.rating_after) for event in recent],
+        season=season.name,
+        rating_label=leaderboards.label(season.community_id),
     )
     from league.domain.openskill_v1 import tier
 
@@ -776,11 +777,9 @@ def player_stats(season: Season, player: Player, history: int = 10) -> PlayerSta
     if interim.enabled(season.community_id):
         # The interim shows NeatQueue's points and record: OpenSkill's tier and placement
         # describe a rating players don't see yet.
-        line, _total = leaderboards.player_row(season, player)
         record = leaderboards.shown(season, [player.pk])[player.pk]
         stats.rating, stats.wins, stats.losses = record.rating, record.wins, record.losses
         stats.games = record.games
-        stats.rank = line.rank if line else None
         stats.recent = interim.recent(season, player, history)
         stats.tier = ""
         stats.placement = ""

@@ -8,11 +8,13 @@ from typing import Any
 import discord
 from discord import Interaction, app_commands
 
+from bot.commands.player import resolve_steam, unlinked_text
 from bot.db import db
 from bot.handlers.common import actor, community_of
 from bot.handlers.permissions import require_area
 from bot.handlers.results import send_name_picker
 from bot.routing import guarded, reply
+from league.domain.copy import plural
 from league.domain.engine import TERMINAL, Status
 from league.domain.errors import InvalidAction
 from league.models import (
@@ -446,7 +448,7 @@ async def queue_clear(interaction: Interaction[Any]) -> None:
     async def run() -> None:
         community = await _staff_start(interaction, Area.MATCH_CONTROL)
         removed = await db(queue.clear, community.pk)
-        await reply(interaction, f"Cleared {removed} players from the queue.")
+        await reply(interaction, f"Cleared {plural(removed, 'player')} from the queue.")
 
     await guarded(interaction, run)
 
@@ -502,7 +504,9 @@ async def ban_revoke(
         target = await db(Player.objects.from_discord, player.id, player.display_name)
         count = await db(penalties.revoke_active, community, target, keep_strikes=keep_strikes)
         strikes = "kept" if keep_strikes else "removed"
-        await reply(interaction, f"Lifted {count} cooldown(s); their strikes are {strikes}.")
+        await reply(
+            interaction, f"Lifted {plural(count, 'cooldown')}; their strikes are {strikes}."
+        )
 
     await guarded(interaction, run)
 
@@ -584,13 +588,19 @@ async def deadlock_check(
     await guarded(interaction, run)
 
 
-@deadlock_group.command(name="unlink", description="Remove a player's linked Steam account")
-async def deadlock_unlink(interaction: Interaction[Any], player: discord.Member) -> None:
+@deadlock_group.command(
+    name="unlink", description="Remove one of a player's Steam accounts, or all of them"
+)
+@app_commands.describe(account="The account to remove. Leave it empty to remove every one")
+async def deadlock_unlink(
+    interaction: Interaction[Any], player: discord.Member, account: str | None = None
+) -> None:
     async def run() -> None:
         await _staff_start(interaction, Area.MODERATION)
+        account_id = await resolve_steam(account) if account else None
         target = await db(Player.objects.from_discord, player.id, player.display_name)
-        removed = await db(steam.unlink, target)
-        await reply(interaction, "Unlinked." if removed else "They had no Steam account linked.")
+        removed = await db(steam.unlink, target, account_id)
+        await reply(interaction, unlinked_text(removed, account, "them"))
 
     await guarded(interaction, run)
 

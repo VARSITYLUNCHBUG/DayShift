@@ -117,7 +117,7 @@ def answer(match_id: int, captain: Player, agree: bool) -> None:
         AlertKind.EARLY_LEAVE,
         Area.DISPUTES,
         f"Did {claim.leaver.display_name} leave early? The captains disagree. "
-        "`/match early_leave` voids the match.",
+        "Void it on this card, or with `/match early_leave`.",
         match=match,
     )
     match.bump()
@@ -144,6 +144,26 @@ def staff_void(match_id: int, leaver: Player, actor: Player | None) -> None:
     )
     claim.leaver = leaver
     _void(match, claim, actor, Source.STAFF)
+
+
+def latest_claim(match_id: int) -> EarlyLeave | None:
+    """The most recent report for the match, answered or not: whose leave staff are asked about."""
+    return (
+        EarlyLeave.objects.filter(match_id=match_id)
+        .select_related("leaver")
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+
+
+def void_from_alert(match_id: int, actor: Player) -> str:
+    """Staff press Void on the early-leave card: the reported player is the leaver. Returns
+    their name. Works whether or not the leaver is still in the server."""
+    claim = latest_claim(match_id)
+    if claim is None:
+        raise InvalidAction("There's no early leave report for this match. Use /match early_leave.")
+    staff_void(match_id, claim.leaver, actor)
+    return claim.leaver.display_name
 
 
 def _close(claim: EarlyLeave, status: str, actor: Player | None) -> None:
@@ -192,7 +212,7 @@ def tick(moment: datetime) -> int:
                 AlertKind.EARLY_LEAVE,
                 Area.DISPUTES,
                 f"{claim.leaver.display_name} may have left early, and the other captain didn't "
-                "answer. `/match early_leave` voids the match.",
+                "answer. Void it on this card, or with `/match early_leave`.",
                 match=match,
             )
             match.bump()

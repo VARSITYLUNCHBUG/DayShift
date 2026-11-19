@@ -211,3 +211,58 @@ def test_setup_creates_a_hidden_staff_channel(server: Community) -> None:
     assert name == "staff-alerts"
     assert overwrites[guild.default_role] == discord.PermissionOverwrite(view_channel=False)
     assert Community.objects.get(pk=server.pk).staff_channel_id == 7777
+
+
+def _channel(kind: type, channel_id: int, name: str) -> MagicMock:
+    channel = MagicMock(spec=kind)
+    channel.id, channel.name = channel_id, name
+    return channel
+
+
+def test_setup_on_a_fresh_database_reuses_the_old_category(server: Community) -> None:
+    """The server already has a Deadlock category from before a database reset: setup wires
+    its channels up again instead of making a second category beside it."""
+    community.save_wiring(
+        server.pk,
+        match_category_id=None,
+        waiting_room_channel_id=None,
+        queue_channel_id=None,
+        results_channel_id=None,
+        leaderboard_channel_id=None,
+        archive_channel_id=None,
+        staff_channel_id=None,
+    )
+    server.refresh_from_db()
+    old = [
+        _channel(discord.TextChannel, 801, "queue"),
+        _channel(discord.TextChannel, 802, "results"),
+        _channel(discord.TextChannel, 803, "leaderboard"),
+        _channel(discord.TextChannel, 804, "staff-alerts"),
+        _channel(discord.VoiceChannel, 805, "Waiting Room"),
+    ]
+    category = MagicMock(spec=discord.CategoryChannel)
+    category.id, category.name, category.channels = 800, "Deadlock", old
+    unrelated = MagicMock(spec=discord.CategoryChannel)
+    unrelated.name, unrelated.channels = "Deadlock", []  # No #queue: not ours.
+    guild = MagicMock()
+    guild.get_channel.return_value = None
+    guild.categories = [unrelated, category]
+    guild.create_text_channel = AsyncMock(return_value=MagicMock(id=7777))
+    interaction = MagicMock()
+    interaction.guild = guild
+    assert asyncio.run(setup_commands.ensure_channels(interaction, server)) is True
+    guild.create_category.assert_not_called()
+    guild.create_voice_channel.assert_not_called()
+    (name,) = guild.create_text_channel.call_args.args  # Only the one that was missing.
+    assert name == "scoreboard-archive"
+    row = Community.objects.get(pk=server.pk)
+    assert (row.match_category_id, row.queue_channel_id, row.waiting_room_channel_id) == (
+        800,
+        801,
+        805,
+    )
+    assert (row.leaderboard_channel_id, row.staff_channel_id, row.archive_channel_id) == (
+        803,
+        804,
+        7777,
+    )

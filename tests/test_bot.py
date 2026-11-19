@@ -13,7 +13,7 @@ import discord
 import pytest
 from django.db import connections
 
-from bot.client import DraftBot
+from bot.client import DayShiftBot
 from bot.db import db
 from bot.effects.gateway import ChannelGone
 from bot.effects.worker import EffectWorker
@@ -37,7 +37,7 @@ from league.domain.draft_plan import build_plan, team_for_role
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
 from league.domain.images import detect_image
-from league.models import Community, Match, OutboxEffect, Player
+from league.models import Community, Match, OutboxEffect, Player, Season
 from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
 from league.services import boards, common, community, effects, integrity, lobby, queue
@@ -445,7 +445,7 @@ def test_game_on_board_reports_with_a_button_per_team() -> None:
     ],
 )
 def test_timers_say_what_happens_when_they_run_out(status: str, action: str, label: str) -> None:
-    from datetime import UTC, datetime
+    from datetime import UTC, datetime, timedelta
 
     from bot.renderers.board import countdown
     from league.services.boards import BoardState
@@ -455,7 +455,8 @@ def test_timers_say_what_happens_when_they_run_out(status: str, action: str, lab
         status=status,
         mode_name="Test",
         is_candidate_format=False,
-        deadline_at=datetime(2030, 1, 1, tzinfo=UTC),
+        # Near: a year out would read "paused", as the dev tools' parked timers do.
+        deadline_at=datetime.now(UTC) + timedelta(minutes=2),
         step_index=0,
         players=[],
         step_action=action,
@@ -653,6 +654,9 @@ class FakeGateway:
     view_pings: dict[int, list[int]] = field(default_factory=dict)  # Roles a view pinged.
     view_user_pings: dict[int, list[int]] = field(default_factory=dict)
     closed_dms: set[int] = field(default_factory=set)
+    dm_ids: dict[int, int] = field(default_factory=dict)  # DM message ID -> user.
+    dm_edits: list[tuple[int, int, discord.ui.LayoutView]] = field(default_factory=list)
+    edited_files: dict[int, tuple[str, bytes]] = field(default_factory=dict)  # Replaced images.
     next_id: int = 500_000
     fail_next: dict[str, Exception] = field(default_factory=dict)
     messages: dict[int, list[int]] = field(default_factory=dict)
@@ -711,11 +715,18 @@ class FakeGateway:
     async def create_invite(self, guild_id, channel_id, max_age) -> str | None:
         return f"https://discord.gg/invite-{channel_id}"
 
-    async def send_dm(self, user_id, view) -> bool:
+    async def send_dm(self, user_id, view) -> int | None:
         if user_id in self.closed_dms:
-            return False  # Discord's 50007.
+            return None  # Discord's 50007.
         self.dms.append((user_id, view))
-        return True
+        message_id = self._id()
+        self.dm_ids[message_id] = user_id
+        return message_id
+
+    async def edit_dm(self, user_id, message_id, view) -> None:
+        if self.dm_ids.get(message_id) != user_id:
+            raise ChannelGone(str(message_id))
+        self.dm_edits.append((user_id, message_id, view))
 
     async def send_view(
         self, channel_id, view, *, file=None, ping_role_ids=(), ping_user_ids=()
@@ -731,13 +742,15 @@ class FakeGateway:
         self.messages.setdefault(channel_id, []).append(message_id)
         return message_id
 
-    async def edit_view(self, channel_id, message_id, view) -> None:
+    async def edit_view(self, channel_id, message_id, view, *, file=None) -> None:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
         if message_id not in self.messages.get(channel_id, []):
             raise ChannelGone(str(message_id))
         self.views[message_id] = view
         self.edited.add(message_id)
+        if file is not None:
+            self.edited_files[message_id] = file
 
     async def send_text(
         self, channel_id, text, *, user_ids: Iterable[int] = (), role_ids: Iterable[int] = ()
@@ -848,7 +861,6 @@ def test_gather_leaves_the_waiting_room_be_and_dms_everyone_else(wired: Communit
 
     match = Match.objects.get()
     # The Waiting Room is the lobby: no voice channel of the match's own until teams are set.
-    assert effects.resource_id(match.pk, ResourceKind.LOBBY_VOICE) is None
     assert gateway.voice[WAITING_ROOM] == set(ids[:4])
     assert gateway.voice[9999] == {ids[4]}  # Left alone: they get an invite instead.
     assert {user for user, _view in gateway.dms} == set(ids[4:])
@@ -858,19 +870,37 @@ def test_gather_leaves_the_waiting_room_be_and_dms_everyone_else(wired: Communit
 
 
 @pytest.mark.django_db(transaction=True)
-def test_closed_dms_fall_back_to_a_lobby_mention(wired: Community) -> None:
+def test_closed_dms_are_covered_by_the_one_ready_ping(wired: Community) -> None:
+    """Nobody can be DMed: the lobby still posts one ping naming them all, not one each, so a
+    full lobby can't send a burst Discord throttles."""
     players = [make_player(n) for n in range(1, 13)]
     ids = discord_ids(players)
-    gateway = FakeGateway(closed_dms={ids[0]})
+    gateway = FakeGateway(closed_dms=set(ids))
     for player in players:
         queue.join(wired.pk, player)
     drain(gateway)
     match = Match.objects.get()
     text_id = resource(match, ResourceKind.TEXT)
-    mentions = [
-        row for row in gateway.texts if row[0] == text_id and ids[0] in row[2] and "DM" in row[1]
-    ]
-    assert mentions, "A player who can't be DMed must still be told"
+    posts = [row for row in gateway.texts if row[0] == text_id]
+    assert len(posts) == 1, "One ready ping, no per-player notices"
+    assert set(posts[0][2]) == set(ids)
+    assert "Press **Ready**" in posts[0][1]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_readying_on_the_board_takes_the_button_off_the_dm(wired: Community) -> None:
+    players = [make_player(n) for n in range(1, 13)]
+    gateway = FakeGateway()
+    for player in players:
+        queue.join(wired.pk, player)
+    drain(gateway)
+    match = Match.objects.get()
+    lobby.mark_ready(match.pk, players[0])
+    drain(gateway)
+    (edit,) = [row for row in gateway.dm_edits if row[0] == players[0].discord_user_id]
+    payload = str(edit[2].to_components())
+    assert "You're ready" in payload
+    assert button_id("ready", match.pk) not in payload
 
 
 @pytest.mark.django_db(transaction=True)
@@ -1536,9 +1566,9 @@ def test_only_other_peoples_server_messages_count_as_chat(
         )
 
     async def scenario() -> None:
-        await DraftBot.on_message(bot, message(SimpleNamespace(id=9), 1, 5))  # type: ignore[arg-type]
-        await DraftBot.on_message(bot, message(None, 2, 6))  # type: ignore[arg-type]
-        await DraftBot.on_message(bot, message(SimpleNamespace(id=9), 2, 7))  # type: ignore[arg-type]
+        await DayShiftBot.on_message(bot, message(SimpleNamespace(id=9), 1, 5))  # type: ignore[arg-type]
+        await DayShiftBot.on_message(bot, message(None, 2, 6))  # type: ignore[arg-type]
+        await DayShiftBot.on_message(bot, message(SimpleNamespace(id=9), 2, 7))  # type: ignore[arg-type]
 
     asyncio.run(scenario())
     assert seen == [7]
@@ -1771,7 +1801,6 @@ def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_waiting_ro
     drain(gateway)
     successor = Match.objects.get(restarted_from=match)
     assert resource(successor, ResourceKind.TEXT) == text and text not in gateway.deleted
-    assert effects.resource_id(successor.pk, ResourceKind.LOBBY_VOICE) is None
     assert team_voice in gateway.deleted
     assert sitting in gateway.voice[WAITING_ROOM]  # Back in the lobby: the Waiting Room.
     board = gateway.views[resource(successor, ResourceKind.BOARD_MESSAGE)]
@@ -1923,7 +1952,6 @@ def test_match_channel_names_read_alike() -> None:
     from bot.renderers import names
 
     assert names.match_text(12) == "match-12"
-    assert names.lobby_voice(12) == "Match 12 · Lobby"
     assert names.team_voice(12, "Kestrel") == "Match 12 · Kestrel's Team"
     assert names.team_voice(12, " Kes​trel \n") == "Match 12 · Kestrel's Team"
     assert len(names.team_voice(12, "x" * 200)) == 100
@@ -1969,6 +1997,44 @@ def test_grant_and_revoke_go_by_member_id() -> None:
     assert int(allow) & discord.Permissions(view_channel=True, send_messages=True).value
     asyncio.run(gateway.revoke_member(55, 123456789012345678))
     client.http.delete_channel_permissions.assert_awaited_once_with(55, 123456789012345678)
+
+
+def test_letting_in_someone_who_left_the_server_is_not_a_failure() -> None:
+    """Found in the live run: a swap between two players who aren't in the server failed its
+    voice effect for good on Discord's 404 10009 (Unknown Overwrite)."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.effects.gateway import ChannelGone, DiscordGateway
+
+    def not_found(code: int) -> discord.NotFound:
+        return discord.NotFound(MagicMock(status=404, reason="Not Found"), {"code": code})
+
+    client = MagicMock()
+    client.get_channel.return_value = MagicMock(spec=discord.VoiceChannel)
+    gateway = DiscordGateway(client)
+    client.http.edit_channel_permissions = AsyncMock(side_effect=not_found(10009))
+    asyncio.run(gateway.grant_member(55, 123))  # No error: there was nobody to let in.
+    client.http.edit_channel_permissions = AsyncMock(side_effect=not_found(10003))
+    with pytest.raises(ChannelGone):
+        asyncio.run(gateway.grant_member(55, 123))
+
+
+@pytest.mark.parametrize("code", [50007, 50033])
+def test_a_dm_nobody_can_receive_is_not_a_failure(code: int) -> None:
+    """Found in the live run: a DM to a deleted account is 400 50033, Invalid Recipient(s). It
+    failed the effect for good instead of falling back to a mention, like closed DMs (50007)."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.effects.gateway import DiscordGateway
+
+    response = MagicMock(status=400, reason="Bad Request")
+    channel = MagicMock()
+    channel.send = AsyncMock(side_effect=discord.HTTPException(response, {"code": code}))
+    client = MagicMock()
+    client.create_dm = AsyncMock(return_value=channel)
+    assert asyncio.run(DiscordGateway(client).send_dm(123, MagicMock())) is None
 
 
 @pytest.mark.django_db(transaction=True)
@@ -2065,3 +2131,34 @@ def test_a_player_sub_out_line_reads_plainly() -> None:
     text = _sub_text(_state(Status.PLAYER_DRAFT), line)
     assert text.startswith("🔁 **Nyx** is subbing out. Waiting for **MDMT**. <t:")
     assert "priority list" not in text
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_leaderboard_posts_images_then_replaces_them_in_place(wired: Community) -> None:
+    """Ten players to an image, one image to a message; the hourly redraw edits those
+    messages, swapping each image, instead of posting new ones."""
+    from league.services import leaderboards, ratings
+
+    LEADERBOARD = 4_444
+    community.save_wiring(wired.pk, leaderboard_channel_id=LEADERBOARD)
+    gateway = FakeGateway()
+    gateway.messages[LEADERBOARD] = []
+    season = Season.objects.open_for(wired)
+    for n in range(1, 24):  # 23 players: three images, of 10, 10 and 3.
+        ratings.seed_player(season, make_player(n), "mid", actor=None)
+    leaderboards.request(Community.objects.get(pk=wired.pk))
+    drain(gateway)
+    posted = [file for channel, file in gateway.posted_files if channel == LEADERBOARD]
+    assert [name for name, _png in posted] == [
+        "leaderboard-1.png",
+        "leaderboard-2.png",
+        "leaderboard-3.png",
+    ]
+    message_ids = Community.objects.get(pk=wired.pk).leaderboard_message_ids
+    assert len(message_ids) == 3
+
+    leaderboards.request_all()
+    drain(gateway)
+    assert Community.objects.get(pk=wired.pk).leaderboard_message_ids == message_ids
+    assert set(gateway.edited_files) == set(message_ids)  # Each image replaced in place.
+    assert gateway.edited_files[message_ids[0]][1].startswith(b"\x89PNG")

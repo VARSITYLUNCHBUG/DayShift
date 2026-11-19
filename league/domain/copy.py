@@ -6,6 +6,12 @@ rarer messages stay where they're raised.
 
 from __future__ import annotations
 
+
+def plural(count: int, word: str, many: str = "") -> str:
+    """ "1 game", "3 games": the count and the word that fits it. `many` for irregular plurals."""
+    return f"{count} {word if count == 1 else many or word + 's'}"
+
+
 # Queue and ready check.
 ALREADY_QUEUED = "You're already in queue!"
 NOT_QUEUED = "You're not in queue!"

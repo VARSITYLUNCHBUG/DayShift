@@ -162,7 +162,7 @@ describe("control API", () => {
       matches: [MATCH],
       recent: [{ id: 3, status: "completed", winner: "A", ended_at: "2026-11-16T20:00:00Z" }],
       timers: { paused_all: true, frozen_matches: [1] },
-      sim: { configured: true, reachable: false, url: "http://discord-sim:8090" },
+      sim: { configured: true, reachable: false, url: "http://discord-sim:8090", bot_on_sim: false },
     };
     const { fetcher, calls } = fakeFetch(200, json(state));
     const out = await createControlApi("/_control/api", fetcher).state();
@@ -172,6 +172,7 @@ describe("control API", () => {
     expect(out.queue[0]).toMatchObject({ id: 7, name: "Dev 7", inQueue: true, discordId: "1100000000000000123" });
     expect(out.timersPaused).toBe(true);
     expect(out.simReachable).toBe(false);
+    expect(out.botOnSim).toBe(false);
     expect(out.recent).toEqual([{ id: 3, status: "completed", winner: "A" }]);
   });
 
@@ -272,7 +273,7 @@ describe("sim API", () => {
       id: "900",
       channel_id: "11",
       author_id: "5",
-      author_name: "Draft Bot",
+      author_name: "DayShift",
       content: "",
       text: ["Match #1", "Ready up"],
       flags: 32768 | 64,
@@ -289,7 +290,7 @@ describe("sim API", () => {
     const api = createSimApi("/_sim", fetcher);
     const list = await api.channelMessages("11", 20);
     expect(calls[0]?.url).toBe("/_sim/channels/11/messages?limit=20");
-    expect(list[0]).toMatchObject({ authorName: "Draft Bot", authorIsBot: true, text: "Match #1\n\nReady up", ephemeralFor: "1100000000000000100" });
+    expect(list[0]).toMatchObject({ authorName: "DayShift", authorIsBot: true, text: "Match #1\n\nReady up", ephemeralFor: "1100000000000000100" });
     expect(list[0]?.components[0]).toMatchObject({ customId: "ready:1", label: "Ready", emoji: "✅", style: 3 });
 
     await api.sendMessage("21", { dm: true }, "hi");

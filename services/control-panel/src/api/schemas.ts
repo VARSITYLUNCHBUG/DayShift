@@ -262,7 +262,9 @@ export const ControlState = z
     recent: z.array(Recent).nullish(),
     timers: z.object({ paused_all: optBool, frozen_matches: z.array(Pk).nullish() }).nullish(),
     lobbies: z.enum(["create", "fail"]).nullish(),
-    sim: z.object({ configured: optBool, reachable: optBool, url: optStr }).nullish(),
+    sim: z
+      .object({ configured: optBool, reachable: optBool, url: optStr, bot_on_sim: optBool })
+      .nullish(),
   })
   .transform((s) => ({
     community: s.community ? { id: s.community.id, name: s.community.name } : null,
@@ -278,6 +280,8 @@ export const ControlState = z
     /** Whether deadlock-api makes the next lobbies, or refuses them so hosts enter a code. */
     lobbies: s.lobbies ?? null,
     simReachable: s.sim?.reachable ?? null,
+    /** False when the bot is on real Discord, where the simulator can't see its session. */
+    botOnSim: s.sim?.bot_on_sim ?? null,
   }));
 export type ControlState = z.output<typeof ControlState>;
 

@@ -8,6 +8,8 @@ import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 
+import discord
+
 from bot.db import db
 from bot.effects import flow
 from bot.effects.gateway import ChannelGone, Gateway
@@ -44,7 +46,7 @@ from league.services import (
     scrims,
     subs,
 )
-from league.services.common import add_effect
+from league.services.common import add_effect, now
 from league.services.common import render_board as request_board
 
 logger = logging.getLogger(__name__)
@@ -210,12 +212,13 @@ async def gather_player(env: Env) -> None:
         else None
     )
     view = render_ready_dm(env.match_id, invite, heading="Ready Up", channel_url=link)
-    if not await env.gateway.send_dm(user_id, view):
-        await _notice(
-            env,
-            "I couldn't DM you. Join the Waiting Room and press Ready on the board.",
-            user_ids=[user_id],
-        )
+    message_id = await env.gateway.send_dm(user_id, view)
+    if message_id is None:
+        # No notice of its own: the lobby's one ready ping already mentions everyone still to
+        # press Ready, so a full lobby with DMs closed can't post a burst that Discord throttles.
+        logger.info("Ready DM not delivered", extra={"user": user_id, "match": env.match_id})
+        return
+    await db(effects.record_ready_dm, env.match_id, user_id, message_id)
 
 
 async def _gather_sub(env: Env, user_id: int, resources: dict[str, int], link: str | None) -> None:
@@ -236,7 +239,8 @@ async def _gather_sub(env: Env, user_id: int, resources: dict[str, int], link: s
         if target is not None
         else None
     )
-    if await db(_needs_ready, env.match_id, user_id):
+    needs_ready = await db(_needs_ready, env.match_id, user_id)
+    if needs_ready:
         view = render_ready_dm(env.match_id, invite, heading="You're subbing in", channel_url=link)
     else:
         view = render_voice_dm(
@@ -247,8 +251,30 @@ async def _gather_sub(env: Env, user_id: int, resources: dict[str, int], link: s
             channel_url=link,
             voice_label="Join voice",
         )
-    if not await env.gateway.send_dm(user_id, view):
+    message_id = await env.gateway.send_dm(user_id, view)
+    if message_id is None:
         await _notice(env, "you're in. Join voice and check the board.", user_ids=[user_id])
+    elif needs_ready:
+        await db(effects.record_ready_dm, env.match_id, user_id, message_id)
+
+
+@effect("ready_dm_done")
+async def ready_dm_done(env: Env) -> None:
+    """The player pressed Ready (on the board or in the DM): their Ready Up DM loses its button,
+    so it can't be pressed again, and says where to go."""
+    user_id = int(env.effect.payload["discord_user_id"])
+    message_id = int(env.effect.payload["message_id"])
+    resources = await db(effects.resources, env.match_id)
+    link = channel_url(env.guild_id, resources.get(ResourceKind.TEXT))
+    view = render_voice_dm(
+        env.match_id,
+        None,
+        heading="You're ready",
+        body="Wait in the Waiting Room for the captains.",
+        channel_url=link,
+    )
+    with contextlib.suppress(ChannelGone):
+        await env.gateway.edit_dm(user_id, message_id, view)
 
 
 def _needs_ready(match_id: int, user_id: int) -> bool:
@@ -319,7 +345,6 @@ async def remove_player(env: Env) -> None:
     user_id = int(env.effect.payload["discord_user_id"])
     resources = await db(effects.resources, env.match_id)
     voice_kinds = {
-        ResourceKind.LOBBY_VOICE,
         ResourceKind.TEAM_A_VOICE,
         ResourceKind.TEAM_B_VOICE,
     }
@@ -447,35 +472,41 @@ async def render_queue_effect(env: Env) -> None:
     await db(community_service.save_wiring, community.pk, queue_message_id=message_id)
 
 
-def _leaderboard_pages(community_id: int) -> tuple[int | None, list[int], list[str]]:
+LeaderboardPage = tuple[discord.ui.LayoutView, tuple[str, bytes]]
+
+
+def _leaderboard_pages(community_id: int) -> tuple[int | None, list[int], list[LeaderboardPage]]:
+    """The channel, its current messages, and each page: the view and its image. The images are
+    drawn here, on the database thread, off the bot's event loop."""
     from bot.renderers.leaderboard import pages
     from league.services import leaderboards
 
     community = Community.objects.get(pk=community_id)
     season = Season.objects.open_for(community)
-    title = f"Leaderboard · {season.name}"
     rows = leaderboards.table(season)
     return (
         community.leaderboard_channel_id,
         list(community.leaderboard_message_ids),
-        pages(rows, leaderboards.label(community), title),
+        pages(rows, leaderboards.label(community), season.name, now()),
     )
 
 
 @effect("render_leaderboard")
 async def render_leaderboard_effect(env: Env) -> None:
-    """Every player's rating and win rate, over as many messages as it takes. Edits the ones
-    already there, posts any more it needs and deletes any it no longer does."""
+    """Every player, highest first, ten to an image and one image to a message. Edits the
+    messages already there (their image replaced in place), posts any more it needs and deletes
+    any it no longer does. Runs after each result and every hour (the bot's leaderboard loop)."""
     from league.services import leaderboards
 
-    channel_id, message_ids, texts = await db(_leaderboard_pages, env.community.pk)
+    channel_id, message_ids, page_list = await db(_leaderboard_pages, env.community.pk)
     if not channel_id:
         raise Skip("Leaderboard channel isn't set up.")
     kept: list[int] = []
-    for index, text in enumerate(texts):
+    views = [view for view, _image in page_list]
+    for index, (view, image) in enumerate(page_list):
         if index < len(message_ids):
             try:
-                await env.gateway.edit_text(channel_id, message_ids[index], text)
+                await env.gateway.edit_view(channel_id, message_ids[index], view, file=image)
                 kept.append(message_ids[index])
                 continue
             except ChannelGone:
@@ -484,9 +515,9 @@ async def render_leaderboard_effect(env: Env) -> None:
                     with contextlib.suppress(ChannelGone):
                         await env.gateway.delete_message(channel_id, stale)
                 message_ids = message_ids[:index]
-        kept.append(await env.gateway.send_text(channel_id, text))
+        kept.append(await env.gateway.send_view(channel_id, view, file=image))
         await db(leaderboards.save_messages, env.community.pk, kept + message_ids[len(kept) :])
-    for stale in message_ids[len(texts) :]:
+    for stale in message_ids[len(views) :]:
         with contextlib.suppress(ChannelGone):
             await env.gateway.delete_message(channel_id, stale)
     await db(leaderboards.save_messages, env.community.pk, kept)
@@ -609,12 +640,6 @@ def _enqueue_team_moves(match_id: int, user_ids: list[tuple[int, str]]) -> None:
             match=match,
             dedupe_key=f"team_move:{match_id}:{user_id}",
         )
-    add_effect(
-        match.community,
-        "delete_lobby_voice",
-        match=match,
-        dedupe_key=f"delete_lobby_voice:{match_id}",
-    )
 
 
 @effect("create_team_voice")
@@ -648,13 +673,8 @@ async def team_move_player(env: Env) -> None:
     team_channel = resources.get(_team_voice_kind(str(env.effect.payload["team"])))
     if team_channel is None:
         raise Skip("Team channel is gone.")
-    # A lobby voice only exists for a match that popped before the Waiting Room became the lobby.
-    lobbies = (env.community.waiting_room_channel_id, resources.get(ResourceKind.LOBBY_VOICE))
-    in_lobby = any(
-        user_id in env.gateway.voice_member_ids(env.guild_id, channel)
-        for channel in lobbies
-        if channel
-    )
+    waiting = env.community.waiting_room_channel_id
+    in_lobby = bool(waiting) and user_id in env.gateway.voice_member_ids(env.guild_id, waiting)
     if in_lobby and await env.gateway.move_member(env.guild_id, user_id, team_channel):
         return
     invite = await env.gateway.create_invite(env.guild_id, team_channel, INVITE_MAX_AGE_SECONDS)
@@ -685,15 +705,6 @@ async def swap_team_voice(env: Env) -> None:
         if user_id in env.gateway.voice_member_ids(env.guild_id, old_channel):
             await env.gateway.move_member(env.guild_id, user_id, new_channel)
         await env.gateway.revoke_member(old_channel, user_id)
-
-
-@effect("delete_lobby_voice")
-async def delete_lobby_voice(env: Env) -> None:
-    channel_id = await db(effects.resource_id, env.match_id, ResourceKind.LOBBY_VOICE)
-    if channel_id is None:
-        raise Skip("Already deleted.")
-    await env.gateway.delete_channel(channel_id)
-    await db(effects.mark_resource_deleted, env.match_id, ResourceKind.LOBBY_VOICE)
 
 
 # --- Results ---------------------------------------------------------------------------------
@@ -873,7 +884,7 @@ async def restart_voice(env: Env) -> None:
 async def cleanup_voice(env: Env) -> None:
     resources = await db(effects.resources, env.match_id)
     waiting = env.community.waiting_room_channel_id
-    for kind in (ResourceKind.LOBBY_VOICE, ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
+    for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
         channel_id = resources.get(kind)
         if channel_id is None:
             continue

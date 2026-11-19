@@ -86,17 +86,19 @@ interface Props {
   web: Health;
   sim: Health;
   bot: Health;
+  /** "bot", or what it runs against when that isn't the simulator. */
+  botName?: string;
   onReset: (fixture: string) => Promise<unknown>;
   onPauseTimers: () => void;
   onResumeTimers: () => void;
 }
 
 /** Top bar: environment badge, what's loaded, service health, global actions. */
-export function Header({ state, web, sim, bot, onReset, onPauseTimers, onResumeTimers }: Props) {
+export function Header({ state, web, sim, bot, botName = "bot", onReset, onPauseTimers, onResumeTimers }: Props) {
   return (
     <header className="flex flex-wrap items-center gap-3 border-b border-border bg-surface px-4 py-2">
       <div className="flex items-center gap-2">
-        <span className="text-base font-semibold">draft-bot control</span>
+        <span className="text-base font-semibold">DayShift control</span>
         <Chip size="sm" color="danger" variant="primary" className="font-bold tracking-wider">
           DEV ONLY
         </Chip>
@@ -122,7 +124,7 @@ export function Header({ state, web, sim, bot, onReset, onPauseTimers, onResumeT
       <div className="ml-auto flex flex-wrap items-center gap-2">
         <HealthChip name="web" health={web} />
         <HealthChip name="sim" health={sim} />
-        <HealthChip name="bot" health={bot} />
+        <HealthChip name={botName} health={bot} />
         <Button size="sm" variant="tertiary" onPress={onPauseTimers}>
           Pause timers
         </Button>

@@ -149,6 +149,7 @@ class AlertCard:
     outcome: str
     team_names: tuple[str, str]
     ping_role_ids: tuple[int, ...]
+    leaver_name: str = ""  # An early-leave card: who the captain said left.
 
 
 def card(alert_id: int) -> AlertCard:
@@ -181,7 +182,17 @@ def card(alert_id: int) -> AlertCard:
         ping_role_ids=tuple(permissions.role_ids_with(alert.community_id, [Area(alert.area)]))
         if is_open
         else (),
+        leaver_name=_leaver_name(alert),
     )
+
+
+def _leaver_name(alert: StaffAlert) -> str:
+    if alert.kind != AlertKind.EARLY_LEAVE or alert.match_id is None:
+        return ""
+    from league.services import early_leave  # early_leave imports this module.
+
+    claim = early_leave.latest_claim(alert.match_id)
+    return claim.leaver.display_name if claim else ""
 
 
 def where_to_post(alert_id: int) -> tuple[int | None, int | None, int | None]:

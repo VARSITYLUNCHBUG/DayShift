@@ -69,9 +69,12 @@ export function App() {
       : { ok: null, detail: "waiting for the simulator" };
   const botConnected = simHealth.data?.botConnected ?? simState.data?.botConnected ?? null;
   const bot: Health =
-    botConnected === null
-      ? { ok: null, detail: "bot gateway session: unknown" }
-      : { ok: botConnected, detail: botConnected ? "bot connected to the sim gateway" : "bot not connected" };
+    state.data?.botOnSim === false
+      ? { ok: null, detail: "bot is on real Discord: check it there, the simulator can't see it" }
+      : botConnected === null
+        ? { ok: null, detail: "bot gateway session: unknown" }
+        : { ok: botConnected, detail: botConnected ? "bot connected to the sim gateway" : "bot not connected" };
+  const botName = state.data?.botOnSim === false ? "bot · real Discord" : "bot";
 
   return (
     <div className="flex h-full flex-col">
@@ -87,6 +90,7 @@ export function App() {
         web={web}
         sim={simOk}
         bot={bot}
+        botName={botName}
         onReset={(fixture) => run("Reset", () => control.reset(fixture || undefined), "Reset to fixtures")}
         onPauseTimers={() => void run("Pause timers", () => control.pauseTimers())}
         onResumeTimers={() => void run("Resume timers", () => control.resumeTimers())}

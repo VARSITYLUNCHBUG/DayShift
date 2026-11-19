@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
 
+from league.domain.copy import plural
+
 EntryKind = Literal["offence", "clean", "adjust"]
 
 # Order of entries at the same instant: an offence lands before a clean game finishing with it.
@@ -158,5 +160,5 @@ def captain_eligibility(games: int, strikes: int, override: str, rule: CaptainRu
     if games < rule.min_games:
         return Eligibility(False, f"{games}/{rule.min_games} matches", games)
     if rule.max_strikes is not None and strikes >= rule.max_strikes:
-        return Eligibility(False, f"{strikes} strikes", games)
+        return Eligibility(False, plural(strikes, "strike"), games)
     return Eligibility(True, "", games)

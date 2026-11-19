@@ -66,7 +66,17 @@ def _buttons(card: AlertCard) -> ActionRow[Any]:
             ),
             RouteButton("resolve_void", match_id, label="Void", style=ButtonStyle.danger),
         )
-    return ActionRow(RouteButton("alert_dismiss", match_id, card.alert_id, label="Dismiss"))
+    dismiss = RouteButton("alert_dismiss", match_id, card.alert_id, label="Dismiss")
+    if card.kind == AlertKind.EARLY_LEAVE and card.leaver_name:
+        void = RouteButton(
+            "early_leave_void",
+            match_id,
+            card.alert_id,
+            label=f"Void: {card.leaver_name} left early"[:80],
+            style=ButtonStyle.danger,
+        )
+        return ActionRow(void, dismiss)
+    return ActionRow(dismiss)
 
 
 def render_alert(card: AlertCard) -> LayoutView:

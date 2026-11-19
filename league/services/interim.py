@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from django.db import transaction
 
+from league.domain.copy import plural
 from league.domain.engine import Status
 from league.domain.errors import InvalidAction
 from league.models import (
@@ -173,9 +174,11 @@ def recent(season: Season, player: Player, limit: int = 10) -> list[tuple[int, i
 
 # --- Import ------------------------------------------------------------------------------------
 
-ID_COLUMNS = ("discord_id", "discord_user_id", "user_id", "id", "discord")
+# NeatQueue's own export (player_stats_alltime_leaderboard.csv) names them Player ID, MMR, Wins,
+# Losses and Player Name, among columns the import doesn't need.
+ID_COLUMNS = ("discord_id", "discord_user_id", "player_id", "user_id", "id", "discord")
 POINTS_COLUMNS = ("rating", "points", "mmr", "elo")
-NAME_COLUMNS = ("name", "username", "display_name", "player")
+NAME_COLUMNS = ("player_name", "name", "username", "display_name", "player")
 MAX_ROWS = 20000
 
 
@@ -195,8 +198,15 @@ class ParsedImport:
 
 
 def _number(value: str) -> int:
+    """A count or points, rounded: NeatQueue's MMR has decimals."""
     cleaned = value.strip().replace(",", "")
-    return int(float(cleaned)) if cleaned else 0
+    return round(float(cleaned)) if cleaned else 0
+
+
+def _discord_id(value: str) -> int:
+    """A Discord ID as written: plain, a <@mention>, or ="..." (how NeatQueue's export keeps
+    spreadsheets from rounding the 18-digit IDs)."""
+    return int(value.strip().removeprefix("=").strip('"').strip("<@!>"))
 
 
 def _column(header: list[str], names: tuple[str, ...]) -> int | None:
@@ -240,7 +250,7 @@ def parse_csv(text: str) -> ParsedImport:
             return line[index] if index is not None and index < len(line) else ""
 
         try:
-            discord_id = int(cell("id").strip().strip("<@!>"))
+            discord_id = _discord_id(cell("id"))
             points = _number(cell("points"))
             wins, losses = _number(cell("wins")), _number(cell("losses"))
         except ValueError:
@@ -263,8 +273,8 @@ def preview_lines(community: Community, parsed: ParsedImport) -> list[str]:
         ).values_list("discord_user_id", flat=True)
     )
     lines = [
-        f"Import NeatQueue points for {len(parsed.rows)} players "
-        f"({len(known)} have used this bot already).",
+        f"Import NeatQueue points for {plural(len(parsed.rows), 'player')} "
+        f"({len(known)} {'has' if len(known) == 1 else 'have'} used this bot already).",
         "This replaces any earlier import for this season, turns the interim on, and rebuilds "
         "everyone's points from these plus the matches played here. Players not listed start "
         f"at {runtime.of(community).interim_start_points}.",
