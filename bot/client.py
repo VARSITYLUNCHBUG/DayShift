@@ -40,7 +40,7 @@ from bot.handlers import swaps as _swaps  # noqa: F401
 from bot.routing import RouteButton, RouteSelect, RouteUserSelect
 from league import log_context
 from league.services import community as community_service
-from league.services import deadlines, effects, health
+from league.services import deadlines, effects, health, leaderboards
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +188,7 @@ async def watchdog_loop(watchdog: Watchdog, stop: asyncio.Event | None = None) -
             await asyncio.wait_for(stop.wait(), WATCHDOG_INTERVAL_SECONDS)
 
 
-class DraftBot(discord.Client):
+class DayShiftBot(discord.Client):
     def __init__(self, heartbeat_file: Path | None = None) -> None:
         # The bot moves members but never joins voice itself, so it has no use for voice libraries.
         discord.VoiceClient.warn_nacl = False
@@ -245,6 +245,7 @@ class DraftBot(discord.Client):
         await self._recover()
         self._tasks.append(asyncio.create_task(self._deadline_loop(), name="deadlines"))
         self._tasks.append(asyncio.create_task(self._effect_loop(), name="effects"))
+        self._tasks.append(asyncio.create_task(self._leaderboard_loop(), name="leaderboard"))
         self._tasks.append(asyncio.create_task(watchdog_loop(self.watchdog), name="watchdog"))
 
     async def _recover(self) -> None:
@@ -284,6 +285,20 @@ class DraftBot(discord.Client):
 
     async def _deadline_loop(self) -> None:
         await deadline_loop(self.heartbeat, on_fired=self.wake_effects)
+
+    async def _leaderboard_loop(self) -> None:
+        """Redraw every server's leaderboard images on the hour, starting now, so a deploy shows
+        fresh ones at once. The redraw is an ordinary effect: it coalesces with the one each
+        result asks for, and a failure retries like any other."""
+        errors = LoopErrors("Leaderboard refresh failed")
+        while True:
+            try:
+                await db(leaderboards.request_all)
+                self.wake_effects()
+                errors.passed()
+            except Exception as exc:
+                errors.failed(exc)
+            await asyncio.sleep(leaderboards.REFRESH_SECONDS)
 
     async def _effect_loop(self) -> None:
         """Hand due effects to per-match lanes. Wakes on a click, a fired timer or a lane ending."""
@@ -333,9 +348,9 @@ class DraftBot(discord.Client):
             )
 
 
-class _Tree(app_commands.CommandTree[DraftBot]):
+class _Tree(app_commands.CommandTree[DayShiftBot]):
     async def on_error(
-        self, interaction: discord.Interaction[DraftBot], error: app_commands.AppCommandError
+        self, interaction: discord.Interaction[DayShiftBot], error: app_commands.AppCommandError
     ) -> None:
         """Errors outside `guarded`, such as a bad argument. Tagged with their server."""
         with log_context.bind(guild=interaction.guild_id, interaction=interaction.id):
@@ -352,7 +367,7 @@ def run() -> None:
     # waited out the grace period and then killed it. Treat SIGTERM like Ctrl+C: discord.py then
     # closes the connection cleanly, and any effect cut short stays pending and runs on restart.
     signal.signal(signal.SIGTERM, _stop_on_sigterm)
-    bot = DraftBot()
+    bot = DayShiftBot()
     # Only the bot process posts errors to Discord, so this isn't in settings.LOGGING, which the
     # web process and tests share. It's bound to the loop once that's running (setup_hook).
     logging.getLogger().addHandler(discord_error_handler)

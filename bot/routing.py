@@ -70,6 +70,15 @@ async def reply(interaction: Interaction[Any], text: str) -> None:
         await interaction.response.send_message(text, ephemeral=True, allowed_mentions=allowed)
 
 
+async def reply_view(interaction: Interaction[Any], view: discord.ui.LayoutView) -> None:
+    """An ephemeral card, whichever state the interaction is in."""
+    allowed = discord.AllowedMentions.none()
+    if interaction.response.is_done():
+        await interaction.followup.send(view=view, ephemeral=True, allowed_mentions=allowed)
+    else:
+        await interaction.response.send_message(view=view, ephemeral=True, allowed_mentions=allowed)
+
+
 async def guarded(interaction: Interaction[Any], call: Callable[[], Awaitable[None]]) -> None:
     """Show expected refusals to the user. Anything else is logged and never leaks details."""
     with log_context.bind(guild=interaction.guild_id, interaction=interaction.id):

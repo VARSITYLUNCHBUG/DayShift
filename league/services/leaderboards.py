@@ -1,7 +1,8 @@
 """The rating players see: NeatQueue's points during the interim, OpenSkill's rating after.
 
-The #leaderboard channel lists every player with their rating and win rate, and /leaderboard
-shows a player their own line of it. Both read from here, as do the boards and results.
+The #leaderboard channel lists every player in the league with their rating and win rate, and
+/leaderboard shows a player their own line of it. Both read from here, as do the boards and
+results.
 """
 
 from __future__ import annotations
@@ -9,9 +10,14 @@ from __future__ import annotations
 from collections.abc import Collection
 from dataclasses import dataclass
 
-from django.db.models import Q
-
-from league.models import Community, InterimRating, Player, PlayerRating, Season
+from league.models import (
+    Community,
+    InterimRating,
+    MatchParticipant,
+    Player,
+    PlayerRating,
+    Season,
+)
 from league.services import interim
 from league.services.common import request_render
 
@@ -69,25 +75,31 @@ class Row:
         return self.wins / games if games else None
 
 
-def table(season: Season) -> list[Row]:
-    """Everyone with a record, best first. Ties share the order of their names."""
-    entries: list[tuple[int, str, int, int, int]] = []
-    if interim.enabled(season.community_id):
-        rows = (
-            InterimRating.objects.filter(season=season)
-            .filter(Q(games__gt=0) | Q(imported_points__isnull=False))
-            .select_related("player")
+def members(season: Season) -> set[int]:
+    """Everyone in the league this season: a rating this season (played or seeded), a NeatQueue
+    import, or any match on this server. An admin login that never joined isn't one."""
+    ids = set(PlayerRating.objects.filter(season=season).values_list("player_id", flat=True))
+    ids |= set(InterimRating.objects.filter(season=season).values_list("player_id", flat=True))
+    ids |= set(
+        MatchParticipant.objects.filter(match__community_id=season.community_id).values_list(
+            "player_id", flat=True
         )
-        entries = [
-            (row.player_id, row.player.display_name, row.points, row.wins, row.losses)
-            for row in rows
-        ]
-    else:
-        ratings = PlayerRating.objects.filter(season=season, games__gt=0).select_related("player")
-        entries = [
-            (row.player_id, row.player.display_name, row.rating, row.wins, row.losses)
-            for row in ratings
-        ]
+    )
+    return ids
+
+
+def table(season: Season) -> list[Row]:
+    """Everyone in the league, best first, those who haven't played at the start rating. Ties
+    share the order of their names."""
+    ids = members(season)
+    names = dict(
+        Player.objects.filter(pk__in=ids, is_active=True).values_list("pk", "display_name")
+    )
+    records = shown(season, list(names))
+    entries = [
+        (pid, names[pid], record.rating, record.wins, record.losses)
+        for pid, record in records.items()
+    ]
     entries.sort(key=lambda entry: (-entry[2], entry[1].lower(), entry[0]))
     return [
         Row(index + 1, player_id, name, rating, wins, losses)
@@ -112,6 +124,17 @@ LANE = "leaderboard:{}"
 def request(community: Community) -> None:
     """Refresh the #leaderboard channel. Requests coalesce, so call it as often as needed."""
     request_render(community, "render_leaderboard", lane=LANE.format(community.pk))
+
+
+REFRESH_SECONDS = 3600
+
+
+def request_all() -> int:
+    """The hourly refresh: redraw every server's leaderboard. Returns how many were asked for."""
+    communities = list(Community.objects.exclude(leaderboard_channel_id=None))
+    for community in communities:
+        request(community)
+    return len(communities)
 
 
 def save_messages(community_id: int, message_ids: list[int]) -> None:
