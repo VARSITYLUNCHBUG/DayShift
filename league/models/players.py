@@ -46,6 +46,9 @@ class Player(AbstractUser):
 
     discord_user_id = models.BigIntegerField(unique=True)
     display_name = models.CharField(max_length=100)
+    # The Discord avatar hash, from the player's last Discord sign-in on the web. Blank shows
+    # their initials. The web serves it from /avatar/, so pages never see the Discord ID.
+    discord_avatar = models.CharField(max_length=64, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -84,6 +87,9 @@ class SteamAccount(models.Model):
     steam_name = models.CharField(max_length=100, blank=True)
     linked_at = models.DateTimeField()
     verified_at = models.DateTimeField(null=True, blank=True)
+    # When the player signed in to Steam with it on the web (OpenID), which proves they own it.
+    # A proven owner takes over an account somebody else only claimed with /link.
+    proven_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "steam_accounts"
