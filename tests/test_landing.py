@@ -113,8 +113,14 @@ def test_youtube_links_give_their_video_id(url: str, found: str | None) -> None:
         ({"kind": LandingKind.IMAGE, "image": SimpleUploadedFile("a.png", b"<svg/>")}, "image"),
         ({"kind": LandingKind.IMAGE, "image": SimpleUploadedFile("a.png", PNG)}, "alt_text"),
         ({"kind": LandingKind.VIDEO, "alt_text": "A"}, "video"),
-        ({"kind": LandingKind.VIDEO, "alt_text": "A", "youtube_url": "https://example.com"}, "youtube_url"),  # noqa: E501
-        ({"kind": LandingKind.VIDEO, "alt_text": "A", "video": SimpleUploadedFile("a.mp4", PNG)}, "video"),  # noqa: E501
+        (
+            {"kind": LandingKind.VIDEO, "alt_text": "A", "youtube_url": "https://example.com"},
+            "youtube_url",
+        ),
+        (
+            {"kind": LandingKind.VIDEO, "alt_text": "A", "video": SimpleUploadedFile("a.mp4", PNG)},
+            "video",
+        ),
     ],
 )
 def test_an_item_that_cant_be_shown_is_refused(fields: dict[str, Any], problem: str) -> None:

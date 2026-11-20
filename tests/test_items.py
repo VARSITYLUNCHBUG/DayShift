@@ -17,7 +17,7 @@ from league.models import DeadlockItem, Match
 from league.services import api_results, items, postgame
 from tests.conftest import Clock
 from tests.test_postgame import DEADLOCK_ID, metadata
-from tests.test_postgame import reported as reported  # noqa: F401  (the fixture)
+from tests.test_postgame import reported as reported
 
 
 def _entry(item_id: Any, name: Any, kind: str = "upgrade", **more: Any) -> dict[str, Any]:
@@ -75,7 +75,7 @@ def test_sync_items_stores_the_catalogue(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.django_db
-def test_the_served_postgame_names_the_items_it_knows(reported: Match) -> None:  # noqa: F811
+def test_the_served_postgame_names_the_items_it_knows(reported: Match) -> None:
     api_results.record_metadata(reported.pk, DEADLOCK_ID, metadata())
     first = postgame.stored(reported)
     assert first is not None and first.item_names == {}  # The copy is empty: "Item <id>".

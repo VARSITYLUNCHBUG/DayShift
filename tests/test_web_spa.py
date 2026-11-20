@@ -65,7 +65,7 @@ def test_every_script_and_style_carries_the_responses_nonce(dist: Path) -> None:
     response = Client().get("/")
     nonce = _nonce(response)
     html = response.content.decode()
-    tags = re.findall(r"<(?:script|style)\b[^>]*>", html)
+    tags = re.findall(r"<(?:script|style)\b[^>]*>", html, re.IGNORECASE)
     assert len(tags) == 3
     assert all(f'nonce="{nonce}"' in tag for tag in tags)
     assert f'<meta property="csp-nonce" nonce="{nonce}">' in html
