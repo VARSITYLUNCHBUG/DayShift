@@ -200,14 +200,20 @@ def choose_champion(match: Match) -> int:
     profiles = {
         p.player_id: p for p in DevProfile.objects.filter(player_id__in=roster.values("player_id"))
     }
-    for player_id in roster.values_list("player_id", flat=True):
+    player_ids = list(roster.values_list("player_id", flat=True))
+    for player_id in player_ids:
         profile = profiles.get(player_id)
         wanted = (profile.ban if action == "ban" else profile.prefer) if profile else []
         for champion_id in wanted:
             if champion_id in available:
                 return int(champion_id)
+    pool = set(available)
+    if action == "ban":
+        # A team out of bans takes a random one, but never a champion it wants to pick.
+        own = {c for p in player_ids if (profile := profiles.get(p)) for c in profile.prefer}
+        pool = pool - own or pool
     rng = random.Random(f"{match.rng_seed}:dev-champion:{match.step_index}")
-    return rng.choice(sorted(available))
+    return rng.choice(sorted(pool))
 
 
 def winner_of(match: Match) -> str:
