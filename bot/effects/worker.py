@@ -18,7 +18,7 @@ import discord
 
 from bot.db import db
 from bot.effects.gateway import ChannelGone, EditCapped, Gateway
-from bot.effects.handlers import HANDLERS, Env, Skip
+from bot.effects.handlers import HANDLERS, Env, Later, Skip
 from league import log_context, timings
 from league.models import OutboxEffect
 from league.models.outbox import EffectStatus
@@ -144,6 +144,13 @@ class EffectWorker:
         except (Skip, ChannelGone) as exc:
             await db(effects.mark_done, effect.pk, EffectStatus.SKIPPED)
             logger.debug("Effect skipped", extra={"kind": effect.kind, "why": str(exc)})
+            return True
+        except Later as exc:
+            await db(effects.mark_later, effect.pk, exc.seconds, str(exc))
+            logger.info(
+                "Effect put off",
+                extra={"kind": effect.kind, "seconds": exc.seconds, "why": str(exc)},
+            )
             return True
         except EditCapped as exc:
             # The panels that must stay current repost themselves; for anything else an old

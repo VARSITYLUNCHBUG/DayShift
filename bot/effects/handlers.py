@@ -65,6 +65,15 @@ class Skip(Exception):
     """Nothing to do, and that's fine: for example, the channel was already deleted."""
 
 
+class Later(Exception):
+    """Not now: try again in `seconds`. Nothing failed, so no attempt is used. For work waiting
+    out someone else's rate limit."""
+
+    def __init__(self, seconds: float, why: str) -> None:
+        super().__init__(why)
+        self.seconds = seconds
+
+
 @dataclass(frozen=True, slots=True)
 class Env:
     gateway: Gateway
@@ -1070,14 +1079,26 @@ async def fetch_api_match_id(env: Env) -> None:
     await db(draft.record_api_match_id, env.match_id, found, attempt)
 
 
-@effect("check_match_api")
+@effect(api_results.CHECK_KIND)
 async def check_match_api(env: Env) -> None:
     """Fetch the match from deadlock-api and compare. A miss is recorded and retried later by
-    its own new effect, never by failing this one."""
+    its own new effect, never by failing this one.
+
+    One bulk lookup first asks for every check still queued, from deadlock-api's own store, which
+    has a generous quota. Only a match it doesn't have is fetched on its own, which may go to
+    Steam: 3 an hour without a key. While a 429 on that is being waited out, the check waits too,
+    without using one of its tries."""
     deadlock_match_id = int(env.effect.payload["deadlock_match_id"])
+    found = await _bulk_metadata(env.match_id, deadlock_match_id)
+    if (stored := found.get(deadlock_match_id)) is not None:
+        names = await asyncio.to_thread(_steam_names, stored)
+        await db(api_results.record_metadata, env.match_id, deadlock_match_id, stored, names)
+        return
     try:
         data = await asyncio.to_thread(deadlock_api.match_metadata, deadlock_match_id)
     except deadlock_api.ApiError as exc:
+        if exc.held_back:
+            raise Later(exc.retry_after or deadlock_api.DEFAULT_WAIT_SECONDS, str(exc)) from exc
         await db(
             api_results.record_miss,
             env.match_id,
@@ -1093,6 +1114,26 @@ async def check_match_api(env: Env) -> None:
         return
     names = await asyncio.to_thread(_steam_names, data)
     await db(api_results.record_metadata, env.match_id, deadlock_match_id, data, names)
+
+
+async def _bulk_metadata(match_id: int, deadlock_match_id: int) -> dict[int, dict[str, Any]]:
+    """One bulk lookup for this check and every other one queued. The others it answers are
+    recorded now, and their queued checks claimed. A failure costs nothing: each match falls
+    back to its own fetch."""
+    waiting = await db(api_results.waiting_checks)
+    waiting[deadlock_match_id] = match_id
+    try:
+        found = await asyncio.to_thread(deadlock_api.bulk_match_metadata, waiting)
+    except deadlock_api.ApiError as exc:
+        logger.info("Bulk match lookup failed, fetching one by one: %s", exc)
+        return {}
+    for other, data in found.items():
+        if other == deadlock_match_id or other not in waiting:
+            continue
+        names = await asyncio.to_thread(_steam_names, data)
+        if await db(api_results.record_found, waiting[other], other, data, names):
+            logger.info("Result check answered early", extra={"other_match": waiting[other]})
+    return found
 
 
 def _steam_names(data: dict[str, Any]) -> dict[int, str]:

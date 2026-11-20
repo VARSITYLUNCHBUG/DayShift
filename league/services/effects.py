@@ -137,6 +137,16 @@ def mark_done(effect_id: int, status: str = EffectStatus.DONE) -> None:
     OutboxEffect.objects.filter(pk=effect_id).update(status=status, done_at=now(), last_error="")
 
 
+def mark_later(effect_id: int, seconds: float, why: str) -> None:
+    """Run it again in `seconds`, as if it hadn't started: nothing failed, so no attempt is used
+    and the rest of its lane carries on. For work waiting out someone else's rate limit."""
+    OutboxEffect.objects.filter(pk=effect_id, status=EffectStatus.PENDING).update(
+        run_after=now() + timedelta(seconds=max(seconds, 1)),
+        started_at=None,
+        last_error=why[:2000],
+    )
+
+
 def mark_retry(effect_id: int, error: str, wait_at_least: float = 0) -> str:
     """Back off and retry, or fail for good once attempts run out. Returns the new status.
     `wait_at_least` is how long Discord asked us to wait, for a rate limit."""
