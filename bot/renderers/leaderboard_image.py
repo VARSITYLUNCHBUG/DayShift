@@ -3,6 +3,8 @@
 Pure: rows in, PNG bytes out, no I/O but reading the bundled fonts. The fonts are Figtree and
 Bricolage Grotesque (SIL Open Font License, bot/assets/fonts/), the brand's two families: Bricolage
 for the title, Figtree for everything people read. Both are variable fonts, set by weight here.
+Names and season names in other scripts, and emoji, fall back letter by letter to the system's
+fonts (bot/renderers/fonts.py).
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from bot.renderers.fonts import Writer
 from league.services.leaderboards import Row
 
 FONTS = Path(__file__).resolve().parent.parent / "assets" / "fonts"
@@ -78,15 +81,6 @@ def _text(size: int, weight: int = 500) -> ImageFont.FreeTypeFont:
     return _font("Figtree", size, weight)
 
 
-def _fit(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, width: int) -> str:
-    """The name, cut with an ellipsis to fit its column."""
-    if draw.textlength(text, font=font) <= width:
-        return text
-    while text and draw.textlength(text + "…", font=font) > width:
-        text = text[:-1]
-    return text.rstrip() + "…"
-
-
 def _mark(draw: ImageDraw.ImageDraw, right: int, top: int) -> None:
     """The DayShift mark: three kit stripes, bubblegum, cream, bubblegum, leaning 14 degrees."""
     height, width, gap, lean = 44 * SCALE, 9 * SCALE, 5 * SCALE, 11 * SCALE
@@ -131,25 +125,22 @@ def render(
     height = HEIGHT
     image = Image.new("RGB", (WIDTH, height), INK)
     draw = ImageDraw.Draw(image)
+    write = Writer(image, draw)
 
     # A bubblegum edge down the left, the brand's mark for a DayShift moment.
     draw.rectangle((0, 0, 6 * SCALE, height), fill=BUBBLEGUM)
     draw.text((PAD, 20 * SCALE), "Leaderboard", font=_title(40), fill=CREAM)
     first, last = (rows[0].rank, rows[-1].rank) if rows else (0, 0)
     span = f"{first}{EN_DASH}{last} of {total}" if rows else "0 players"
-    draw.text(
-        (PAD, 72 * SCALE),
-        f"{season_name}  ·  {rating_label}  ·  {span}",
-        font=_text(16, 600),
-        fill=MUTED,
-    )
+    subtitle = write.fit(f"{season_name}  ·  {rating_label}  ·  {span}", _text(16, 600), WIDTH // 2)
+    write.text((PAD, 72 * SCALE), subtitle, font=_text(16, 600), fill=MUTED)
     _mark(draw, WIDTH - PAD, 30 * SCALE)
 
     # Column headings.
     y = HEADER + COLUMN_HEADS // 2
     heads = _text(13, 700)
     draw.text((X_NAME, y), "PLAYER", font=heads, fill=FAINT, anchor="lm")
-    draw.text((X_RATING, y), rating_label.upper(), font=heads, fill=FAINT, anchor="rm")
+    write.text((X_RATING, y), rating_label.upper(), font=heads, fill=FAINT, anchor="rm")
     draw.text((X_RECORD, y), f"W{EN_DASH}L", font=heads, fill=FAINT, anchor="rm")
     draw.text((X_RATE, y), "WIN %", font=heads, fill=FAINT, anchor="rm")
     draw.line((PAD, HEADER + COLUMN_HEADS, WIDTH - PAD, HEADER + COLUMN_HEADS), fill=LINE, width=2)
@@ -169,8 +160,8 @@ def render(
         top = HEADER + COLUMN_HEADS + index * ROW
         middle = top + ROW // 2
         _rank_badge(draw, row.rank, middle)
-        name = _fit(draw, row.name, name_font, X_RATING - X_NAME - 120 * SCALE)
-        draw.text((X_NAME, middle), name, font=name_font, fill=CREAM, anchor="lm")
+        name = write.fit(row.name, name_font, X_RATING - X_NAME - 120 * SCALE)
+        write.text((X_NAME, middle), name, font=name_font, fill=CREAM, anchor="lm")
         draw.text((X_RATING, middle), str(row.rating), font=number_font, fill=CREAM, anchor="rm")
         record = f"{row.wins}{EN_DASH}{row.losses}"
         draw.text((X_RECORD, middle), record, font=small_font, fill=MUTED, anchor="rm")
