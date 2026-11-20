@@ -27,15 +27,19 @@ interface Props {
 /** A player's round picture, initials while it loads or when there isn't one. Decorative: the name
  * is always in the text next to it. */
 export function Avatar({ name, src, size = "lg", team, ready = null, className }: Props) {
+  // Not ready yet: the picture fades and the initials go muted on a plain fill. Fading the
+  // initials themselves would take them below text contrast.
+  const waiting = ready === false;
+  const fill = team && !waiting ? TEAM_CLASS[team].fill : waiting ? "bg-raised text-muted" : "bg-raised text-foreground";
   return (
-    <span className={cn("relative inline-flex shrink-0", ready === false && "opacity-50", className)}>
+    <span className={cn("relative inline-flex shrink-0", className)}>
       <HeroAvatar
         aria-hidden="true"
-        className={cn("rounded-full border-2 border-background", SIZE[size], team ? TEAM_CLASS[team].fill : "bg-raised")}
+        className={cn("rounded-full border-2 border-background", SIZE[size], team && !waiting ? TEAM_CLASS[team].fill : "bg-raised")}
       >
-        {src ? <HeroAvatar.Image src={src} alt="" /> : null}
+        {src ? <HeroAvatar.Image src={src} alt="" className={cn(waiting && "opacity-50")} /> : null}
         <HeroAvatar.Fallback
-          className={cn("font-extrabold", team ? TEAM_CLASS[team].fill : "bg-raised text-foreground")}
+          className={cn("font-extrabold", fill)}
           delayMs={src ? 600 : 0}
         >
           {initials(name)}

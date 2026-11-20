@@ -120,7 +120,6 @@ export function ReportForm({ match, myId, onDone }: { match: MatchSnap; myId: st
                   selected
                     ? cn(TEAM_CLASS[key].border, TEAM_CLASS[key].soft, "shadow-lift")
                     : cn(TEAM_CLASS[key].softBorder, "bg-surface"),
-                  winner && !selected && "opacity-70",
                 )}
               >
                 {selected ? (

@@ -86,8 +86,10 @@ export function RoomHeader({ number, title, phases, current, tone = null, action
           <div className="ml-auto flex items-center gap-3">
             {actions}
             {me ? (
-              <Link to="/me" aria-label={`Me: ${me.name}`} className="flex rounded-full">
+              <Link to="/me" className="flex rounded-full">
                 <Avatar name={me.name} src={me.avatar} size="md" />
+                {/* The name comes from the content, so it matches what's shown (WCAG 2.5.3). */}
+                <span className="sr-only">Me: {me.name}</span>
               </Link>
             ) : null}
           </div>
