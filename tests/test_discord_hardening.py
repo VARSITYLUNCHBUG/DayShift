@@ -300,6 +300,9 @@ def test_command_sync_is_skipped_when_nothing_changed(
     from django.conf import settings
 
     monkeypatch.setattr(settings, "DISCORD_GUILD_ID", wired.discord_guild_id)
+    # setup_hook binds the process-wide error handler to this test's loop. Left bound, later
+    # tests in the same worker see an error queue and start an extra loop.
+    monkeypatch.setattr(client_module.discord_error_handler, "bind", lambda _loop: None)
 
     async def boot() -> AsyncMock:
         bot = DayShiftBot(tmp_path / "beat")
