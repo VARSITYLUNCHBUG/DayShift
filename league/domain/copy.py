@@ -15,6 +15,7 @@ def plural(count: int, word: str, many: str = "") -> str:
 # Queue and ready check.
 ALREADY_QUEUED = "You're already in queue!"
 NOT_QUEUED = "You're not in queue!"
+NO_LONGER_QUEUED = "You're no longer in the queue. Join again from the queue panel."
 ALREADY_READY = "You're already ready!"
 
 # Captains.

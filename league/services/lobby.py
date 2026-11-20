@@ -496,10 +496,11 @@ def void_live(
         for participant in active:
             if participant.ready_at is not None and participant.player_id not in skip_requeue:
                 # Keeping the original time puts them ahead of everyone who joined later.
+                # They just readied, so the idle clock starts again.
                 _entry, created = QueueEntry.objects.get_or_create(
                     community=community,
                     player=participant.player,
-                    defaults={"joined_at": participant.queue_joined_at},
+                    defaults={"joined_at": participant.queue_joined_at, "active_at": moment},
                 )
                 if created:
                     places.append((participant.player, participant.queue_joined_at))

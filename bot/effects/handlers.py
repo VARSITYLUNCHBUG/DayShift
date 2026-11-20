@@ -27,7 +27,7 @@ from bot.renderers.board import (
     render_voice_dm,
 )
 from bot.renderers.match_stats import render_match_stats
-from bot.renderers.queue import render_queue
+from bot.renderers.queue import render_check_in_dm, render_idle_removed_dm, render_queue
 from bot.renderers.results import (
     render_correction,
     render_results,
@@ -46,6 +46,7 @@ from league.services import (
     effects,
     ocr,
     permissions,
+    queue,
     runtime,
     scrims,
     subs,
@@ -653,6 +654,38 @@ async def dm_player(env: Env) -> None:
 @effect("ping_lobby")
 async def ping_lobby(env: Env) -> None:
     await _notice(env, str(env.effect.payload["text"]))
+
+
+# --- The queue's idle timeout ------------------------------------------------------------------
+# Both are DMs only. Closed DMs drop them: they're taken out at the same time either way.
+
+
+@effect("queue_check_in")
+async def queue_check_in(env: Env) -> None:
+    payload = env.effect.payload
+    if not await db(queue.awaiting_check_in, int(payload["entry_id"])):
+        raise Skip("They left, popped, or already answered.")
+    view = render_check_in_dm(
+        env.community.pk,
+        env.community.name,
+        datetime.fromisoformat(str(payload["remove_at"])),
+        channel_url(env.guild_id, env.community.queue_channel_id),
+    )
+    if not await env.gateway.send_dm(int(payload["discord_user_id"]), view):
+        raise Skip("DMs are closed.")
+
+
+@effect("queue_idle_removed")
+async def queue_idle_removed(env: Env) -> None:
+    payload = env.effect.payload
+    view = render_idle_removed_dm(
+        env.community.name,
+        warned=bool(payload["warned"]),
+        idle_minutes=int(payload["idle_minutes"]),
+        queue_url=channel_url(env.guild_id, env.community.queue_channel_id),
+    )
+    if not await env.gateway.send_dm(int(payload["discord_user_id"]), view):
+        raise Skip("DMs are closed.")
 
 
 # --- Staff alerts --------------------------------------------------------------------------

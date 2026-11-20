@@ -78,6 +78,7 @@ def tick() -> int:
     # Each of these can fail without stopping the others, or the queue pops below.
     fired += _side_tick("scrims", lambda _moment: scrims.tick(), moment)
     fired += _side_tick("priority list", prio.tick, moment)
+    fired += _side_tick("queue idle timeout", queue.tick, moment)
 
     # Only full queues: each pop locks its community and counts its live matches again.
     for community_id in queue.full_queues():
