@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import time
-from collections.abc import Iterable
+from collections.abc import Awaitable, Iterable
 from typing import Any, Literal, Protocol
 
 import discord
@@ -70,8 +70,13 @@ class Gateway(Protocol):
         say), which is different from an empty room."""
         ...
 
-    async def move_member(self, guild_id: int, user_id: int, channel_id: int) -> bool:
-        """False if the member isn't in voice (Discord error 40032). Not a failure."""
+    async def move_member(
+        self, guild_id: int, user_id: int, channel_id: int, *, paced: bool = True
+    ) -> bool:
+        """False if the member isn't in voice (Discord error 40032). Not a failure.
+
+        `paced` spaces it with the server's other voice work. Callers outside a voice lane pass
+        False, so a match board never waits behind another match's voice setup."""
         ...
 
     async def create_invite(self, guild_id: int, channel_id: int, max_age: int) -> str | None: ...
@@ -128,7 +133,7 @@ class Gateway(Protocol):
 
     async def revoke_member(self, channel_id: int, user_id: int) -> None: ...
 
-    async def set_voice_status(self, channel_id: int, text: str) -> None: ...
+    async def set_voice_status(self, channel_id: int, text: str, *, paced: bool = True) -> None: ...
 
     async def fetch_attachment(
         self, channel_id: int, message_id: int, attachment_id: int
@@ -337,13 +342,15 @@ class DiscordGateway:
             found[user_id] = member.display_name if member is not None else ""
         return found
 
-    async def move_member(self, guild_id: int, user_id: int, channel_id: int) -> bool:
-        try:
+    async def move_member(
+        self, guild_id: int, user_id: int, channel_id: int, *, paced: bool = True
+    ) -> bool:
+        def move() -> Awaitable[Any]:
             # A plain PATCH: no member cache needed, one request per move.
-            await self._voice_pacer.run(
-                guild_id,
-                lambda: self.client.http.edit_member(guild_id, user_id, channel_id=channel_id),
-            )
+            return self.client.http.edit_member(guild_id, user_id, channel_id=channel_id)
+
+        try:
+            await (self._voice_pacer.run(guild_id, move) if paced else move())
         except discord.HTTPException as exc:
             if exc.code == 40032:
                 return False
@@ -549,10 +556,15 @@ class DiscordGateway:
         with contextlib.suppress(discord.NotFound):  # They had no overwrite there.
             await self.client.http.delete_channel_permissions(channel_id, user_id)
 
-    async def set_voice_status(self, channel_id: int, text: str) -> None:
+    async def set_voice_status(self, channel_id: int, text: str, *, paced: bool = True) -> None:
         channel = await self._messageable(channel_id)
         if isinstance(channel, discord.VoiceChannel):
-            await self._voice_pacer.run(channel.guild.id, lambda: channel.edit(status=text[:500]))
+            voice = channel
+
+            def edit() -> Awaitable[Any]:
+                return voice.edit(status=text[:500])
+
+            await (self._voice_pacer.run(voice.guild.id, edit) if paced else edit())
 
     async def fetch_attachment(
         self, channel_id: int, message_id: int, attachment_id: int

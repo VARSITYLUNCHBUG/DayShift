@@ -242,7 +242,8 @@ async def _gather_sub(env: Env, user_id: int, resources: dict[str, int], link: s
     target = team_voice or waiting_room
     if team_voice is not None and waiting_room:
         here = user_id in env.gateway.voice_member_ids(env.guild_id, waiting_room)
-        if here and await env.gateway.move_member(env.guild_id, user_id, team_voice):
+        # The main match lane: never paced behind other matches' voice setup.
+        if here and await env.gateway.move_member(env.guild_id, user_id, team_voice, paced=False):
             return
     elif target is not None and user_id in env.gateway.voice_member_ids(env.guild_id, target):
         target = None  # Already in the Waiting Room: no invite needed.
@@ -367,7 +368,7 @@ async def remove_player(env: Env) -> None:
             and user_id in env.gateway.voice_member_ids(env.guild_id, discord_id)
             and waiting
         ):
-            await env.gateway.move_member(env.guild_id, user_id, waiting)
+            await env.gateway.move_member(env.guild_id, user_id, waiting, paced=False)
         if kind in voice_kinds or kind == ResourceKind.TEXT:
             await env.gateway.revoke_member(discord_id, user_id)
 
@@ -707,7 +708,9 @@ async def announce_lobby_code(env: Env) -> None:
     for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
         channel_id = resources.get(kind)
         if channel_id:
-            await env.gateway.set_voice_status(channel_id, f"Lobby code: {match.lobby_code}")
+            await env.gateway.set_voice_status(
+                channel_id, f"Lobby code: {match.lobby_code}", paced=False
+            )
 
 
 @effect("report_reminder")

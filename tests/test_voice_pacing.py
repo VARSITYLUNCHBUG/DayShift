@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import timedelta
 from unittest.mock import AsyncMock
 
@@ -49,30 +49,61 @@ def test_voice_operations_are_spaced_per_guild_and_errors_also_consume_a_slot() 
     assert waits == [5, 1, 1]
 
 
-def test_concurrent_voice_calls_in_one_guild_are_serialized() -> None:
-    async def scenario() -> None:
-        pacer = VoicePacer(create_interval=0, action_interval=0)
-        entered, release = asyncio.Event(), asyncio.Event()
-        calls = []
+def test_concurrent_calls_get_spaced_slots_and_a_slow_one_holds_nobody_up() -> None:
+    """Starts are spaced in the order asked, but a call stuck in Discord (a rate-limit wait,
+    say) doesn't stop the next one starting in its own slot."""
+    stamp = [0.0]
+    waits: list[float] = []
 
-        async def slow() -> None:
-            entered.set()
-            await release.wait()
-            calls.append("first")
-
-        async def second() -> None:
-            calls.append("second")
-
-        first = asyncio.create_task(pacer.run(1, slow))
-        await entered.wait()
-        other = asyncio.create_task(pacer.run(1, second))
+    async def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        stamp[0] += seconds
         await asyncio.sleep(0)
-        assert not other.done()
+
+    async def scenario() -> None:
+        pacer = VoicePacer(
+            create_interval=5, action_interval=1, clock=lambda: stamp[0], sleep=sleep
+        )
+        release = asyncio.Event()
+        starts: list[str] = []
+
+        async def stuck() -> None:
+            starts.append("stuck")
+            await release.wait()
+
+        def quick(name: str) -> Callable[[], Awaitable[None]]:
+            async def call() -> None:
+                starts.append(name)
+
+            return call
+
+        first = asyncio.create_task(pacer.run(1, stuck, create=True))
+        await asyncio.sleep(0)
+        await asyncio.gather(pacer.run(1, quick("second")), pacer.run(1, quick("third")))
+        assert not first.done()  # Still stuck, and the others ran anyway.
+        assert starts == ["stuck", "second", "third"]
+        assert waits == [5, 1]  # Second waits out the creation's 5 s; third 1 s after it.
         release.set()
-        await asyncio.gather(first, other)
-        assert calls == ["first", "second"]
+        await first
 
     asyncio.run(scenario())
+
+
+def test_main_lane_voice_calls_skip_the_pacer(wired: Community) -> None:
+    """The lobby code's voice status runs in the match's main lane, so it never waits behind
+    another match's paced voice setup."""
+    from bot.effects.handlers import Env, announce_lobby_code
+
+    match = popped_match(wired, FakeGateway())
+    match.lobby_code = "ABC123"
+    match.save(update_fields=["lobby_code"])
+    effects.record_resource(match.pk, ResourceKind.TEXT, 4242)
+    effects.record_resource(match.pk, ResourceKind.TEAM_A_VOICE, 4243)
+    common.add_effect(wired, "announce_lobby_code", match=match)
+    effect = OutboxEffect.objects.get(match=match, kind="announce_lobby_code")
+    gateway = FakeGateway()
+    asyncio.run(announce_lobby_code(Env(gateway, effect, wired, match)))
+    assert ("set_voice_status", 4243) in gateway.unpaced
 
 
 @pytest.fixture

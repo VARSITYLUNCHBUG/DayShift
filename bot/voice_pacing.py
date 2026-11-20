@@ -24,20 +24,18 @@ class VoicePacer:
         self.action_interval = action_interval
         self._clock = clock
         self._sleep = sleep
-        self._locks: dict[int, asyncio.Lock] = {}
         self._next: dict[int, float] = {}
 
     async def run[T](
         self, guild_id: int, call: Callable[[], Awaitable[T]], *, create: bool = False
     ) -> T:
-        lock = self._locks.setdefault(guild_id, asyncio.Lock())
-        async with lock:
-            wait = self._next.get(guild_id, 0) - self._clock()
-            if wait > 0:
-                await self._sleep(wait)
-            try:
-                return await call()
-            finally:
-                # Even a failed request consumes an attempt. Space the following operation.
-                interval = self.create_interval if create else self.action_interval
-                self._next[guild_id] = self._clock() + interval
+        """Start `call` in this server's next free slot. Starts are spaced, not whole calls: a
+        call that is slow, or waits out a rate limit, doesn't hold up the ones after it. A failed
+        call still used its slot."""
+        moment = self._clock()
+        start = max(moment, self._next.get(guild_id, 0.0))
+        # Reserved before sleeping, with no await in between, so concurrent callers queue up.
+        self._next[guild_id] = start + (self.create_interval if create else self.action_interval)
+        if start > moment:
+            await self._sleep(start - moment)
+        return await call()

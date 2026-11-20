@@ -667,6 +667,7 @@ class FakeGateway:
     text_mentions: dict[int, list[int]] = field(default_factory=dict)
     open_voice: dict[int, bool] = field(default_factory=dict)
     names: dict[int, str] = field(default_factory=dict)  # Display names Discord has cached.
+    unpaced: list[tuple[str, int]] = field(default_factory=list)  # Voice calls skipping pacing.
 
     def _id(self) -> int:
         self.next_id += 1
@@ -716,7 +717,9 @@ class FakeGateway:
             for user_id in self.voice_member_ids(guild_id, channel_id)
         }
 
-    async def move_member(self, guild_id, user_id, channel_id) -> bool:
+    async def move_member(self, guild_id, user_id, channel_id, *, paced=True) -> bool:
+        if not paced:
+            self.unpaced.append(("move_member", user_id))
         current = [c for c, users in self.voice.items() if user_id in users]
         if not current:
             return False  # Discord's 40032.
@@ -818,7 +821,9 @@ class FakeGateway:
     async def revoke_member(self, channel_id, user_id) -> None:
         self.revoked.append((channel_id, user_id))
 
-    async def set_voice_status(self, channel_id, text) -> None:
+    async def set_voice_status(self, channel_id, text, *, paced=True) -> None:
+        if not paced:
+            self.unpaced.append(("set_voice_status", channel_id))
         self.statuses[channel_id] = text
 
     async def fetch_attachment(self, channel_id, message_id, attachment_id):

@@ -442,7 +442,8 @@ class DayShiftBot(discord.Client):
         try:
             target = await db(effects.on_voice_join, member.id, channel.id)
             if target is not None:
-                await self.gateway.move_member(target[0], member.id, target[1])
+                # Someone waiting to be moved shouldn't queue behind other matches' setup.
+                await self.gateway.move_member(target[0], member.id, target[1], paced=False)
         except Exception:
             logger.exception(
                 "Auto-move failed", extra={"user": member.id, "guild": member.guild.id}
