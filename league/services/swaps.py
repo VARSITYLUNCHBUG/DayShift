@@ -2,7 +2,8 @@
 
 One captain offers one of their players for one of the other team's. The other captain accepts
 and the two change teams, voice channels included; declines; or lets it lapse. Captains stay
-where they are. Swaps are open from the coinflip until the game starts.
+where they are. Swaps are open from the coinflip until the game starts, and the captains'
+team check after the coinflip is the place for them.
 """
 
 from __future__ import annotations
@@ -23,7 +24,9 @@ from league.services.common import (
 )
 
 # The player draft is over and the game hasn't started: teams can still change.
-SWAPPABLE = frozenset({Status.COINFLIP, Status.CHAMPION_DRAFT, Status.LOBBY_CODE})
+SWAPPABLE = frozenset(
+    {Status.COINFLIP, Status.TEAM_CONFIRM, Status.CHAMPION_DRAFT, Status.LOBBY_CODE}
+)
 ANSWER_SECONDS = 60
 
 
@@ -145,6 +148,9 @@ def answer(match_id: int, captain: Player, swap_id: int, accept: bool) -> Player
     give.save(update_fields=["team"])
     take.save(update_fields=["team"])
     _close(swap, SwapStatus.ACCEPTED, captain)
+    from league.services.draft import teams_changed
+
+    teams_changed(match)  # Teams the captains had confirmed have changed: they confirm again.
     add_effect(
         match.community,
         "swap_team_voice",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,7 @@ from league.services import (
 from tests.conftest import PRESETS, Clock, activate, make_player
 from tests.helpers import (
     acting_captain,
+    confirm_teams,
     fail_api_lobby,
     finish,
     fresh,
@@ -54,6 +56,7 @@ from tests.helpers import (
     ready_all,
     run_champion_draft,
     run_player_draft,
+    settle_coinflip_for,
     to_champion_draft,
     to_in_progress,
     vote_captains,
@@ -431,6 +434,8 @@ def test_the_winner_chooses_a_side_and_hidden_king_bans_first(voting: Match) -> 
         draft.choose_coinflip(match.pk, winner, engine.FIRST_PICK)  # Scrims only.
     draft.choose_coinflip(match.pk, winner, engine.ARCHMOTHER)
     match = fresh(match)
+    assert match.status == Status.TEAM_CONFIRM
+    match = confirm_teams(match)
     assert match.status == Status.CHAMPION_DRAFT
     loser_team = "B" if match.coinflip_winner == "A" else "A"
     # The winner took The Archmother, so the loser's team is Hidden King and bans first.
@@ -454,7 +459,7 @@ def test_a_coinflip_timeout_chooses_at_random_for_the_winner(voting: Match, cloc
     clock.advance(21)
     deadlines.tick()
     match = fresh(match)
-    assert match.status == Status.CHAMPION_DRAFT
+    assert match.status == Status.TEAM_CONFIRM
     assert match.coinflip_winner_choice in engine.RANKED_COINFLIP_CHOICES
     assert match.hidden_king_team in {"A", "B"}
     assert match.champion_first_pick in {"A", "B"}
@@ -483,11 +488,12 @@ def test_every_preset_runs_the_same_flow(
     match = run_champion_draft(match)
     assert match.status == Status.LOBBY_CODE
     statuses = list(match.transitions.order_by("id").values_list("to_status", flat=True))
-    assert statuses[-6:] == [
+    assert statuses[-7:] == [
         Status.CAPTAIN_PHASE,
         Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
+        Status.TEAM_CONFIRM,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
     ]
@@ -832,3 +838,59 @@ def test_render_requests_coalesce(popped: Match) -> None:
         match=popped, kind="render_board", status=EffectStatus.PENDING
     )
     assert pending.count() == 1
+
+
+# --- Captains confirm the teams after the coinflip -------------------------------------------
+
+
+def at_team_check(voting: Match) -> Match:
+    match = settle_coinflip_for(at_coinflip(voting))
+    assert match.status == Status.TEAM_CONFIRM
+    return match
+
+
+def test_both_captains_confirm_the_teams_before_the_hero_draft(voting: Match) -> None:
+    match = at_team_check(voting)
+    assert match.deadline_at is not None
+    player = match.participants.filter(is_captain=False, is_active=True).first().player
+    with pytest.raises(NotAllowed):
+        draft.confirm_teams(match.pk, player)
+    draft.confirm_teams(match.pk, match.captain_of("A").player)
+    assert fresh(match).status == Status.TEAM_CONFIRM
+    with pytest.raises(InvalidAction):
+        draft.confirm_teams(match.pk, match.captain_of("A").player)
+    draft.confirm_teams(match.pk, match.captain_of("B").player)
+    match = fresh(match)
+    assert match.status == Status.CHAMPION_DRAFT
+    with pytest.raises(StaleAction):
+        draft.confirm_teams(match.pk, match.captain_of("A").player)
+
+
+def test_a_swap_during_the_team_check_means_confirming_again(voting: Match, clock: Clock) -> None:
+    from league.services import swaps
+
+    match = at_team_check(voting)
+    captain_a, captain_b = match.captain_of("A").player, match.captain_of("B").player
+    draft.confirm_teams(match.pk, captain_a)
+    give = match.participants.filter(team="A", is_captain=False).first().player
+    take = match.participants.filter(team="B", is_captain=False).first().player
+    clock.advance(30)
+    swap = swaps.propose(match.pk, captain_a, give.pk, take.pk)
+    swaps.answer(match.pk, captain_b, swap.pk, True)
+    match = fresh(match)
+    assert match.status == Status.TEAM_CONFIRM
+    assert match.participants.get(player=give).team == "B"
+    assert not match.participants.filter(teams_confirmed_at__isnull=False).exists()
+    # The full time again, from the swap.
+    seconds = match.mode.champion_draft.team_confirm_seconds
+    expected = clock.now() + timedelta(seconds=seconds)
+    assert abs((match.deadline_at - expected).total_seconds()) < 1
+
+
+def test_unconfirmed_teams_stand_when_time_runs_out(voting: Match, clock: Clock) -> None:
+    match = at_team_check(voting)
+    clock.advance(match.mode.champion_draft.team_confirm_seconds + 1)
+    deadlines.tick()
+    match = fresh(match)
+    assert match.status == Status.CHAMPION_DRAFT
+    assert match.transitions.get(to_status=Status.CHAMPION_DRAFT).source == "timeout"

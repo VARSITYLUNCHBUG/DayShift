@@ -163,6 +163,7 @@ class BoardState:
     voted_ids: frozenset[int] = frozenset()
     # Captains who have pressed I'm here.
     checked_in_ids: frozenset[int] = frozenset()
+    teams_confirmed_ids: frozenset[int] = frozenset()  # Captains who pressed Teams ready.
     # Completed matches a player needs before they can captain. 0 means anyone can.
     captain_min_games: int = 0
     # Team A's chance of winning once both teams are drafted, from current ratings.
@@ -387,6 +388,12 @@ def board_state(match_id: int) -> BoardState:
             )
             for line in state.players
         ]
+    if match.status == Status.TEAM_CONFIRM:
+        state.teams_confirmed_ids = frozenset(
+            participants.filter(is_captain=True, teams_confirmed_at__isnull=False).values_list(
+                "player_id", flat=True
+            )
+        )
     if match.status == Status.CAPTAIN_CHECKIN:
         state.checked_in_ids = frozenset(
             participants.filter(is_captain=True, checked_in_at__isnull=False).values_list(

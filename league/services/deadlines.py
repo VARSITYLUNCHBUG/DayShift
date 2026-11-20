@@ -36,6 +36,7 @@ _HANDLERS = {
     Status.CAPTAIN_CHECKIN: lobby.on_checkin_timeout,
     Status.PLAYER_DRAFT: draft.on_player_draft_timeout,
     Status.COINFLIP: draft.on_coinflip_timeout,
+    Status.TEAM_CONFIRM: draft.on_team_confirm_timeout,
     Status.CHAMPION_DRAFT: draft.on_champion_draft_timeout,
     Status.LOBBY_CODE: draft.on_lobby_code_timeout,
     Status.IN_PROGRESS: results.on_in_progress_timeout,

@@ -22,6 +22,8 @@ class Status:
     CAPTAIN_CHECKIN = "captain_checkin"
     PLAYER_DRAFT = "player_draft"
     COINFLIP = "coinflip"
+    # Both captains look over the teams, swapping players if they like, before the hero draft.
+    TEAM_CONFIRM = "team_confirm"
     CHAMPION_DRAFT = "champion_draft"
     LOBBY_CODE = "lobby_code"
     IN_PROGRESS = "in_progress"
@@ -43,6 +45,7 @@ LIVE = frozenset(
         Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
+        Status.TEAM_CONFIRM,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,
@@ -63,7 +66,8 @@ _TRANSITIONS: dict[str, frozenset[str]] = {
     Status.CAPTAIN_PHASE: frozenset({Status.CAPTAIN_CHECKIN, Status.VOIDED}),
     Status.CAPTAIN_CHECKIN: frozenset({Status.PLAYER_DRAFT, Status.VOIDED}),
     Status.PLAYER_DRAFT: frozenset({Status.COINFLIP, Status.VOIDED}),
-    Status.COINFLIP: frozenset({Status.CHAMPION_DRAFT, Status.VOIDED}),
+    Status.COINFLIP: frozenset({Status.TEAM_CONFIRM, Status.VOIDED}),
+    Status.TEAM_CONFIRM: frozenset({Status.CHAMPION_DRAFT, Status.VOIDED}),
     Status.CHAMPION_DRAFT: frozenset({Status.LOBBY_CODE, Status.VOIDED}),
     Status.LOBBY_CODE: frozenset({Status.IN_PROGRESS, Status.VOIDED}),
     Status.IN_PROGRESS: frozenset({Status.AWAITING_CONFIRMATION, Status.DISPUTED, Status.VOIDED}),

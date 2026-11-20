@@ -63,6 +63,7 @@ SUBBABLE = frozenset(
         Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
+        Status.TEAM_CONFIRM,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,
@@ -74,6 +75,7 @@ RESTARTABLE = frozenset(
         Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
+        Status.TEAM_CONFIRM,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
     }
@@ -611,6 +613,11 @@ def _release_if_clear(match: Match) -> None:
         return
     elif match.status == Status.CAPTAIN_CHECKIN:
         lobby.advance_checkin(match)
+        return
+    elif match.status == Status.TEAM_CONFIRM:
+        from league.services import draft
+
+        draft.advance_team_confirm(match)
         return
     render_board(match)
 

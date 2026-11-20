@@ -428,7 +428,7 @@ def test_a_sub_during_the_coinflip_resumes_it(voting: Match) -> None:
     match = fresh(match)
     assert match.status == Status.COINFLIP
     assert match.deadline_at is not None
-    assert settle_coinflip_for(match).status == Status.CHAMPION_DRAFT
+    assert settle_coinflip_for(match).status == Status.TEAM_CONFIRM
 
 
 def test_lobby_host_subbing_out_makes_the_sub_host(popped: Match) -> None:

@@ -58,6 +58,7 @@ from league.services.common import render_queue as request_queue
 from tests.conftest import Clock, make_player
 from tests.helpers import (
     acting_captain,
+    confirm_teams,
     finish,
     fresh,
     ready_all,
@@ -194,6 +195,8 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
     check(match)
     match = settle_coinflip_for(match)
     check(match)
+    match = confirm_teams(match)
+    check(match)
     match = run_champion_draft(match)
     check(match)
     draft.api_lobby_failed(match.pk, "test: no API")
@@ -217,6 +220,7 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
         Status.CAPTAIN_PHASE,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
+        Status.TEAM_CONFIRM,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,
@@ -1369,6 +1373,14 @@ def test_board_stays_last_and_only_current_pings_survive_a_whole_match(wired: Co
     match = settle_coinflip_for(match)
     drain(gateway)
     assert_board_last(gateway, match)
+    assert live_notice_texts(gateway, match) == [
+        "check your teams. Swap players on the board if you need to, then each press "
+        "**Teams ready** to start the hero draft."
+    ]
+
+    match = confirm_teams(match)
+    drain(gateway)
+    assert_board_last(gateway, match)
     assert live_notice_texts(gateway, match) == ["you ban first."]
 
     match = to_in_progress(match)
@@ -1986,7 +1998,21 @@ def test_coinflip_board_offers_the_winner_a_side(voting: Match) -> None:
     draft_service.choose_coinflip(
         match.pk, match.captain_of(match.coinflip_winner).player, "archmother"
     )
-    assert fresh(match).status == Status.CHAMPION_DRAFT
+    assert fresh(match).status == Status.TEAM_CONFIRM
+
+
+@pytest.mark.django_db
+def test_team_check_board_offers_teams_ready_and_swaps(voting: Match) -> None:
+    match = settle_coinflip_for(run_player_draft(vote_captains(voting)))
+    assert match.status == Status.TEAM_CONFIRM
+    view = _check(match)
+    text = str(view)
+    labels = {b["label"] for b in all_buttons(view)}
+    assert {"Teams ready", "Swap players"} <= labels
+    assert "⏳" in text and "✅" not in text
+    draft_service.confirm_teams(match.pk, match.captain_of("A").player)
+    text = str(_check(match))
+    assert text.count("✅") == 1 and text.count("⏳") == 1
 
 
 @pytest.mark.django_db

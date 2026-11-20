@@ -87,6 +87,13 @@ async def coin_choice(ctx: Context) -> None:
     await db(draft.choose_coinflip, ctx.match_id, await actor(ctx.interaction), ctx.arg)
 
 
+@handles("teams_ready")
+async def teams_ready(ctx: Context) -> None:
+    """A captain's Teams ready, after the coinflip."""
+    await ctx.interaction.response.defer()
+    await db(draft.confirm_teams, ctx.match_id, await actor(ctx.interaction))
+
+
 class LobbyCodeModal(discord.ui.Modal, title="Enter the lobby code"):
     code: discord.ui.TextInput[Any] = discord.ui.TextInput(
         label="Custom lobby code",
