@@ -2,7 +2,7 @@
 
 # Build stage: uv installs the locked dependencies and the sim into /opt/venv. The same pinned
 # Python and uv as the app's image (the root Dockerfile): bump them together.
-FROM python:3.13.18-slim-trixie AS build
+FROM python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS build
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 
@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-edi
 
 
 # Runtime stage: just the virtualenv, run as an unprivileged user. No uv, pip caches or sources.
-FROM python:3.13.18-slim-trixie
+FROM python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
 
 LABEL org.opencontainers.image.title="discord-sim" \
       org.opencontainers.image.description="Fake Discord REST v10 + gateway + control API for DayShift dev and tests."
