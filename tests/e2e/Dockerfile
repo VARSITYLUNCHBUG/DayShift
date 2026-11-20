@@ -4,7 +4,7 @@
 #   e2e     pytest and the suite, driving that browser over PW_WS_ENDPOINT
 # compose.test.yaml builds both; scripts/test.sh e2e runs them.
 
-FROM mcr.microsoft.com/playwright/python:v1.65.2-noble AS base
+FROM mcr.microsoft.com/playwright/python:v1.65.2-noble@sha256:38dd67fc654b56b3cba611e4c8eb71cd33750e1cd29eea2a5dc00b484817a75f AS base
 
 # The image's own Python. It's a throwaway test image, so pip may install system-wide.
 ENV PYTHONUNBUFFERED=1 \
