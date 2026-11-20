@@ -160,3 +160,30 @@ class RuntimeSettings(models.Model):
             raise ValidationError(
                 {"queue_warn_minutes": "The check-in has to go out before the idle time is up."}
             )
+
+
+class VoiceChannelSlot(models.Model):
+    """One of a server's reusable team voice channels. Each match borrows two and gives them back,
+    because Discord caps how many channels a server can create in a day (a day of matches each
+    making and deleting two hit it on 2026-11-20).
+
+    A slot is busy while a live team voice `MatchResource` holds its channel ID; that resource is
+    the only record of who has it. `open_to_everyone` is how the channel's @everyone overwrite
+    was last set, so a change to the Open match voice setting reaches it on its next match."""
+
+    community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name="voice_slots")
+    number = models.PositiveSmallIntegerField()
+    discord_id = models.BigIntegerField(unique=True)
+    open_to_everyone = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "voice_channel_slots"
+        ordering = ("community", "number")
+        constraints = [
+            # The number is the channel's name (Team Voice 3), so it stays one per server.
+            models.UniqueConstraint(fields=("community", "number"), name="uniq_voice_slot_number"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Team Voice {self.number}"

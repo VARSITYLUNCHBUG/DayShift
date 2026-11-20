@@ -1,7 +1,7 @@
 from league.models.alerts import StaffAlert
 from league.models.api import ApiMatchCheck
 from league.models.champions import Champion
-from league.models.community import Community, RuntimeSettings
+from league.models.community import Community, RuntimeSettings, VoiceChannelSlot
 from league.models.interim import InterimPointsChange, InterimRating
 from league.models.matches import (
     CaptainVote,
@@ -66,4 +66,5 @@ __all__ = [
     "StrikeAdjustment",
     "SubOffer",
     "SubRequest",
+    "VoiceChannelSlot",
 ]
