@@ -76,6 +76,9 @@ class DraftLine:
     random_choice: bool = False
     emoji: str = ""  # A champion's plain emoji, shown when it has no custom one.
     emoji_id: int | None = None  # Its custom hero icon.
+    # What was picked or banned, for the web, which shows faces and hero art rather than labels.
+    player_id: int | None = None
+    champion_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +98,10 @@ class SubLine:
     offer_from_prio: bool = False
     offer_deadline_at: datetime | None = None
     reason: str = "sub_out"
+    # Player IDs behind the names, for the web. Requested-by is None for a spot the bot opened.
+    leaving_id: int | None = None
+    requested_by_id: int | None = None
+    offer_player_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +113,10 @@ class SwapLine:
     give_name: str
     take_name: str
     deadline_at: datetime
+    # Player IDs behind the names, for the web.
+    requested_by_id: int | None = None
+    give_id: int | None = None
+    take_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +126,8 @@ class ChampionOption:
     emoji_id: int | None = None
     taken: bool = False  # Banned or picked. It stays on the grid, so nothing shifts.
     unicode_emoji: str = ""  # Shown when there's no custom emoji.
+    slug: str = ""
+    icon_url: str = ""  # The champion's own art, empty when it has none.
 
 
 @dataclass(slots=True)
@@ -188,6 +201,17 @@ class BoardState:
     kind: str = "ranked"
     # The match this one restarted, keeping its lobby.
     restarted_from: int | None = None
+    # For the web: the row's version, and player IDs behind the names above.
+    version: int = 0
+    community_id: int = 0
+    host_id: int | None = None
+    reported_by_id: int | None = None
+    early_leave_player_id: int | None = None
+    early_leave_by_id: int | None = None
+    early_leave_deadline_at: datetime | None = None
+    game_started_at: datetime | None = None
+    # The team making each player pick, in step order, once the captains are set.
+    player_draft_order: tuple[str, ...] = ()
 
     @property
     def is_scrim(self) -> bool:
@@ -270,6 +294,10 @@ def board_state(match_id: int) -> BoardState:
         champion_first_pick=match.champion_first_pick,
         kind=match.kind,
         restarted_from=match.restarted_from_id,
+        version=match.version,
+        community_id=match.community_id,
+        host_id=match.lobby_code_host_id,
+        game_started_at=match.api_started_at or match.started_at,
         coinflip_winner=match.coinflip_winner,
         coinflip_winner_choice=match.coinflip_winner_choice,
         coinflip_loser_choice=match.coinflip_loser_choice,
@@ -316,11 +344,18 @@ def board_state(match_id: int) -> BoardState:
                 emoji_id=champion_icons.get(action.target_champion_id or 0)
                 if match.custom_emojis
                 else None,
+                player_id=action.target_player_id,
+                champion_id=action.target_champion_id,
             )
         )
 
     plan = build_plan(mode)
     state.steps_total = len(plan)
+    if match.player_first_pick:
+        state.player_draft_order = tuple(
+            team_for_role(step.role, match.player_first_pick)
+            for step in plan[: player_draft_length(mode)]
+        )
     if match.hidden_king_team and match.champion_first_pick:
         start = player_draft_length(mode)
         state.champion_steps = tuple(
@@ -357,6 +392,8 @@ def board_state(match_id: int) -> BoardState:
                 row.discord_emoji_id if match.custom_emojis else None,
                 taken=row.pk in used,
                 unicode_emoji=row.unicode_emoji,
+                slug=row.slug,
+                icon_url=row.icon_url,
             )
             for row in rows
         ]
@@ -365,6 +402,7 @@ def board_state(match_id: int) -> BoardState:
     if report is not None:
         state.reported_winner = report.claimed_winner
         state.reported_by = report.captain.display_name
+        state.reported_by_id = report.captain_id
     if match.status == Status.COMPLETED:
         if interim.enabled(match.community_id):
             state.deltas = {
@@ -408,6 +446,9 @@ def board_state(match_id: int) -> BoardState:
         if claim is not None:
             state.early_leave_name = claim.leaver.display_name
             state.early_leave_by = claim.requested_by.display_name
+            state.early_leave_player_id = claim.leaver_id
+            state.early_leave_by_id = claim.requested_by_id
+            state.early_leave_deadline_at = claim.deadline_at
         state.early_leave_open = early_leave.can_report(match)
     state.draft_name = draft_name(match.rng_seed)
     state.gif_url = pick_gif(match.rng_seed, draft_gifs())
@@ -423,6 +464,9 @@ def board_state(match_id: int) -> BoardState:
                 offer.give.display_name,
                 offer.take.display_name,
                 offer.deadline_at,
+                requested_by_id=offer.requested_by_id,
+                give_id=offer.give_id,
+                take_id=offer.take_id,
             )
     state.subs = _sub_lines(match)
     return state
@@ -475,6 +519,9 @@ def _sub_lines(match: Match) -> list[SubLine]:
                 offer_from_prio=bool(offer and offer.source == OfferSource.PRIO),
                 offer_deadline_at=offer.deadline_at if offer else None,
                 reason=row.reason,
+                leaving_id=row.leaving_id,
+                requested_by_id=row.requested_by_id,
+                offer_player_id=offer.player_id if offer else None,
             )
         )
     return lines
@@ -488,15 +535,17 @@ class QueueView:
     mode_name: str
     live_matches: int
     waiting_room_channel_id: int | None = None
+    player_ids: list[int] = field(default_factory=list)  # In the same order as `players`.
 
 
 def queue_view(community: Community) -> QueueView:
     mode = parse_mode(community.active_mode.body)
-    entries = QueueEntry.objects.filter(community=community).select_related("player")
+    entries = list(QueueEntry.objects.filter(community=community).select_related("player"))
     return QueueView(
-        size=entries.count(),
+        size=len(entries),
         capacity=mode.lobby_size,
         players=[entry.player.display_name for entry in entries],
+        player_ids=[entry.player_id for entry in entries],
         mode_name=mode.name,
         live_matches=Match.objects.filter(community=community, kind=MatchKind.RANKED)
         .exclude(status__in=TERMINAL)
