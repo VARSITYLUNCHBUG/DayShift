@@ -59,11 +59,6 @@ def add_effect(
     lane: str | None = None,
 ) -> None:
     """Queue a Discord side effect. `lane` names the ordering lane for work outside a match."""
-    if match is not None and kind in {"cleanup_voice", "restart_voice"}:
-        from league.services.effects import cancel_voice_setup
-
-        old_id = int(str((payload or {})["old_id"])) if kind == "restart_voice" else match.pk
-        cancel_voice_setup(old_id)
     created_at = now()
     fields = {
         "community": community,

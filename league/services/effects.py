@@ -48,6 +48,14 @@ def cancel_voice_setup(match_id: int) -> None:
     ).update(status=EffectStatus.SKIPPED, done_at=now())
 
 
+def queue_voice_cleanup(match: Match) -> None:
+    """The match's voice is finished: drop its pending setup, then queue the one cleanup."""
+    cancel_voice_setup(match.pk)
+    add_effect(
+        match.community, "cleanup_voice", match=match, dedupe_key=f"cleanup_voice:{match.pk}"
+    )
+
+
 def lane_key(match_id: int | None, lane: str, kind: str, community_id: int) -> Lane:
     """Which effects must run in order with this one.
 

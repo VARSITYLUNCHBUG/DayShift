@@ -572,6 +572,7 @@ def restart(match: Match, *, leaving: Collection[int]) -> Match:
             queue_joined_at=participant.queue_joined_at,
             ready_at=moment,  # They're here: they stayed.
         )
+    effects.cancel_voice_setup(match.pk)  # The successor takes the voice over as it is.
     add_effect(community, "restart_voice", {"old_id": match.pk}, match=successor)
     subs.open_openings(successor, mode, gone, reason=SubReason.RESTART)
     _matched(community, [participant.player for participant in stayed])
@@ -581,7 +582,7 @@ def restart(match: Match, *, leaving: Collection[int]) -> Match:
 
 def schedule_cleanup(match: Match) -> None:
     community = match.community
-    add_effect(community, "cleanup_voice", match=match, dedupe_key=f"cleanup_voice:{match.pk}")
+    effects.queue_voice_cleanup(match)
     add_effect(
         community,
         "delete_text_channel",

@@ -763,9 +763,7 @@ def _record_created_voice(match_id: int, kind: str, channel_id: int) -> bool:
     if not _voice_needed(match_id):
         # The result/void may have landed while Discord was creating the channel. Record it
         # before cleanup, so even a restart can't lose track of this late response.
-        add_effect(
-            match.community, "cleanup_voice", match=match, dedupe_key=f"cleanup_voice:{match_id}"
-        )
+        effects.queue_voice_cleanup(match)
         return False
     return True
 
