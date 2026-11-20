@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 
 from django.db import transaction
+from django.db.models import Count
 
 from league.domain import copy
 from league.domain.engine import LIVE
@@ -115,6 +116,35 @@ def try_pop(community: Community) -> Match | None:
     if len(entries) < mode.lobby_size:
         return None
     return lobby.create_match(community, entries)
+
+
+def full_queues() -> list[int]:
+    """The communities whose queue holds a full lobby, by a count taken without any lock.
+
+    The deadline loop pops only these, so an empty or short queue costs it no lock and no
+    count of live matches. `pop_if_ready` checks everything again under the lock, so a count
+    that is already stale costs one pass at most: a queue that fills is seen on the next, and a
+    full one stays here every pass until a match slot frees up for it.
+    """
+    counts = dict(
+        QueueEntry.objects.order_by()
+        .values("community")
+        .annotate(entries=Count("pk"))
+        .values_list("community", "entries")
+    )
+    if not counts:
+        return []
+    full = []
+    bodies = Community.objects.filter(pk__in=counts).values_list("pk", "active_mode__body")
+    for community_id, body in bodies:
+        try:
+            lobby_size = parse_mode(body).lobby_size
+        except Exception:
+            full.append(community_id)  # pop_if_ready reports the broken mode, as it always has.
+            continue
+        if counts[community_id] >= lobby_size:
+            full.append(community_id)
+    return sorted(full)
 
 
 @transaction.atomic

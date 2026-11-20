@@ -59,6 +59,11 @@ def add_effect(
     lane: str | None = None,
 ) -> None:
     """Queue a Discord side effect. `lane` names the ordering lane for work outside a match."""
+    if match is not None and kind in {"cleanup_voice", "restart_voice"}:
+        from league.services.effects import cancel_voice_setup
+
+        old_id = int(str((payload or {})["old_id"])) if kind == "restart_voice" else match.pk
+        cancel_voice_setup(old_id)
     created_at = now()
     fields = {
         "community": community,
@@ -132,9 +137,9 @@ def render_board(match: Match) -> None:
     request_render(match.community, "render_board", match, delay_seconds=delay)
 
 
-# Joins and leaves come in bursts as a match pops or finishes, and Discord allows a channel about
-# five edits every five seconds. A short wait folds a burst into one edit of the queue panel.
-QUEUE_RENDER_DELAY_SECONDS = 1.5
+# A 200 ms window coalesces near-simultaneous clicks while keeping the panel responsive.
+# Sustained joins can need multiple edits; discord.py paces those using Discord's headers.
+QUEUE_RENDER_DELAY_SECONDS = 0.2
 
 
 def render_queue(community: Community) -> None:

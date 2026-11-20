@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import discord
 import pytest
@@ -1042,17 +1043,30 @@ def test_full_match_through_effects(wired: Community) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_player_not_in_the_waiting_room_gets_team_invite(wired: Community) -> None:
+@pytest.mark.parametrize("closed_dms", [False, True])
+def test_team_voice_does_not_notify_players_outside_the_waiting_room(
+    wired: Community, closed_dms: bool
+) -> None:
     players = [make_player(n) for n in range(1, 13)]
     gateway = FakeGateway()
+    if closed_dms:
+        gateway.closed_dms = set(discord_ids(players))
     for player in players:
         queue.join(wired.pk, player)
     drain(gateway)
     gateway.dms.clear()
-    to_champion_draft(Match.objects.get())
+    gateway.send_dm = AsyncMock(side_effect=AssertionError("No team-ready DM"))
+    gateway.create_invite = AsyncMock(side_effect=AssertionError("No team-ready invite"))
+    match = to_champion_draft(Match.objects.get())
     drain(gateway)
-    assert len(gateway.dms) == 12
-    assert "Join team voice" in str(gateway.dms[0][1].to_components())
+    assert resource(match, ResourceKind.TEAM_A_VOICE)
+    assert resource(match, ResourceKind.TEAM_B_VOICE)
+    gateway.send_dm.assert_not_awaited()
+    gateway.create_invite.assert_not_awaited()
+    assert not OutboxEffect.objects.filter(match=match, kind="team_move_player").exists()
+    assert not any(
+        "Join your team's voice channel" in text for _channel, text, _users in gateway.texts
+    )
 
 
 def _http_error(status: int, code: int) -> discord.HTTPException:
@@ -2126,14 +2140,14 @@ def test_a_finished_match_channel_closes_after_three_minutes(wired: Community) -
 
 
 @pytest.mark.django_db(transaction=True)
-def test_the_teams_dm_is_just_its_heading(wired: Community) -> None:
+def test_team_voice_keeps_ready_dms_but_sends_no_team_dms(wired: Community) -> None:
     gateway = FakeGateway()
     match = run_player_draft(vote_captains(ready_all(popped_match(wired, gateway))))
     drain(gateway)
     teams = [
         str(v.to_components()) for _u, v in gateway.dms if "Teams picked" in str(v.to_components())
     ]
-    assert teams and all("Match #" not in dm for dm in teams)
+    assert not teams
     ready = [
         str(v.to_components()) for _u, v in gateway.dms if "Ready Up" in str(v.to_components())
     ]

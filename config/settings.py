@@ -193,6 +193,12 @@ LOGGING = {
 
 # --- Bot ---------------------------------------------------------------------------------------
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
+VOICE_CREATE_INTERVAL_SECONDS = max(
+    0.0, float(os.environ.get("VOICE_CREATE_INTERVAL_SECONDS", "5"))
+)
+VOICE_ACTION_INTERVAL_SECONDS = max(
+    0.0, float(os.environ.get("VOICE_ACTION_INTERVAL_SECONDS", "1"))
+)
 DISCORD_GUILD_ID = int(os.environ.get("DISCORD_GUILD_ID") or 0)
 BOT_HEARTBEAT_FILE = Path(os.environ.get("BOT_HEARTBEAT_FILE", BASE_DIR / ".bot-heartbeat"))
 DEADLOCK_API_BASE = os.environ.get("DEADLOCK_API_BASE", "https://api.deadlock-api.com")

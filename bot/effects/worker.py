@@ -1,8 +1,8 @@
 """Runs outbox effects, in order per lane, with retry and backoff.
 
-Each match gets its own lane, so a slow Discord call in one match (deleting voice channels,
-uploading a screenshot, waiting out a rate limit) never holds up another match's board. Work
-outside a match is split the same way (see `effects.lane_key`).
+Each match gets a main lane and a voice lane, so a slow Discord call in one match (deleting
+voice channels, uploading a screenshot, waiting out a rate limit) never holds up another's board.
+Work outside a match is split the same way (see `effects.lane_key`).
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import time
 from collections.abc import Callable
 
 import discord
@@ -17,10 +18,11 @@ import discord
 from bot.db import db
 from bot.effects.gateway import ChannelGone, EditCapped, Gateway
 from bot.effects.handlers import HANDLERS, Env, Skip
-from league import log_context
+from league import log_context, timings
 from league.models import OutboxEffect
 from league.models.outbox import EffectStatus
 from league.services import effects, lobby, scrims
+from league.services.common import now
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +118,18 @@ class EffectWorker:
             return True
         if not await db(effects.mark_started, effect.pk):
             return True  # Finished or cancelled since it was fetched.
+        # How long it was due before it started: the worker's wake-up plus the lane ahead of it.
+        # Read defensively: a timing must never be what fails an effect.
+        if (due := getattr(effect, "run_after", None)) is not None:
+            timings.record("effect.late", max(0.0, (now() - due).total_seconds()))
         env = Env(self.gateway, effect, effect.community, effect.match)
+        started = time.perf_counter()
         try:
-            await handler(env)
+            try:
+                await handler(env)
+            finally:
+                # The handler alone, however it ends: its Discord calls and its own reads.
+                timings.record(f"effect.run:{effect.kind}", time.perf_counter() - started)
         except (Skip, ChannelGone) as exc:
             await db(effects.mark_done, effect.pk, EffectStatus.SKIPPED)
             logger.debug("Effect skipped", extra={"kind": effect.kind, "why": str(exc)})
@@ -132,6 +143,10 @@ class EffectWorker:
             )
             return True
         except discord.RateLimited as exc:
+            logger.warning(
+                "Discord effect deferred by rate limit",
+                extra={"kind": effect.kind, "retry_after_seconds": exc.retry_after},
+            )
             # A wait longer than the client's max_ratelimit_timeout. Sleeping it out here would
             # stall every later effect in this lane, so step aside and come back after it.
             return await self._retry(

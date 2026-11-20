@@ -16,6 +16,7 @@ import logging
 import signal
 import time
 from collections.abc import Callable, Iterable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,17 +42,26 @@ from bot.handlers import queue as _queue  # noqa: F401
 from bot.handlers import results as _results  # noqa: F401
 from bot.handlers import subs as _subs  # noqa: F401
 from bot.handlers import swaps as _swaps  # noqa: F401
+from bot.ratelimits import install as install_ratelimit_compatibility
 from bot.request_health import FailedRequests
 from bot.routing import RouteButton, RouteSelect, RouteUserSelect
 from bot.watched import ChannelWatch
-from league import log_context
+from league import log_context, timings
 from league.services import community as community_service
 from league.services import deadlines, effects, health, leaderboards
+from league.services.common import now
 
 logger = logging.getLogger(__name__)
 
 DEADLINE_INTERVAL_SECONDS = 1.0
-EFFECT_IDLE_SECONDS = 0.5
+# The effect loop's fallback poll. A click, a fired timer and a finished lane wake it at once,
+# and it sleeps only until the next delayed effect is due; the poll is for effects nothing in
+# this process wakes it for, such as a retry staff start from the admin.
+EFFECT_IDLE_SECONDS = 2.0
+# Shortest sleep before a delayed effect, so a clock rounding to now never spins the loop.
+EFFECT_MIN_WAIT_SECONDS = 0.01
+# How often the timing summary (league.timings) is logged.
+TIMINGS_INTERVAL_SECONDS = 60.0
 PRUNE_INTERVAL_SECONDS = 24 * 3600
 # How often the watchdog checks the league is keeping up, and pings HEALTHCHECK_PING_URL.
 WATCHDOG_INTERVAL_SECONDS = 60.0
@@ -64,6 +74,14 @@ RATE_LIMIT_WAIT_SECONDS = 60.0
 # discord.py's own endpoints. Only a dev or test setup points the bot anywhere else.
 DISCORD_API_BASE = "https://discord.com/api/v10"
 DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/"
+
+
+def effect_wait(next_due: datetime | None, moment: datetime | None = None) -> float:
+    """Seconds the effect loop sleeps: until `next_due`, at most `EFFECT_IDLE_SECONDS`."""
+    if next_due is None:
+        return EFFECT_IDLE_SECONDS
+    seconds = (next_due - (moment or now())).total_seconds()
+    return min(EFFECT_IDLE_SECONDS, max(EFFECT_MIN_WAIT_SECONDS, seconds))
 
 
 class Heartbeat:
@@ -227,6 +245,7 @@ class DayShiftBot(discord.Client):
             # retries the effect after the wait.
             max_ratelimit_timeout=RATE_LIMIT_WAIT_SECONDS,
         )
+        install_ratelimit_compatibility(self.http)
         self.tree = _Tree(self)
         self.gateway = DiscordGateway(self)
         self.watch = ChannelWatch()
@@ -296,6 +315,7 @@ class DayShiftBot(discord.Client):
         self._tasks.append(asyncio.create_task(watchdog_loop(self.watchdog), name="watchdog"))
         self._tasks.append(asyncio.create_task(self.watch.run(), name="watched-channels"))
         self._tasks.append(asyncio.create_task(self._failed_request_loop(), name="failed-requests"))
+        self._tasks.append(asyncio.create_task(self._timings_loop(), name="timings"))
 
     async def _recover(self) -> None:
         """Startup recovery, retried until the database answers.
@@ -340,6 +360,14 @@ class DayShiftBot(discord.Client):
             await asyncio.sleep(request_health.WINDOW_SECONDS)
             self.failed_requests.log_summary()
 
+    async def _timings_loop(self) -> None:
+        """Log where the last minute's time went, when anything happened (league.timings)."""
+        while True:
+            await asyncio.sleep(TIMINGS_INTERVAL_SECONDS)
+            self.failed_requests.log_usage_summary()
+            if summary := timings.summary():
+                logger.info("Timings", extra={"timings": summary})
+
     async def _leaderboard_loop(self) -> None:
         """Redraw every server's leaderboard images on the hour, starting now, so a deploy shows
         fresh ones at once. The redraw is an ordinary effect: it coalesces with the one each
@@ -355,18 +383,22 @@ class DayShiftBot(discord.Client):
             await asyncio.sleep(leaderboards.REFRESH_SECONDS)
 
     async def _effect_loop(self) -> None:
-        """Hand due effects to per-match lanes. Wakes on a click, a fired timer or a lane ending."""
+        """Hand due effects to per-match lanes. Wakes on a click, a fired timer, a lane ending,
+        or when the next delayed effect is due; otherwise every `EFFECT_IDLE_SECONDS`."""
         errors = LoopErrors("Effect loop error")
         while True:
+            wait = EFFECT_IDLE_SECONDS
             try:
                 self._effects_wake.clear()
+                looked = now()  # Before the dispatch's own look at what is due (next_due_at).
                 await self.worker.dispatch()
                 self.heartbeat.beat("effects")
+                wait = effect_wait(await db(effects.next_due_at, looked))
                 errors.passed()
             except Exception as exc:
                 errors.failed(exc)
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._effects_wake.wait(), EFFECT_IDLE_SECONDS)
+                await asyncio.wait_for(self._effects_wake.wait(), wait)
 
     async def on_message(self, message: discord.Message) -> None:
         """Chat is welcome in match channels, but the board has to stay in view. Other
@@ -382,6 +414,8 @@ class DayShiftBot(discord.Client):
         with log_context.bind(guild=message.guild.id):
             try:
                 await db(effects.note_chat, message.channel.id)
+                # It may have queued or put off a board move: sleep until that one instead.
+                self.wake_effects()
             except Exception:
                 logger.exception("Couldn't note chat", extra={"channel": message.channel.id})
 

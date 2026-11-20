@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from django.db import transaction
+
 from bot.db import db
 from bot.effects import flow
 from bot.effects.gateway import ChannelGone, EditCapped, Gateway
@@ -405,6 +407,23 @@ class _MatchFlowStore:
         await db(_queue_delete, channel_id, message_id, match_id=self.match_id)
 
 
+def _board_place(match_id: int) -> tuple[dict[str, int], int | None]:
+    """A match's live resources and the channel its board is in, read together."""
+    return effects.resources(match_id), effects.board_channel(match_id)
+
+
+def _board_inputs(
+    match_id: int, resources: dict[str, int] | None, channel_id: int | None
+) -> tuple[dict[str, int], int | None, boards.BoardState | None]:
+    """Everything a render reads, in one trip to the database thread, which every click shares.
+    No state is read for a board with no channel yet."""
+    if resources is None or channel_id is None:
+        resources, channel_id = _board_place(match_id)
+    if channel_id is None:
+        return resources, None, None
+    return resources, channel_id, boards.board_state(match_id)
+
+
 async def _render_board(
     env: Env,
     resources: dict[str, int] | None = None,
@@ -412,12 +431,10 @@ async def _render_board(
     *,
     bottom: bool | None = None,
 ) -> None:
-    if resources is None or channel_id is None:
-        resources = await db(effects.resources, env.match_id)
-        channel_id = await db(effects.board_channel, env.match_id)
-    if channel_id is None:
+    live, channel_id, state = await db(_board_inputs, env.match_id, resources, channel_id)
+    if channel_id is None or state is None:
         raise Skip("Lobby channel isn't up yet; creating it renders the board.")
-    state = await db(boards.board_state, env.match_id)
+    resources = live
     try:
         reposted = await flow.render(
             env.gateway,
@@ -445,8 +462,7 @@ async def render_board_effect(env: Env) -> None:
 @effect("move_board")
 async def move_board(env: Env) -> None:
     """Chat has built up below the board, unless a state change has already moved it since."""
-    resources = await db(effects.resources, env.match_id)
-    channel_id = await db(effects.board_channel, env.match_id)
+    resources, channel_id = await db(_board_place, env.match_id)
     if channel_id is None or ResourceKind.BOARD_MESSAGE not in resources:
         raise Skip("The channel has closed.")
     try:
@@ -718,8 +734,11 @@ def _captain_ids(match: Match) -> list[int]:
 # --- Team voice ------------------------------------------------------------------------------
 
 
+@transaction.atomic
 def _enqueue_team_moves(match_id: int, user_ids: list[tuple[int, str]]) -> None:
-    match = Match.objects.select_related("community").get(pk=match_id)
+    match = Match.objects.lock(match_id)
+    if not match.participants.filter(is_active=True).exists():
+        return
     for user_id, team in user_ids:
         add_effect(
             match.community,
@@ -730,6 +749,24 @@ def _enqueue_team_moves(match_id: int, user_ids: list[tuple[int, str]]) -> None:
         )
 
 
+def _voice_needed(match_id: int) -> bool:
+    return Match.objects.filter(pk=match_id, participants__is_active=True).exists()
+
+
+@transaction.atomic
+def _record_created_voice(match_id: int, kind: str, channel_id: int) -> bool:
+    match = Match.objects.lock(match_id)
+    effects.record_resource(match_id, kind, channel_id)
+    if not _voice_needed(match_id):
+        # The result/void may have landed while Discord was creating the channel. Record it
+        # before cleanup, so even a restart can't lose track of this late response.
+        add_effect(
+            match.community, "cleanup_voice", match=match, dedupe_key=f"cleanup_voice:{match_id}"
+        )
+        return False
+    return True
+
+
 @effect("create_team_voice")
 async def create_team_voice(env: Env) -> None:
     resources = await db(effects.resources, env.match_id)
@@ -737,6 +774,8 @@ async def create_team_voice(env: Env) -> None:
     assignments: list[tuple[int, str]] = []
     captains = await db(boards.captain_names, env.required_match)
     for team, kind in (("A", ResourceKind.TEAM_A_VOICE), ("B", ResourceKind.TEAM_B_VOICE)):
+        if not await db(_voice_needed, env.match_id):
+            raise Skip("The players have left this match; voice setup is obsolete.")
         members = await db(_team_user_ids, env.required_match, team)
         assignments.extend((user_id, team) for user_id in members)
         if kind in resources:
@@ -750,13 +789,20 @@ async def create_team_voice(env: Env) -> None:
             open_to_everyone=await db(_open_voice, community.pk),
             viewer_role_ids=_viewer_roles(env),
         )
-        await db(effects.record_resource, env.match_id, kind, channel_id)
-    await db(_enqueue_team_moves, env.match_id, assignments)
+        if not await db(_record_created_voice, env.match_id, kind, channel_id):
+            raise Skip("The match ended while its voice channel was being created.")
+    waiting = env.community.waiting_room_channel_id
+    in_lobby = env.gateway.voice_member_ids(env.guild_id, waiting) if waiting else set()
+    moves = [(user_id, team) for user_id, team in assignments if user_id in in_lobby]
+    if moves:
+        await db(_enqueue_team_moves, env.match_id, moves)
 
 
 @effect("team_move_player")
 async def team_move_player(env: Env) -> None:
-    """In the Waiting Room: move them. Anywhere else: DM an invite to their team's channel."""
+    """Move players still in the Waiting Room; team setup sends no per-player notice."""
+    if not await db(_voice_needed, env.match_id):
+        raise Skip("The players have left this match.")
     user_id = int(env.effect.payload["discord_user_id"])
     resources = await db(effects.resources, env.match_id)
     team_channel = resources.get(_team_voice_kind(str(env.effect.payload["team"])))
@@ -764,24 +810,16 @@ async def team_move_player(env: Env) -> None:
         raise Skip("Team channel is gone.")
     waiting = env.community.waiting_room_channel_id
     in_lobby = bool(waiting) and user_id in env.gateway.voice_member_ids(env.guild_id, waiting)
-    if in_lobby and await env.gateway.move_member(env.guild_id, user_id, team_channel):
-        return
-    invite = await env.gateway.create_invite(env.guild_id, team_channel, INVITE_MAX_AGE_SECONDS)
-    view = render_voice_dm(
-        env.match_id,
-        invite,
-        heading="Teams picked",
-        subtitle=False,
-        channel_url=channel_url(env.guild_id, resources.get(ResourceKind.TEXT)),
-    )
-    if not await env.gateway.send_dm(user_id, view):
-        await _notice(env, "teams are set. Join your team's voice channel.", user_ids=[user_id])
+    if in_lobby:
+        await env.gateway.move_member(env.guild_id, user_id, team_channel)
 
 
 @effect("swap_team_voice")
 async def swap_team_voice(env: Env) -> None:
     """Two players changed teams: each gets their new team's voice and loses the old one, and
     anyone in their old team's voice is moved across."""
+    if not await db(_voice_needed, env.match_id):
+        raise Skip("The players have left this match.")
     resources = await db(effects.resources, env.match_id)
     for move in env.effect.payload["moves"]:
         user_id = int(move["discord_user_id"])

@@ -15,7 +15,7 @@ from bot import client as client_module
 from bot import watched as watched_module
 from bot.client import DayShiftBot, Heartbeat, LoopErrors, deadline_loop
 from bot.effects import worker as worker_module
-from league.services import deadlines
+from league.services import deadlines, effects
 from league.services.effects import WatchedChannels
 
 CACHED = "server login has been failing, cached error: server DNS lookup failed"
@@ -33,6 +33,8 @@ class FlakyDb:
         if self.left:
             self.left -= 1
             raise OperationalError(CACHED)
+        if fn is effects.next_due_at:
+            return None  # Nothing delayed.
         return 0 if fn is deadlines.tick else []
 
 
@@ -71,6 +73,7 @@ def test_startup_recovery_waits_for_the_database_then_starts_the_loops(
             "watchdog",
             "watched-channels",
             "failed-requests",
+            "timings",
         }
     assert beat.exists()
     assert flaky.calls.count(deadlines.extend_past_due) == 4

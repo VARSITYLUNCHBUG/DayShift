@@ -11,7 +11,7 @@ from django.db import transaction
 from league import log_context
 from league.domain.engine import TIMED, Status
 from league.domain.errors import DomainError
-from league.models import Community, Match
+from league.models import Match
 from league.models.matches import MatchKind
 from league.services import (
     draft,
@@ -79,9 +79,11 @@ def tick() -> int:
     fired += _side_tick("scrims", lambda _moment: scrims.tick(), moment)
     fired += _side_tick("priority list", prio.tick, moment)
 
-    for community_id in Community.objects.values_list("pk", flat=True):
+    # Only full queues: each pop locks its community and counts its live matches again.
+    for community_id in queue.full_queues():
         try:
-            queue.pop_if_ready(community_id)
+            # A pop queues the lobby's effects, so it counts: the bot wakes its worker for it.
+            fired += 1 if queue.pop_if_ready(community_id) is not None else 0
         except Exception:
             logger.exception("Queue pop failed", extra={"community": community_id})
     return fired

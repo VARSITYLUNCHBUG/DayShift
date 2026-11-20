@@ -86,6 +86,9 @@ sequenceDiagram
    not at all.
 4. The worker runs due effects in order within each lane (one per match, and one per kind and
    server for work outside a match), so one slow or failing match never holds up another.
+   Team voice setup, member moves, swaps and voice cleanup use a separate ordered lane per match,
+   so a delayed voice channel does not hold up its draft board. Cleanup cancels pending setup
+   and moves; a channel returned after the players leave is recorded and cleaned up.
    Server errors and rate limits are retried with backoff; an effect that keeps failing ends as
    `failed`, visible in the admin and logged as an error.
 
@@ -111,6 +114,25 @@ keeps well clear of that:
   effect hitting the cap is skipped.
 - **Counting.** Every response passes an aiohttp trace (`bot/request_health.py`) that counts the
   refusals Discord counts, logs the ten-minute total, and posts an error past 1,000.
+  Once a minute, `Discord API usage` logs request totals by method, normalized route and status,
+  network failures, and the last observed bucket limit, remaining requests and reset delay.
+  A 429 is logged separately with its scope and retry header; a long wait raised before a new
+  HTTP request is logged as `Discord effect deferred by rate limit`. Tokens and query strings
+  are excluded. Bucket values are observations from the last response, not a live global quota.
+- **Unavailable DMs.** A failed DM delivery is remembered for 60 seconds, so further notices in
+  the same burst use the existing channel fallback without another refused DM request. After
+  that the bot tries again, allowing changed privacy settings to take effect. Server errors
+  and rate limits do not enter this cache.
+- **Voice pacing.** Per server, voice-channel creation, member moves, voice deletion and status
+  changes are serialized separately from text requests. The bot pauses for 5 seconds after a
+  creation and 1 second after other paced voice operations. Configure these using
+  `VOICE_CREATE_INTERVAL_SECONDS` and `VOICE_ACTION_INTERVAL_SECONDS`. These are conservative
+  application delays, not Discord limits; the API's returned cooldown still takes precedence.
+- **Long quota windows.** `bot/ratelimits.py` corrects discord.py 2.7's bucket wait-cap behavior:
+  available tokens may be used even if the window resets tomorrow. Exhausted buckets retain
+  their expiry and respect the wait cap; HTTP 429 handling remains in discord.py. This small
+  per-client bucket compatibility layer uses library internals and has regression tests, so
+  check it when upgrading discord.py.
 - **Chat and voice events stay off the database thread.** The bot sees every message and voice
   move in the server. An in-memory list of the channels that matter (`bot/watched.py`) drops
   the rest before they queue behind button presses on the one database thread.

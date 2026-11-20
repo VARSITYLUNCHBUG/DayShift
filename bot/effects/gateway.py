@@ -10,6 +10,9 @@ from collections.abc import Iterable
 from typing import Any, Literal, Protocol
 
 import discord
+from django.conf import settings
+
+from bot.voice_pacing import VoicePacer
 
 # Discord errors that mean this person can't get a DM, so the caller mentions them in the match
 # channel instead: DMs closed (50007), or no such recipient, such as a deleted account (50033).
@@ -185,6 +188,12 @@ def _member(user_id: int) -> discord.Object:
     return discord.Object(id=user_id, type=discord.Member)
 
 
+# A closed DM doesn't become reachable on the next effect. Retry after a short cooldown,
+# rather than spend another refused request on every notice during the same match burst.
+DM_UNAVAILABLE_SECONDS = 60.0
+DM_UNAVAILABLE_CACHE_SIZE = 1000
+
+
 class DiscordGateway:
     def __init__(self, client: discord.Client) -> None:
         self.client = client
@@ -194,6 +203,10 @@ class DiscordGateway:
         self._last_message: dict[int, int] = {}
         # (channel, max_age) to an invite URL and when it stops being worth handing out.
         self._invites: dict[tuple[int, int], tuple[str, float]] = {}
+        self._dm_unavailable_until: dict[int, float] = {}
+        self._voice_pacer = VoicePacer(
+            settings.VOICE_CREATE_INTERVAL_SECONDS, settings.VOICE_ACTION_INTERVAL_SECONDS
+        )
 
     def note_last_message(self, channel_id: int, message_id: int) -> None:
         if message_id > self._last_message.get(channel_id, 0):
@@ -291,8 +304,12 @@ class DiscordGateway:
         )
         if open_to_everyone:
             overwrites[guild.default_role] = VOICE_MEMBER
-        channel = await guild.create_voice_channel(
-            name, category=self._category(guild, category_id), overwrites=overwrites
+        channel = await self._voice_pacer.run(
+            guild_id,
+            lambda: guild.create_voice_channel(
+                name, category=self._category(guild, category_id), overwrites=overwrites
+            ),
+            create=True,
         )
         return channel.id
 
@@ -323,7 +340,10 @@ class DiscordGateway:
     async def move_member(self, guild_id: int, user_id: int, channel_id: int) -> bool:
         try:
             # A plain PATCH: no member cache needed, one request per move.
-            await self.client.http.edit_member(guild_id, user_id, channel_id=channel_id)
+            await self._voice_pacer.run(
+                guild_id,
+                lambda: self.client.http.edit_member(guild_id, user_id, channel_id=channel_id),
+            )
         except discord.HTTPException as exc:
             if exc.code == 40032:
                 return False
@@ -346,16 +366,29 @@ class DiscordGateway:
         return invite.url
 
     async def send_dm(self, user_id: int, view: discord.ui.LayoutView) -> int | None:
+        moment = time.monotonic()
+        unavailable_until = self._dm_unavailable_until.get(user_id)
+        if unavailable_until is not None:
+            if unavailable_until > moment:
+                return None
+            del self._dm_unavailable_until[user_id]
         try:
             channel = await self.client.create_dm(discord.Object(id=user_id))
             message = await channel.send(view=view)
         except (discord.Forbidden, discord.NotFound):
+            self._remember_unavailable_dm(user_id)
             return None
         except discord.HTTPException as exc:
             if exc.code in UNREACHABLE_BY_DM:
+                self._remember_unavailable_dm(user_id)
                 return None
             raise
         return int(message.id)
+
+    def _remember_unavailable_dm(self, user_id: int) -> None:
+        if len(self._dm_unavailable_until) >= DM_UNAVAILABLE_CACHE_SIZE:
+            del self._dm_unavailable_until[next(iter(self._dm_unavailable_until))]
+        self._dm_unavailable_until[user_id] = time.monotonic() + DM_UNAVAILABLE_SECONDS
 
     async def edit_dm(self, user_id: int, message_id: int, view: discord.ui.LayoutView) -> None:
         try:
@@ -488,7 +521,10 @@ class DiscordGateway:
     async def delete_channel(self, channel_id: int) -> None:
         try:
             channel = await self._messageable(channel_id)
-            await channel.delete()
+            if isinstance(channel, discord.VoiceChannel | discord.StageChannel):
+                await self._voice_pacer.run(channel.guild.id, channel.delete)
+            else:
+                await channel.delete()
         except (discord.NotFound, ChannelGone):
             return  # Already gone counts as deleted.
 
@@ -516,7 +552,7 @@ class DiscordGateway:
     async def set_voice_status(self, channel_id: int, text: str) -> None:
         channel = await self._messageable(channel_id)
         if isinstance(channel, discord.VoiceChannel):
-            await channel.edit(status=text[:500])
+            await self._voice_pacer.run(channel.guild.id, lambda: channel.edit(status=text[:500]))
 
     async def fetch_attachment(
         self, channel_id: int, message_id: int, attachment_id: int
