@@ -209,6 +209,27 @@ def test_me_shows_a_cooldown_in_plain_text(league: Community) -> None:
     assert me.cooldown.kind == "dodge" and "<t:" not in me.cooldown.text
 
 
+def test_a_cooldown_brings_its_ladder_and_rung(league: Community) -> None:
+    player = make_player(1)
+    penalties.issue(league, player, PenaltyKind.MISSED_READY)
+    penalties.revoke_active(league, player, keep_strikes=True)
+    penalties.issue(league, player, PenaltyKind.MISSED_READY)
+    me = snapshots.build_me(player.pk, league.pk)
+    assert me is not None and me.cooldown is not None
+    assert me.cooldown.ladder == penalties.ladder(league, PenaltyKind.MISSED_READY)
+    assert me.cooldown.rung == 1  # One strike already carried.
+
+
+@pytest.mark.parametrize("manual", [True, False])
+def test_a_cooldown_staff_set_has_no_ladder(league: Community, manual: bool) -> None:
+    player = make_player(1)
+    kind = PenaltyKind.MANUAL if manual else PenaltyKind.DODGE
+    penalties.issue(league, player, kind, minutes=7)
+    me = snapshots.build_me(player.pk, league.pk)
+    assert me is not None and me.cooldown is not None
+    assert me.cooldown.ladder == [] and me.cooldown.rung is None
+
+
 def test_me_shows_the_live_match_and_an_offer(popped: Match, players: list[Player]) -> None:
     request = subs.request_sub_out(popped.pk, players[3], players[3].pk)
     outsider = make_player(40)

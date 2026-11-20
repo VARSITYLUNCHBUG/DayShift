@@ -147,6 +147,11 @@ class Cooldown(_Wire):
     kind: PenaltyKind
     strikes: int
     games_to_next: int | None  # Clean matches until a strike comes off.
+    # How long this kind of offence keeps you out, in minutes by rung: rung N is for N strikes
+    # already carried, the last for that many or more. Empty when this cooldown didn't come
+    # from the ladder (staff set it, or gave it its own length).
+    ladder: list[int]
+    rung: int | None  # The rung this cooldown came from.
 
 
 class MeMatch(_Wire):

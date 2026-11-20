@@ -16,7 +16,8 @@ import { ErrorState, Skeleton } from "../../components/States";
 import { StatusChip } from "../../components/Navigation";
 import { errorText, notify } from "../../components/toast";
 import { useServerNow } from "../../live/hooks";
-import { clockTime, plural, shortDate } from "../../lib/format";
+import { cn } from "../../lib/cn";
+import { clockTime, plural, shortDate, waitLength } from "../../lib/format";
 import { useIsPhone } from "../../lib/useMediaQuery";
 import { matchNo, ordinal, STATUS_LABEL } from "../shared/format";
 import { Progress, QueueFill, Steps, StrikeDots } from "../shared/parts";
@@ -155,7 +156,7 @@ function Strikes({ me }: { me: MeSnap }) {
   const count = strikes?.count ?? cooldown?.strikes ?? me.strikes;
   const per = strikes?.games_per_strike ?? 3;
   return (
-    <Panel as="section" className="flex flex-col gap-3">
+    <Panel as="section" className="flex flex-1 basis-80 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-section">{plural(count, "strike")}</h2>
         <StrikeDots count={count} />
@@ -165,6 +166,39 @@ function Strikes({ me }: { me: MeSnap }) {
         {strikes?.next_decay_at ? ` Or wait until ${shortDate(strikes.next_decay_at)} with no new strike.` : null}
       </p>
       {strikes && count > 0 ? <Progress value={strikes.progress} max={per} label={`${strikes.progress} of ${per} clean matches`} /> : null}
+    </Panel>
+  );
+}
+
+/** A07's "How long you wait": this kind of offence's ladder, with the rung that applied to you. */
+function WaitLadder({ cooldown }: { cooldown: NonNullable<MeSnap["cooldown"]> }) {
+  const { ladder, rung } = cooldown;
+  if (rung === null || ladder.length < 2) return null;
+  const last = ladder.length - 1;
+  const reason = (COOLDOWN_REASON[cooldown.kind] ?? "this").toLowerCase();
+  return (
+    <Panel as="section" className="flex flex-1 basis-80 flex-col gap-3">
+      <h2 className="text-section">How long you wait</h2>
+      <p className="text-label text-muted">For a {reason}, by the strikes you already carry.</p>
+      <ol className="flex flex-col">
+        {ladder.map((minutes, index) => {
+          const strikes = index === 0 ? "No strikes" : index === last ? `${plural(index, "strike")} or more` : plural(index, "strike");
+          const you = index === rung;
+          return (
+            <li
+              key={index}
+              aria-current={you ? "true" : undefined}
+              className={cn("flex justify-between gap-3 border-t border-line py-2 first:border-t-0", you ? "font-extrabold" : "text-muted")}
+            >
+              <span>{strikes}</span>
+              <span className="tabular-nums">
+                {waitLength(minutes)}
+                {you ? " · you" : null}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
     </Panel>
   );
 }
@@ -214,7 +248,10 @@ export function PlayPage() {
               Join the queue
             </Button>
           </ClockCard>
-          <Strikes me={me.data} />
+          <div className="flex flex-wrap items-start gap-6">
+            <Strikes me={me.data} />
+            {cooldown ? <WaitLadder cooldown={cooldown} /> : null}
+          </div>
           <div className="flex flex-wrap items-center gap-4">
             <ButtonLink to="/me" kind="ghost">
               See your strikes on Me

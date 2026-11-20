@@ -26,6 +26,13 @@ export function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
+/** A cooldown's length: "5 minutes", "an hour", "12 hours", "a day", "7 days", "90 minutes". */
+export function waitLength(minutes: number): string {
+  if (minutes % 1440 === 0) return minutes === 1440 ? "a day" : `${minutes / 1440} days`;
+  if (minutes % 60 === 0) return minutes === 60 ? "an hour" : `${minutes / 60} hours`;
+  return plural(minutes, "minute");
+}
+
 /** "Rook" + "'s Team" when the server has no team name yet. */
 export function teamName(names: { A: string | null; B: string | null }, team: "A" | "B"): string {
   return names[team] ?? (team === "A" ? "Team A" : "Team B");

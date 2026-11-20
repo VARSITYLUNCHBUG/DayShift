@@ -16,7 +16,15 @@
     "text": "You're on a queue cooldown until 19:08 UTC. 1 strike: 3 more clean matches remove one, or wait until 19 Jan 2026.",
     "kind": "missed_ready",
     "strikes": 1,
-    "games_to_next": 3
+    "games_to_next": 3,
+    "ladder": [
+      5,
+      15,
+      60,
+      180,
+      720
+    ],
+    "rung": 0
   },
   "match": null,
   "scrim": null,

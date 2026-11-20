@@ -112,6 +112,25 @@ describe("play", () => {
     expect(screen.getByRole("button", { name: "Join the queue" })).toBeDisabled();
   });
 
+  it("shows how long each rung of the cooldown's ladder waits, and which was yours", async () => {
+    const me = live.meCooldown();
+    if (me.cooldown) Object.assign(me.cooldown, { until: "2026-01-05T19:50:00.000Z", ladder: [5, 15, 60, 1440], rung: 1 });
+    page(<PlayPage />, { me });
+    const ladder = (await screen.findByRole("heading", { name: "How long you wait" })).closest("section");
+    if (!ladder) throw new Error("no ladder");
+    const rows = within(ladder).getAllByRole("listitem").map((row) => row.textContent);
+    expect(rows).toEqual(["No strikes5 minutes", "1 strike15 minutes · you", "2 strikesan hour","3 strikes or morea day"]);
+    expect(within(ladder).getByText("1 strike").closest("li")).toHaveAttribute("aria-current", "true");
+  });
+
+  it("leaves the ladder out of a cooldown staff set", async () => {
+    const me = live.meCooldown();
+    if (me.cooldown) Object.assign(me.cooldown, { until: "2026-01-05T19:50:00.000Z", kind: "manual", ladder: [], rung: null });
+    page(<PlayPage />, { me });
+    await screen.findByRole("heading", { name: /You can queue again at/ });
+    expect(screen.queryByRole("heading", { name: "How long you wait" })).not.toBeInTheDocument();
+  });
+
   it("puts your match first, and the status chip says where you are", async () => {
     const me = live.meReady();
     page(

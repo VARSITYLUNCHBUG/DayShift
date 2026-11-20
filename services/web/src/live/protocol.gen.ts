@@ -287,6 +287,8 @@ export interface Cooldown {
   kind: PenaltyKind;
   strikes: number;
   games_to_next: number | null;
+  ladder: number[];
+  rung: number | null;
 }
 /**
  * This interface was referenced by `LiveProtocol`'s JSON-Schema

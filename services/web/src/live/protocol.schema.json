@@ -875,6 +875,22 @@
               "type": "null"
             }
           ]
+        },
+        "ladder": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "rung": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -882,7 +898,9 @@
         "text",
         "kind",
         "strikes",
-        "games_to_next"
+        "games_to_next",
+        "ladder",
+        "rung"
       ],
       "title": "Cooldown",
       "type": "object"

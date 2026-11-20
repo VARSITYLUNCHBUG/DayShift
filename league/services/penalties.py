@@ -26,10 +26,25 @@ def active_penalty(community: Community, player: Player) -> Penalty | None:
     )
 
 
-def _ladder(community: Community, kind: str) -> list[int]:
+def ladder(community: Community, kind: str) -> list[int]:
+    """A kind's cooldown minutes by rung: rung N is for a player already carrying N strikes, and
+    the last rung for that many or more."""
     ladders = standing.policy_of(community).get("ladders", {})
-    ladder = ladders.get(kind) if isinstance(ladders, dict) else None
-    return [int(minutes) for minutes in ladder] if ladder else [60]
+    minutes = ladders.get(kind) if isinstance(ladders, dict) else None
+    return [int(rung) for rung in minutes] if minutes else [60]
+
+
+def ladder_rung_of(community: Community, penalty: Penalty) -> int | None:
+    """The rung this cooldown came from, or None when it didn't come from the ladder: a staff
+    cooldown, one given its own length, or one whose ladder has changed since."""
+    if penalty.kind == PenaltyKind.MANUAL:
+        return None
+    minutes = ladder(community, penalty.kind)
+    rung = penalty.tier - 1
+    length = penalty.expires_at - penalty.starts_at
+    if not 0 <= rung < len(minutes) or length != timedelta(minutes=minutes[rung]):
+        return None
+    return rung
 
 
 def issue(
@@ -45,10 +60,10 @@ def issue(
     """Issue a penalty. Without `minutes`, the duration comes from the ladder and strikes."""
     starts_at: datetime = now()
     before = standing.standing(community, player, starts_at).strikes
-    ladder = _ladder(community, kind)
-    rung = ladder_rung(before, len(ladder))
+    rungs = ladder(community, kind)
+    rung = ladder_rung(before, len(rungs))
     if minutes is None:
-        minutes = ladder[rung]
+        minutes = rungs[rung]
     penalty = Penalty.objects.create(
         community=community,
         player=player,

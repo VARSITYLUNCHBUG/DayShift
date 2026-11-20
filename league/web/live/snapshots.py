@@ -190,7 +190,10 @@ def _me(server: Community, player: Player) -> s.MeSnap:
     now_standing = standing.standing(server, player)
     cooldown = None
     if penalty is not None:
+        rung = penalties.ladder_rung_of(server, penalty)
         cooldown = s.Cooldown(
+            ladder=[] if rung is None else penalties.ladder(server, penalty.kind),
+            rung=rung,
             until=penalty.expires_at,
             text=plain(penalties.refusal_text(server, player, penalty)),
             kind=cast(s.PenaltyKind, penalty.kind),
