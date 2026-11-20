@@ -20,7 +20,12 @@ def test_admin_pages_carry_the_policy_with_a_fresh_nonce_each() -> None:
     policy = first["Content-Security-Policy"]
     assert "default-src 'self'" in policy
     assert "frame-ancestors 'none'" in policy
-    assert "'unsafe-inline'" not in policy and "'unsafe-eval'" not in policy
+    # Inline style attributes only (React Aria positions popovers with them): never inline
+    # scripts or <style> elements, and never eval.
+    directives = dict(part.split(" ", 1) for part in policy.split("; "))
+    assert directives["style-src-attr"] == "'unsafe-inline'"
+    unsafe = [name for name, sources in directives.items() if "'unsafe-inline'" in sources]
+    assert unsafe == ["style-src-attr"] and "'unsafe-eval'" not in policy
     nonces = [
         re.search(r"script-src 'self' 'nonce-([^']+)'", response["Content-Security-Policy"])
         for response in (first, second)
