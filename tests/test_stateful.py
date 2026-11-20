@@ -65,7 +65,7 @@ class MatchMachine(RuleBasedStateMachine):
 
     def __init__(self) -> None:
         super().__init__()
-        self.savepoint = transaction.savepoint()
+        self.savepoint = transaction.savepoint_create()
         self.players = [make_player(n) for n in range(1, 16)]
         for player in self.players[:12]:
             queue.join(self.community_id, player)

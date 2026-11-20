@@ -56,6 +56,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Django 6 refuses ArrayField without it (postgres.E005).
+    "django.contrib.postgres",
     "league",
 ]
 
