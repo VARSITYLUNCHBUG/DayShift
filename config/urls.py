@@ -7,6 +7,7 @@ from django.contrib import admin
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
 
+from league.web import spa
 from league.web.views import calibration_dashboard
 
 urlpatterns = [
@@ -18,4 +19,6 @@ urlpatterns = [
     # WhiteNoise serves /static/ from the image's collected files. With DEBUG on, this serves the
     # apps' own folders too, so a change shows without collectstatic. Empty with DEBUG off.
     *staticfiles_urlpatterns(),
+    # Last: every other path is one of the web UI's pages (league.web.spa).
+    *spa.urlpatterns(),
 ]

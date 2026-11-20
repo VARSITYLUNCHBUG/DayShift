@@ -41,10 +41,10 @@ def test_a_request_is_logged_as_its_method_and_path_without_the_query() -> None:
 def test_djangos_own_4xx_lines_carry_no_query_string(caplog: pytest.LogCaptureFixture) -> None:
     """django.request attaches the request to every 4xx and 5xx it logs."""
     with caplog.at_level(logging.WARNING, logger="django.request"):
-        Client().get("/no-such-page/?code=OAUTHCODE2&state=x")
+        Client().get("/api/no-such-page/?code=OAUTHCODE2&state=x")
     records = [record for record in caplog.records if record.name == "django.request"]
     assert records
     for record in records:
         line = JsonFormatter().format(record)
         assert "OAUTHCODE2" not in line, line
-        assert "GET /no-such-page/" in line
+        assert "GET /api/no-such-page/" in line

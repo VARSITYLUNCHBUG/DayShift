@@ -69,7 +69,8 @@ MIDDLEWARE = [
     # /healthz and /readyz, before ALLOWED_HOSTS and the HTTPS redirect (config.health).
     "config.health.health_middleware",
     "django.middleware.security.SecurityMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
+    # WhiteNoise, streaming files without blocking under ASGI (league.web.static).
+    "league.web.static.AsgiWhiteNoiseMiddleware",
     "config.csp.csp_middleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
