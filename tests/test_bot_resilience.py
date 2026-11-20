@@ -12,9 +12,11 @@ import pytest
 from django.db import OperationalError
 
 from bot import client as client_module
+from bot import watched as watched_module
 from bot.client import DayShiftBot, Heartbeat, LoopErrors, deadline_loop
 from bot.effects import worker as worker_module
 from league.services import deadlines
+from league.services.effects import WatchedChannels
 
 CACHED = "server login has been failing, cached error: server DNS lookup failed"
 
@@ -34,12 +36,18 @@ class FlakyDb:
         return 0 if fn is deadlines.tick else []
 
 
+async def _no_channels(*_args: object, **_kwargs: object) -> WatchedChannels:
+    """The watch list's reload, for tests that fake the database: nothing to watch."""
+    return WatchedChannels(frozenset(), frozenset())
+
+
 def test_startup_recovery_waits_for_the_database_then_starts_the_loops(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     flaky = FlakyDb(failures=3)
     monkeypatch.setattr(client_module, "db", flaky)
     monkeypatch.setattr(worker_module, "db", FlakyDb(failures=0))
+    monkeypatch.setattr(watched_module, "db", _no_channels)
     monkeypatch.setattr(client_module, "STARTUP_RETRY_SECONDS", (0.01,))
     beat = tmp_path / "beat"
 

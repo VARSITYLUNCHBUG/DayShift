@@ -24,6 +24,7 @@ from django.utils import timezone
 
 import config.logging
 from bot import client as client_module
+from bot import watched as watched_module
 from bot.client import DayShiftBot, Heartbeat, Watchdog, deadline_loop, point_at_discord
 from bot.db import db
 from bot.effects import worker as worker_module
@@ -31,6 +32,7 @@ from league.domain.engine import Status
 from league.models import Match, OutboxEffect, Player
 from league.models.outbox import EffectStatus
 from league.services import deadlines, health, lobby
+from league.services.effects import WatchedChannels
 
 LEAGUE_DIR = Path(__file__).resolve().parent.parent / "league"
 
@@ -93,9 +95,15 @@ async def _fake_db(fn: object, *args: object, **kwargs: object) -> list[object]:
     return []
 
 
+async def _no_channels(*_args: object, **_kwargs: object) -> WatchedChannels:
+    """The watch list's reload, for tests that fake the database: nothing to watch."""
+    return WatchedChannels(frozenset(), frozenset())
+
+
 def test_the_bot_runs_every_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(client_module, "db", _fake_db)
     monkeypatch.setattr(worker_module, "db", _fake_db)
+    monkeypatch.setattr(watched_module, "db", _no_channels)
     beat = tmp_path / "beat"
 
     async def scenario() -> set[str]:
