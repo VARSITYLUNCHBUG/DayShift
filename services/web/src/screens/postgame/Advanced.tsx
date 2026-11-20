@@ -114,7 +114,7 @@ function PlayerPanel({ line, doc, names }: { line: PlayerLine; doc: Postgame; na
     <Panel as="section" aria-labelledby="player-heading" className="flex flex-col gap-5 p-6">
       <div className="flex flex-wrap items-center gap-4">
         <Portrait hero={line.hero} src={heroArt(line.hero_slug)} team={line.team} size="lg" />
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 basis-44 flex-col">
           <h3 id="player-heading" tabIndex={-1} className="type-display text-coin outline-none">
             {line.name}
           </h3>
@@ -122,7 +122,7 @@ function PlayerPanel({ line, doc, names }: { line: PlayerLine; doc: Postgame; na
             {line.hero} · {names.side[line.team]} · level {line.level}
           </span>
         </div>
-        <div className="flex flex-col rounded-card bg-background px-4 py-3">
+        <div className="flex flex-col rounded-card bg-background px-4 py-3 max-sm:basis-full">
           <span className="text-micro font-bold text-muted">Damage per minute</span>
           <b className="type-display text-stat tabular-nums">{number(line.damage_per_min)}</b>
           <span className="text-micro font-bold text-muted">
@@ -176,7 +176,7 @@ function PlayerPanel({ line, doc, names }: { line: PlayerLine; doc: Postgame; na
               </li>
             ))}
           </ol>
-          <p className="text-caption text-muted">Faded items were sold. Item names come in a later version.</p>
+          <p className="text-caption text-muted">Faded items were sold. An item the game added since our last look shows its number.</p>
         </section>
       </div>
       <section className="flex flex-col gap-2">

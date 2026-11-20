@@ -38,7 +38,7 @@ function Disclosure({ title, children }: { title: string; children: ReactNode })
 }
 
 /** The page's own hero, when staff have set no call to action. */
-function DefaultHero() {
+function DefaultHero({ withHow }: { withHow: boolean }) {
   return (
     <section aria-labelledby="hero-heading" className="flex min-w-0 flex-999 basis-160 flex-col gap-6">
       <Sticker tone="brand" className="self-start">
@@ -54,15 +54,21 @@ function DefaultHero() {
         <span className="h-2 w-16 rounded-full bg-team-hk" />
         <span className="h-2 w-16 rounded-full bg-team-am" />
       </span>
-      <ul className="grid max-w-190 grid-cols-1 gap-3 sm:grid-cols-3">
-        {HOW.map((item) => (
-          <li key={item.title} className="flex flex-col gap-1 rounded-card border border-line p-4">
-            <b className="text-body font-extrabold">{item.title}</b>
-            <span className="text-label text-muted">{item.line}</span>
-          </li>
-        ))}
-      </ul>
+      {withHow ? <HowItRuns /> : null}
     </section>
+  );
+}
+
+function HowItRuns() {
+  return (
+    <ul aria-label="How it runs" className="grid w-full max-w-190 grid-cols-1 gap-3 sm:grid-cols-3">
+      {HOW.map((item) => (
+        <li key={item.title} className="flex flex-col gap-1 rounded-card border border-line p-4">
+          <b className="text-body font-extrabold">{item.title}</b>
+          <span className="text-label text-muted">{item.line}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -243,13 +249,15 @@ export function SignInPage() {
           {landing && (landing.headline_html || landing.advert) ? (
             <LandingHero landing={landing} withAdvert={!phone} />
           ) : (
-            <DefaultHero />
+            <DefaultHero withHow={!phone} />
           )}
           <div className="min-w-0 flex-1 basis-100">
             <SignInCard next={next} devLogin={devLogin} invite={invite} />
           </div>
-          {/* On a phone the advert comes after the sign-in card, so signing in is never a scroll away. */}
+          {/* On a phone the advert, or how it runs, comes after the sign-in card, so signing in is
+              never a long scroll away. */}
           {phone && landing?.advert ? <AdvertCard advert={landing.advert} /> : null}
+          {phone && !(landing && (landing.headline_html || landing.advert)) ? <HowItRuns /> : null}
         </div>
       )}
     </AppShell>

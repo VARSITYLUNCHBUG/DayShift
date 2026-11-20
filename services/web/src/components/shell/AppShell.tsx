@@ -50,7 +50,7 @@ export function AppShell({ me, status, banner, children, width = "app" }: Props)
         {phone && status ? <div className="flex">{status}</div> : null}
         {children}
       </main>
-      <SiteFooter className={phone && me ? "pb-18" : undefined} />
+      <SiteFooter underTabs={phone && me !== null} />
       {phone && me ? <PhoneTabs /> : null}
     </div>
     </InsideAppShell>

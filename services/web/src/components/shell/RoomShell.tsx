@@ -83,9 +83,9 @@ export function RoomShell({
         <div className="flex min-w-0 flex-col gap-7 md:flex-999 md:basis-160">{children}</div>
         {rail ? <aside className="flex min-w-0 flex-1 basis-80 flex-col gap-5">{rail}</aside> : null}
       </main>
-      <SiteFooter className={phone && footer ? "pb-22" : undefined} />
+      <SiteFooter />
       {phone && footer ? (
-        <div className="fixed inset-x-0 bottom-0 z-30 flex gap-2.5 border-t border-line bg-background px-4 py-3 *:flex-1">{footer}</div>
+        <div data-sticky-footer className="fixed inset-x-0 bottom-0 z-30 flex gap-2.5 border-t border-line bg-background px-4 pt-3 pb-bar-safe *:flex-1">{footer}</div>
       ) : null}
     </div>
   );

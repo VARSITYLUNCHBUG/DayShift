@@ -339,6 +339,16 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* A page's action stuck to a phone's bottom edge (shell/TopBar.tsx StickyFooter, the room's bar):
+   above the tab bar, which is 3.5rem plus the home indicator, or clear of the indicator itself. */
+@utility bottom-above-tabs {
+  bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+@utility pb-bar-safe {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+
 @utility shadow-tab-active {
   box-shadow: inset 0 3px 0 var(--ds-brand);
 }
@@ -587,6 +597,11 @@
     @apply px-4.5;
   }
 
+  /* A search field's clear button: a 32px target, not HeroUI's 20 (WCAG 2.5.8 asks 24 at least). */
+  .search-field__clear-button {
+    @apply size-8 rounded-full;
+  }
+
   .textarea {
     @apply rounded-card text-field sm:text-field;
 
@@ -688,14 +703,17 @@
     @apply min-h-11;
   }
 
-  /* Segmented control (ds.segmented): pills in a surface track; the chosen one is cream on ink. */
+  /* Segmented control (ds.segmented): pills in a surface track; the chosen one is cream on ink.
+     Wider than the screen (a phone, long labels), the track scrolls sideways on its own. */
   .segmented {
-    @apply inline-flex gap-1 rounded-full border border-line bg-surface p-1;
+    @apply inline-flex max-w-full gap-1 overflow-x-auto overscroll-x-contain rounded-full border border-line bg-surface p-1;
+
+    scrollbar-width: none;
   }
 
   .segmented__item,
   .segmented .toggle-button {
-    @apply h-11 rounded-full px-4.5 text-label font-extrabold md:h-11;
+    @apply h-11 shrink-0 rounded-full px-4.5 text-label font-extrabold whitespace-nowrap md:h-11;
 
     --toggle-button-bg: transparent;
     --toggle-button-bg-hover: var(--ds-raised);
@@ -789,4 +807,38 @@
 
 .ds-headline code {
   font-family: inherit;
+}
+
+/* The foot of the page (shell/SiteFooter.tsx) on a phone: clear of whatever is fixed to the bottom
+   of the screen, so it can be read once scrolled to the end. The tab bar is 3.5rem; a page's
+   sticky action (data-sticky-footer) about 5.25rem more. */
+@media (width < 48rem) {
+  .ds-site-footer[data-under-tabs] {
+    padding-bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  body:has([data-sticky-footer]) .ds-site-footer {
+    padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  body:has([data-sticky-footer]) .ds-site-footer[data-under-tabs] {
+    padding-bottom: calc(10.75rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* A phone's bar of actions at the bottom of the screen (data-sticky-footer): its buttons share the
+   width, and a long label wraps onto a second line rather than running off a 320px screen. */
+@media (width < 48rem) {
+  [data-sticky-footer] > * {
+    min-width: 0;
+  }
+
+  [data-sticky-footer] .button {
+    height: auto;
+    min-height: 3rem;
+    padding-block: 0.5rem;
+    line-height: 1.15;
+    text-align: center;
+    white-space: normal;
+  }
 }

@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { getJson } from "../../api/http";
 import { SESSION_KEY } from "../../api/session";
 import type { Session } from "../../api/session";
-import { cn } from "../../lib/cn";
 
 /** South Africa's flag, drawn rather than the 🇿🇦 emoji: Windows has no flag emoji and would show
  * the letters "ZA". Its proportions are 2:3; the Y's bands are 1/5 of its height. */
@@ -25,15 +24,13 @@ function SouthAfricanFlag() {
 
 /** The foot of every page: who made it, and the hero art's credit (the art is the game's own).
  * The Ko-fi link shows once the server has one (KOFI_URL). */
-export function SiteFooter({ className }: { className?: string }) {
+export function SiteFooter({ underTabs = false }: { underTabs?: boolean }) {
   const { data } = useQuery({ queryKey: SESSION_KEY, queryFn: () => getJson<Session>("/api/session/"), staleTime: 60_000 });
   const kofi = data?.kofi_url ?? null;
   return (
     <footer
-      className={cn(
-        "mx-auto box-border flex w-full max-w-room flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 pb-6 text-micro text-faint md:px-8",
-        className,
-      )}
+      data-under-tabs={underTabs || undefined}
+      className="ds-site-footer mx-auto box-border flex w-full max-w-room flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 pb-6 text-micro text-faint md:px-8"
     >
       <ul className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <li>Made with Love &lt;3</li>
@@ -43,8 +40,11 @@ export function SiteFooter({ className }: { className?: string }) {
         </li>
         {kofi ? (
           <>
-            <li aria-hidden="true">·</li>
-            <li>
+            {/* On a small screen Ko-fi takes a line of its own, so no dot is left at a line's end. */}
+            <li aria-hidden="true" className="max-sm:hidden">
+              ·
+            </li>
+            <li className="max-sm:basis-full">
               <a href={kofi} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-6 items-center font-bold underline underline-offset-2 hover:text-muted">
                 Support us on Ko-fi
                 <span className="sr-only"> (opens in a new tab)</span>

@@ -62,6 +62,8 @@ export function HeroDraft({ match }: MatchScreenProps) {
     <Button
       kind="ghost"
       icon="dice"
+      // Only as wide as its word in the phone's bar, so the main action gets the rest.
+      className="max-md:flex-none"
       onPress={random}
       isDisabled={act.pending === "draft.champion"}
       isPending={act.pending === "draft.random_champion"}

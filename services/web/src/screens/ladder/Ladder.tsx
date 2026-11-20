@@ -36,28 +36,37 @@ function YouBar({ ladder }: { ladder: Ladder }) {
   );
 }
 
+/** Padding for every cell: tighter on a phone, so the record fits beside the rating. */
+const CELL = "px-2 py-2.5 sm:px-3";
+
 function Row({ row, label }: { row: LadderRow; label: string }) {
   return (
     <tr className={cn(row.is_you && "bg-raised")}>
-      <td className="px-3 py-2.5 type-display text-card tabular-nums">{row.rank}</td>
-      <th scope="row" className="px-3 py-2.5 text-left font-normal">
-        <span className="flex items-center gap-3">
+      <td className={cn(CELL, "type-display text-card tabular-nums")}>{row.rank}</td>
+      <th scope="row" className={cn(CELL, "text-left font-normal")}>
+        <span className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <Avatar name={row.name} src={row.avatar_url} size="sm" />
-          <b className="truncate text-body font-extrabold">{row.name}</b>
-          {row.is_you ? <span className="text-micro font-semibold text-muted">you</span> : null}
+          <span className="flex min-w-0 flex-col">
+            <span className="flex min-w-0 items-baseline gap-2">
+              <b className="truncate text-body font-extrabold">{row.name}</b>
+              {row.is_you ? <span className="text-micro font-semibold text-muted">you</span> : null}
+            </span>
+            {/* On a phone the tier sits under the name, rather than in a column of its own. */}
+            {row.tier !== null ? <span className="text-micro font-semibold text-muted sm:hidden">{row.tier}</span> : null}
+          </span>
         </span>
       </th>
       {row.tier !== null ? (
-        <td className="px-3 py-2.5">
+        <td className={cn(CELL, "max-sm:hidden")}>
           <Sticker tone="raised" size="sm" tilt="slight">
             {row.tier}
           </Sticker>
         </td>
       ) : null}
-      <td className="px-3 py-2.5 text-right font-extrabold tabular-nums" aria-label={`${label} ${row.rating}`}>
+      <td className={cn(CELL, "text-right font-extrabold tabular-nums")} aria-label={`${label} ${row.rating}`}>
         {number(row.rating)}
       </td>
-      <td className="px-3 py-2.5 text-right text-muted tabular-nums">{record(row.wins, row.losses)}</td>
+      <td className={cn(CELL, "text-right whitespace-nowrap text-muted tabular-nums")}>{record(row.wins, row.losses)}</td>
     </tr>
   );
 }
@@ -110,14 +119,14 @@ export function LadderPage() {
                 </caption>
                 <thead>
                   <tr className="text-micro font-extrabold text-faint">
-                    <th scope="col" className="px-3 py-2 text-left">
+                    <th scope="col" className="px-2 py-2 text-left sm:px-3">
                       #
                     </th>
-                    <th scope="col" className="px-3 py-2 text-left">
+                    <th scope="col" className="px-2 py-2 text-left sm:px-3">
                       Player
                     </th>
                     {tiers ? (
-                      <th scope="col" className="px-3 py-2 text-left">
+                      <th scope="col" className="px-3 py-2 text-left max-sm:hidden">
                         Tier
                       </th>
                     ) : null}

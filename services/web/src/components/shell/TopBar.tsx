@@ -150,9 +150,10 @@ export function PhoneTabs() {
 export function StickyFooter({ children, aboveTabs = true }: { children: ReactNode; aboveTabs?: boolean }) {
   return (
     <div
+      data-sticky-footer
       className={cn(
-        "flex gap-2.5 max-md:fixed max-md:inset-x-0 max-md:z-30 max-md:border-t max-md:border-line max-md:bg-background max-md:px-4 max-md:py-3 max-md:*:flex-1",
-        aboveTabs ? "max-md:bottom-14" : "max-md:bottom-0",
+        "flex gap-2.5 max-md:fixed max-md:inset-x-0 max-md:z-30 max-md:border-t max-md:border-line max-md:bg-background max-md:px-4 max-md:pt-3 max-md:*:flex-1",
+        aboveTabs ? "max-md:bottom-above-tabs max-md:pb-3" : "max-md:bottom-0 max-md:pb-bar-safe",
       )}
     >
       {children}

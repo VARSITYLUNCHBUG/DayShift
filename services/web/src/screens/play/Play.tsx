@@ -62,7 +62,7 @@ function Join({ label = "Join the queue", disabled = false }: { label?: string; 
     <div className="flex flex-col gap-3">
       <Button
         size="lg"
-        className="min-w-80 max-md:min-w-0"
+        className="min-w-80 max-md:w-full max-md:min-w-0"
         isDisabled={disabled}
         isPending={action.pending === "queue.join"}
         pendingLabel="Joining…"
@@ -89,7 +89,7 @@ function Leave() {
       <Button
         kind="danger"
         size="lg"
-        className="min-w-64 max-md:min-w-0"
+        className="min-w-64 max-md:w-full max-md:min-w-0"
         isPending={action.pending === "queue.leave"}
         pendingLabel="Leaving…"
         onPress={() => {
@@ -116,7 +116,7 @@ function LetGo() {
       <Button
         kind="ghost"
         size="lg"
-        className="max-md:min-w-0"
+        className="max-md:w-full max-md:min-w-0"
         isPending={action.pending === "queue.let_go"}
         pendingLabel="Letting it go…"
         onPress={() => {

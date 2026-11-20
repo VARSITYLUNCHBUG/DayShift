@@ -100,7 +100,8 @@ function DraftTeam({ match, team, myId }: { match: MatchSnap; team: Team; myId: 
   const open = Math.max(0, slots - players.length);
   const key = teamKey(match, team);
   return (
-    <div className="flex min-w-0 flex-1 basis-75 flex-col gap-2">
+    // A grid, not a column: in a column the panel's own flex basis would be its height.
+    <div className="grid min-w-0 flex-1 basis-75 content-start gap-2">
       <TeamPanel
         team={key}
         name={nameOf(match, team)}
