@@ -311,6 +311,13 @@
     "scope": "lobby",
     "open": true,
     "closed_reason": null,
-    "messages": []
+    "messages": [
+      {
+        "kind": "system",
+        "id": "t4",
+        "body": "P2 and P1 are the captains. The player draft is on.",
+        "at": "2026-01-05T19:00:00.000Z"
+      }
+    ]
   }
 }

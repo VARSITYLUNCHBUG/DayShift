@@ -856,6 +856,7 @@
     "closed_reason": null,
     "messages": [
       {
+        "kind": "message",
         "id": "1",
         "player_id": "3",
         "name": "P3",
@@ -864,6 +865,7 @@
         "at": "2026-01-05T18:58:30.000Z"
       },
       {
+        "kind": "message",
         "id": "3",
         "player_id": "2",
         "name": "P2",
@@ -872,12 +874,37 @@
         "at": "2026-01-05T18:59:04.000Z"
       },
       {
+        "kind": "message",
         "id": "5",
         "player_id": "6",
         "name": "P6",
         "team": "A",
         "body": "ok\nI'll take mid if nobody minds",
         "at": "2026-01-05T18:59:38.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "t6",
+        "body": "The hero draft is on.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d11",
+        "body": "P2 banned Infernus.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d12",
+        "body": "P1 banned Seven.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d13",
+        "body": "P2 banned Vindicta.",
+        "at": "2026-01-05T19:00:00.000Z"
       }
     ]
   }

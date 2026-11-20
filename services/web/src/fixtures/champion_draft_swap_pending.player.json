@@ -780,6 +780,13 @@
     "scope": "team",
     "open": true,
     "closed_reason": null,
-    "messages": []
+    "messages": [
+      {
+        "kind": "system",
+        "id": "t6",
+        "body": "The hero draft is on.",
+        "at": "2026-01-05T19:00:00.000Z"
+      }
+    ]
   }
 }

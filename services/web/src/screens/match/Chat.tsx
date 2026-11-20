@@ -7,7 +7,7 @@ import type { SyntheticEvent } from "react";
 import { Button } from "../../components/Button";
 import { cn } from "../../lib/cn";
 import { clockTime } from "../../lib/format";
-import type { ChatLine, ChatView, MatchSnap, Team } from "../../live/protocol.gen";
+import type { ChatLine, ChatView, MatchSnap, SystemLine, Team } from "../../live/protocol.gen";
 import { errorText } from "../../components/toast";
 import { TEAM_CLASS } from "../../components/team";
 import { useMatchAction } from "../../match/live";
@@ -113,14 +113,18 @@ export function Chat({ match, chat, myId, myName, isOffline = false, fill = fals
         )}
       >
         {count === 0 ? <li className="m-auto text-caption text-muted">No messages yet. Say hello.</li> : null}
-        {chat.messages.map((line) => (
-          <Line key={line.id} match={match} line={line} isYou={line.player_id === myId} />
-        ))}
+        {chat.messages.map((line) =>
+          line.kind === "system" ? (
+            <SystemNote key={line.id} line={line} />
+          ) : (
+            <Line key={line.id} match={match} line={line} isYou={line.player_id === myId} />
+          ),
+        )}
         {pending.map((line) => (
           <Line
             key={line.id}
             match={match}
-            line={{ id: line.id, player_id: myId ?? "", name: myName, team: myTeam, body: line.body, at: "" }}
+            line={{ kind: "message", id: line.id, player_id: myId ?? "", name: myName, team: myTeam, body: line.body, at: "" }}
             isYou
             isPending
           />
@@ -200,9 +204,23 @@ function Line({
   );
 }
 
-/** How many lines have arrived since the chat was last looked at, for the phone's badge. */
+/** Something that happened, between the messages: quiet, centred, with its time. */
+function SystemNote({ line }: { line: SystemLine }) {
+  return (
+    <li className="flex flex-wrap items-baseline justify-center gap-x-2 text-center text-caption text-muted">
+      <span className="break-words">{line.body}</span>
+      <time dateTime={line.at} className="text-micro text-faint">
+        {clockTime(line.at)}
+      </time>
+    </li>
+  );
+}
+
+/** How many messages have arrived since the chat was last looked at, for the phone's badge.
+ * System lines don't count: a draft makes a lot of them. */
 export function useUnread(chat: ChatView | null, isOpen: boolean): number {
-  const lastId = chat?.messages.at(-1)?.id ?? null;
+  const said = chat ? chat.messages.filter((m) => m.kind === "message") : [];
+  const lastId = said.at(-1)?.id ?? null;
   const [seen, setSeen] = useState<string | null>(lastId);
   const [scope, setScope] = useState(chat?.scope ?? null);
   // Adjusting state while rendering (React's documented pattern), not in an effect.
@@ -214,6 +232,6 @@ export function useUnread(chat: ChatView | null, isOpen: boolean): number {
     setSeen(lastId);
   }
   if (!chat || isOpen) return 0;
-  const index = chat.messages.findIndex((m) => m.id === seen);
-  return index === -1 && seen !== null ? chat.messages.length : chat.messages.length - 1 - index;
+  const index = said.findIndex((m) => m.id === seen);
+  return index === -1 && seen !== null ? said.length : said.length - 1 - index;
 }

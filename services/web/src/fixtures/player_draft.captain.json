@@ -303,6 +303,7 @@
     "closed_reason": null,
     "messages": [
       {
+        "kind": "message",
         "id": "1",
         "player_id": "2",
         "name": "P2",
@@ -311,6 +312,7 @@
         "at": "2026-01-05T18:58:47.000Z"
       },
       {
+        "kind": "message",
         "id": "2",
         "player_id": "3",
         "name": "P3",
@@ -319,6 +321,7 @@
         "at": "2026-01-05T18:59:04.000Z"
       },
       {
+        "kind": "message",
         "id": "3",
         "player_id": "4",
         "name": "P4",
@@ -327,6 +330,7 @@
         "at": "2026-01-05T18:59:21.000Z"
       },
       {
+        "kind": "message",
         "id": "4",
         "player_id": "1",
         "name": "P1",
@@ -335,12 +339,25 @@
         "at": "2026-01-05T18:59:38.000Z"
       },
       {
+        "kind": "message",
         "id": "5",
         "player_id": "5",
         "name": "P5",
         "team": null,
         "body": "first time here, be nice :)",
         "at": "2026-01-05T18:59:55.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "t4",
+        "body": "P2 and P1 are the captains. The player draft is on.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d1",
+        "body": "P2 picked P3.",
+        "at": "2026-01-05T19:00:00.000Z"
       }
     ]
   }

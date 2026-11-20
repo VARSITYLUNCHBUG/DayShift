@@ -531,6 +531,25 @@
     "scope": "team",
     "open": true,
     "closed_reason": null,
-    "messages": []
+    "messages": [
+      {
+        "kind": "system",
+        "id": "t1",
+        "body": "The hero draft is on.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d1",
+        "body": "P1 banned Infernus.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d2",
+        "body": "P2 banned Seven.",
+        "at": "2026-01-05T19:00:00.000Z"
+      }
+    ]
   }
 }

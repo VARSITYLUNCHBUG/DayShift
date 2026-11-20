@@ -715,7 +715,9 @@ def test_chat_lines_and_wishes_on_the_wire(popped: Match) -> None:
         {"player_id": str(player.player_id), "champion_id": str(hero), "rank": 1}
     ]
     assert data["viewer"]["can_wish"] is True
-    (line,) = data["chat"]["messages"]
+    (line,) = [m for m in data["chat"]["messages"] if m["kind"] == "message"]
+    system = [m for m in data["chat"]["messages"] if m["kind"] == "system"]
+    assert system and system[0]["body"] == "The hero draft is on." and "player_id" not in system[0]
     assert data["chat"]["scope"] == "team" and data["chat"]["open"]
     assert line["at"].endswith("Z") and line["team"] == "A" and line["body"] == "hello"
     assert isinstance(line["id"], str) and line["player_id"] == str(player.player_id)

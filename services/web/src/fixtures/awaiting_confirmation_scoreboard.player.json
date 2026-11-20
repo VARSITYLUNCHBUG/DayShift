@@ -1024,6 +1024,127 @@
     "scope": "team",
     "open": false,
     "closed_reason": "Team chat closed when the game ended.",
-    "messages": []
+    "messages": [
+      {
+        "kind": "system",
+        "id": "t6",
+        "body": "The hero draft is on.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "t8",
+        "body": "The game is on. Good luck.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d11",
+        "body": "P2 banned Infernus.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d12",
+        "body": "P1 banned Seven.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d13",
+        "body": "P2 banned Vindicta.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d14",
+        "body": "P1 banned Lady Geist.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d15",
+        "body": "P2 picked Abrams.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d16",
+        "body": "P1 picked Wraith.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d17",
+        "body": "P1 picked McGinnis.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d18",
+        "body": "P2 picked Paradox.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d19",
+        "body": "P1 picked Dynamo.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d20",
+        "body": "P2 picked Kelvin.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d21",
+        "body": "P1 banned Haze.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d22",
+        "body": "P2 banned Holliday.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d23",
+        "body": "P1 picked Bebop.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d24",
+        "body": "P2 picked Calico.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d25",
+        "body": "P2 picked Grey Talon.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d26",
+        "body": "P1 picked Mo & Krill.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d27",
+        "body": "P2 picked Shiv.",
+        "at": "2026-01-05T19:00:00.000Z"
+      },
+      {
+        "kind": "system",
+        "id": "d28",
+        "body": "P1 picked Ivy.",
+        "at": "2026-01-05T19:00:00.000Z"
+      }
+    ]
   }
 }

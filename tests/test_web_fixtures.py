@@ -38,7 +38,9 @@ from league.domain.engine import ARCHMOTHER, LAST_PICK, Status
 from league.models import (
     ChatMessage,
     Community,
+    DraftAction,
     Match,
+    MatchTransition,
     Player,
     PlayerSwap,
     ScoreboardRead,
@@ -578,6 +580,8 @@ SCENES: list[Callable[[Community, list[Player], Clock], Scene]] = [
 
 # An avatar URL names its player by database ID: /avatar/<id>/<hash>.png.
 AVATAR_PLAYER = re.compile(r"^/avatar/(\d+)/")
+# A chat system line's ID prefix (league/services/chat.py `system_lines`) to its record's kind.
+SYSTEM_LINE_IDS = {"t": "transition", "d": "draft", "w": "swap", "s": "sub"}
 
 
 def _numbering() -> dict[str, dict[str, str]]:
@@ -592,6 +596,8 @@ def _numbering() -> dict[str, dict[str, str]]:
         "season": Season.objects,
         "chat": ChatMessage.objects,
         "steam": SteamAccount.objects,
+        "transition": MatchTransition.objects,
+        "draft": DraftAction.objects,
     }
     return {
         kind: {
@@ -617,7 +623,10 @@ def _normalise(value: Any, numbers: dict[str, dict[str, str]], key: str = "") ->
                 kind = "read"
             elif name in SEASON_KEYS:
                 kind = "season"
-            if kind and isinstance(item, str):
+            if kind == "chat" and isinstance(item, str) and item[:1] in SYSTEM_LINE_IDS:
+                # A system line's ID is a letter for its record and that record's ID.
+                out[name] = item[0] + numbers[SYSTEM_LINE_IDS[item[0]]][item[1:]]
+            elif kind and isinstance(item, str):
                 out[name] = numbers[kind][item]
             elif kind == "player" and isinstance(item, int) and not isinstance(item, bool):
                 # The postgame names league players by their integer ID.

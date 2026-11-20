@@ -783,17 +783,32 @@ export interface ChatView {
   scope: ChatScope;
   open: boolean;
   closed_reason: string | null;
-  messages: ChatLine[];
+  messages: (ChatLine | SystemLine)[];
 }
 /**
+ * A player's message.
+ *
  * This interface was referenced by `LiveProtocol`'s JSON-Schema
  * via the `definition` "ChatLine".
  */
 export interface ChatLine {
+  kind: "message";
   id: Id;
   player_id: Id;
   name: string;
   team: Team | null;
+  body: string;
+  at: string;
+}
+/**
+ * Something that happened, shown between the messages, such as "Rook picked Mothball".
+ *
+ * This interface was referenced by `LiveProtocol`'s JSON-Schema
+ * via the `definition` "SystemLine".
+ */
+export interface SystemLine {
+  kind: "system";
+  id: string;
   body: string;
   at: string;
 }
@@ -893,6 +908,7 @@ export interface ActionArgs {
   "ocr.map_row": MapRowArgs;
   "queue.join": NoArgs;
   "queue.leave": NoArgs;
+  "queue.let_go": NoArgs;
   "results.confirm": MatchArgs;
   "results.dispute": DisputeArgs;
   "scrims.claim": ClaimArgs;

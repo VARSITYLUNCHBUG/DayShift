@@ -777,6 +777,7 @@
     "closed_reason": null,
     "messages": [
       {
+        "kind": "message",
         "id": "2",
         "player_id": "4",
         "name": "P4",

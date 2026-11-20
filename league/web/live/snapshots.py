@@ -549,17 +549,27 @@ def _chat_view(match_id: int, room: chat.Room, scope: ChatScope) -> s.ChatView:
         scope=room.kind,
         open=room.open,
         closed_reason=room.closed_reason,
-        messages=[
-            s.ChatLine(
-                id=str(line.pk),
-                player_id=str(line.player_id),
-                name=line.player.display_name,
-                team=_team(teams.get(line.player_id, "")),
-                body=line.body,
-                at=line.created_at,
-            )
-            for line in lines
-        ],
+        messages=sorted(
+            [
+                *(
+                    s.ChatLine(
+                        kind="message",
+                        id=str(line.pk),
+                        player_id=str(line.player_id),
+                        name=line.player.display_name,
+                        team=_team(teams.get(line.player_id, "")),
+                        body=line.body,
+                        at=line.created_at,
+                    )
+                    for line in lines
+                ),
+                *(
+                    s.SystemLine(kind="system", id=line.key, body=line.body, at=line.at)
+                    for line in chat.system_lines(match_id, scope)
+                ),
+            ],
+            key=lambda line: line.at,
+        ),
     )
 
 

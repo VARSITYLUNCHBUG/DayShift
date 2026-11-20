@@ -188,7 +188,7 @@ describe("on a phone", () => {
           ...chat,
           messages: [
             ...chat.messages,
-            { id: "99", player_id: "2", name: "P2", team: "A", body: "new line", at: "2026-01-05T19:00:10.000Z" },
+            { kind: "message", id: "99", player_id: "2", name: "P2", team: "A", body: "new line", at: "2026-01-05T19:00:10.000Z" },
           ],
         },
       } as never,
@@ -199,5 +199,26 @@ describe("on a phone", () => {
     expect(within(view).getByText("new line")).toBeInTheDocument();
     await userEvent.click(within(view).getByRole("button", { name: "Back to the match" }));
     expect(screen.getByRole("button", { name: "Lobby chat" })).toBeInTheDocument();
+  });
+});
+
+describe("system lines", () => {
+  it("shows what happened between the messages, and doesn't count it as unread", async () => {
+    asPhone();
+    const { server, match } = openRoom("player_draft", "player");
+    await roomReady();
+    const chat = match.chat;
+    if (!chat) throw new Error("fixture has a chat");
+    server.snap(
+      `match:${match.id}` as never,
+      {
+        ...match,
+        chat: { ...chat, messages: [...chat.messages, { kind: "system", id: "d99", body: "P1 picked P7.", at: "2026-01-05T19:00:10.000Z" }] },
+      } as never,
+    );
+    const button = await screen.findByRole("button", { name: "Lobby chat" });
+    await userEvent.click(button);
+    const view = screen.getByRole("dialog", { name: "Lobby chat" });
+    expect(within(view).getByText("P1 picked P7.")).toBeInTheDocument();
   });
 });

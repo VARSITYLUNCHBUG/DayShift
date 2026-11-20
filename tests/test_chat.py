@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 import pytest
@@ -52,9 +53,19 @@ def _seen(match: Match, viewer: Player | None) -> schema.MatchSnap:
     return snapshots.project_match(body, viewer.pk if viewer else None)
 
 
-def _bodies(snap: schema.MatchSnap) -> list[str]:
+def _said(snap: schema.MatchSnap) -> list[schema.ChatLine]:
+    """The players' messages, without the system lines between them."""
     assert snap.chat is not None
-    return [line.body for line in snap.chat.messages]
+    return [line for line in snap.chat.messages if isinstance(line, schema.ChatLine)]
+
+
+def _bodies(snap: schema.MatchSnap) -> list[str]:
+    return [line.body for line in _said(snap)]
+
+
+def _system(snap: schema.MatchSnap) -> list[str]:
+    assert snap.chat is not None
+    return [line.body for line in snap.chat.messages if isinstance(line, schema.SystemLine)]
 
 
 # --- Which chat, when -------------------------------------------------------------------------
@@ -122,7 +133,7 @@ def test_the_lobby_chat_reaches_the_whole_roster_and_nobody_else(popped: Match) 
         seen = _seen(match, viewer)
         assert seen.chat is not None and seen.chat.scope == "lobby" and seen.chat.open
         assert _bodies(seen) == ["gl hf", "pick me\nplease"]
-        first, second = seen.chat.messages
+        first, second = _said(seen)
         assert (first.player_id, first.name, first.team) == (
             str(captain.pk),
             captain.display_name,
@@ -282,4 +293,60 @@ def test_a_chat_shows_its_last_hundred_lines_oldest_first(popped: Match) -> None
     )
     seen = _seen(match, player)
     assert _bodies(seen) == [f"line {number}" for number in range(5, 105)]
-    assert seen.chat is not None and seen.chat.messages[0].at.tzinfo is not None
+    assert _said(seen)[0].at.tzinfo is not None
+
+
+# --- System lines -----------------------------------------------------------------------------
+
+
+def test_the_lobby_chat_says_who_captains_and_who_was_picked(popped: Match) -> None:
+    match = vote_captains(ready_all(popped))
+    captains = {team: _player(match, team, captain=True).display_name for team in "AB"}
+    match = run_player_draft(match)
+    match.status = Status.PLAYER_DRAFT  # Read the lobby chat as it stood in the draft.
+    lines = [line.body for line in chat.system_lines(match.pk, ChatScope.LOBBY)]
+    assert lines[0] == (
+        f"{captains['A']} and {captains['B']} are the captains. The player draft is on."
+    )
+    picks = lines[1:]
+    assert len(picks) == match.draft_actions.filter(action="player_pick").count() > 0
+    assert all(" picked " in line or line.startswith("Time ran out") for line in picks)
+    # The team chats get none of it.
+    assert all(
+        "captains" not in line.body and "player draft" not in line.body
+        for line in chat.system_lines(match.pk, ChatScope.TEAM_A)
+    )
+
+
+def test_the_team_chats_get_the_hero_draft_and_the_game(popped: Match) -> None:
+    match = to_in_progress(popped)
+    seen = _seen(match, _player(match, "A"))
+    lines = _system(seen)
+    assert lines[0] == "The hero draft is on." and lines[-1] == "The game is on. Good luck."
+    heroes = match.draft_actions.exclude(action="player_pick").count()
+    assert sum(" banned " in line or " picked " in line for line in lines) == heroes
+    assert _system(_seen(match, _player(match, "B"))) == lines  # The board is public anyway.
+    assert not any(re.search(r" picked P\d+\.$", line) for line in lines)  # No player picks.
+    assert _seen(match, make_player(50)).chat is None  # Outsiders still see no chat.
+
+
+def test_a_sub_is_announced_in_the_chat_of_the_phase_it_came_in(popped: Match) -> None:
+    match = to_in_progress(popped)
+    leaving = _player(match, "A")
+    request = subs.request_sub_out(match.pk, leaving, leaving.pk)
+    newcomer = make_player(40)
+    offer = subs.invite_sub(request.pk, leaving, newcomer.discord_user_id, "P40")
+    subs.answer_offer(offer.pk, newcomer, accept=True)
+    line = f"P40 came in for {leaving.display_name}."
+    assert line in _system(_seen(match, newcomer))
+    assert line not in [x.body for x in chat.system_lines(match.pk, ChatScope.LOBBY)]
+
+
+def test_system_lines_sit_between_the_messages_in_time_order(popped: Match) -> None:
+    match = to_champion_draft(popped)
+    chat.send(match.pk, _player(match, "A"), "ban their best")
+    seen = _seen(match, _player(match, "A"))
+    assert seen.chat is not None
+    times = [line.at for line in seen.chat.messages]
+    assert times == sorted(times)
+    assert {line.kind for line in seen.chat.messages} == {"message", "system"}

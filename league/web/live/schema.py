@@ -444,11 +444,23 @@ class Wish(_Wire):
 
 
 class ChatLine(_Wire):
+    """A player's message."""
+
+    kind: Literal["message"]
     id: Id
     player_id: Id
     name: str
     team: Team | None  # The sender's team, for colouring the lobby chat.
     body: str  # Plain text: render it as text, never as HTML.
+    at: UtcTime
+
+
+class SystemLine(_Wire):
+    """Something that happened, shown between the messages, such as "Rook picked Mothball"."""
+
+    kind: Literal["system"]
+    id: str  # Unique within the chat, and never a message's.
+    body: str  # Plain text.
     at: UtcTime
 
 
@@ -458,7 +470,8 @@ class ChatView(_Wire):
     scope: ChatScope
     open: bool  # False: read-only, and `closed_reason` says why.
     closed_reason: str | None
-    messages: list[ChatLine]  # Oldest first, the last 100.
+    # Oldest first, the last 100 of each: messages and system lines, in time order.
+    messages: list[Annotated[ChatLine | SystemLine, Field(discriminator="kind")]]
 
 
 class Viewer(_Wire):
