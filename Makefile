@@ -19,6 +19,8 @@ WAIT := --wait --wait-timeout 300
 ARGS ?=
 # Real-Discord dev stack: make dev REAL_DISCORD=1 (uses .env, no simulator, no seed).
 REAL_DISCORD ?=
+# The Node image the web UI and control panel checks run on: the Dockerfiles' build stages'.
+NODE_IMAGE := node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
 # The client inventory for the deploy targets: make site CLIENT=acme.
 CLIENT ?= example
 ANSIBLE := cd deploy/ansible && .venv/bin/ansible-playbook -i inventories/$(CLIENT)
@@ -58,6 +60,7 @@ else
 	$(DEV_ENV) $(DEV) up -d $(WAIT) --remove-orphans db migrate web bot edge
 endif
 	@echo
+	@echo "  Web UI          http://localhost:$${DEV_EDGE_PORT:-18080}/   (dev login: any player)"
 	@echo "  Admin           http://localhost:$${DEV_EDGE_PORT:-18080}/admin/   (make superuser)"
 	@echo "  Control panel   http://localhost:$${DEV_PANEL_PORT:-18091}"
 	@echo "  Dev control API http://localhost:$${DEV_WEB_PORT:-18000}/_control/api/"
@@ -102,15 +105,32 @@ e2e: ## The browser suite against the whole stack and the simulator
 		     echo "Traces and screenshots: test-results/e2e/"; $(TEST) --profile '*' down -v; exit 1; }
 	$(TEST) --profile '*' down -v --remove-orphans
 
-ci: check test ## What CI runs: the checks, then the unit suite
+ci: check test web-test ## What CI runs: the checks, the unit suite and the web UI's checks
 
-.PHONY: sim-test panel-test
+.PHONY: sim-test panel-test web-test web-e2e web-e2e-smoke
 sim-test: ## The Discord simulator's own suite and types
 	cd services/discord-sim && uv run --frozen pytest -q && uv run --frozen mypy
 
 panel-test: ## The control panel's types, lint, tests and build, in a Node container
-	docker run --rm -v "$(CURDIR)/services/control-panel:/src:ro" -w /work node:26.13.0-trixie-slim \
+	docker run --rm -v "$(CURDIR)/services/control-panel:/src:ro" -w /work $(NODE_IMAGE) \
 		sh -c "cp -r /src/. . && npm ci --no-audit --no-fund && npm run typecheck && npm run lint && npm test && npm run build"
+
+# Copied in without this machine's node_modules (perhaps another OS's) or build output.
+web-test: ## The web UI's types, lint, unit tests and build, in a Node container (CI's Web UI job)
+	docker run --rm -v "$(CURDIR)/services/web:/src:ro" -w /work $(NODE_IMAGE) \
+		sh -c "tar -C /src --exclude=./node_modules --exclude=./dist --exclude=./test-results \
+			--exclude=./playwright-report -cf - . | tar -xf - \
+			&& npm ci --no-audit --no-fund && npm run check:gen && npm run typecheck && npm run lint \
+			&& npm test && npm run build"
+
+# Local only, like the git hooks that run them (services/web/e2e/README.md): a throwaway Postgres
+# in Docker, then uvicorn and Chromium on this machine. More options in ARGS, e.g.
+# make web-e2e ARGS=--headed, or Playwright's own: make web-e2e ARGS="-- -g swap".
+web-e2e: ## The web UI's full Playwright suite (the pre-push hook)
+	bash scripts/web-e2e.sh --full $(ARGS)
+
+web-e2e-smoke: ## The web UI's Playwright smoke set (the pre-commit hook)
+	bash scripts/web-e2e.sh --smoke $(ARGS)
 
 .PHONY: compose-check
 compose-check: ## Check every way the compose files combine (a pre-commit hook)

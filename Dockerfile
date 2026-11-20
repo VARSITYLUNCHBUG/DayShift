@@ -4,10 +4,22 @@
 #
 # Targets: `runtime` (the default, last, and what is published) has only what production runs.
 # `dev` adds devtools/ and fixtures/: the dev control API and the dev seed, for compose.dev.yaml
-# and compose.test.yaml. `test` is the unit suite's: the same locked dependencies plus the dev
+# and compose.test.yaml. `web` builds the player web UI, which both copy in. `test` is the unit suite's: the same locked dependencies plus the dev
 # group, then the code and tests. The layers are ordered so a code change rebuilds only the last
 # one: dependencies first, from pyproject.toml and uv.lock alone.
 # Bases are pinned by digest as well as tag; Dependabot moves both.
+
+# The player web UI (services/web): Vite builds the single-page app into dist/, which the app
+# stages copy in for collectstatic. Only the build leaves this stage; Node never reaches the app.
+# The same Node image as services/control-panel's build.
+FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS web
+WORKDIR /web
+COPY services/web/package.json services/web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund
+COPY services/web/ ./
+RUN npm run build
+
 
 # Build stage: uv resolves the locked dependencies into /opt/venv.
 FROM python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS build
@@ -70,16 +82,21 @@ COPY config/ config/
 COPY league/ league/
 COPY presets/ presets/
 COPY scoreocr/ scoreocr/
+# The web UI's build, where settings.WEB_DIST looks: Django serves its index.html for every page,
+# and collectstatic gathers the rest under /static/web/.
+COPY --from=web /web/dist services/web/dist
 # Static files and bytecode are built here, because the running containers can't write. web
-# serves the static files (WhiteNoise).
+# serves the static files (WhiteNoise): collectstatic hashes and compresses each one, the web
+# UI's included.
 RUN DEBUG=true python manage.py collectstatic --noinput \
     && python -m compileall -q -j 0 bot config league scoreocr manage.py
 
 USER app
 
 EXPOSE 8000
-# One worker is plenty for the admin and the dashboard. Lifespan is off because Django's ASGI
-# handler doesn't speak it. Proxy headers are trusted only from FORWARDED_ALLOW_IPS (uvicorn's
+# One worker: the web UI's websocket hub lives in this process (no channel layer), and one is
+# plenty for the admin, the dashboard and the players. /ws/ needs no flags of its own. Lifespan
+# is off because Django's ASGI handler doesn't speak it. Proxy headers are trusted only from FORWARDED_ALLOW_IPS (uvicorn's
 # default: 127.0.0.1); compose sets it for the edge.
 CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--lifespan", "off", "--timeout-graceful-shutdown", "20"]
 

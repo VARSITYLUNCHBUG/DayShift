@@ -1,8 +1,9 @@
 # The merge gate, kept small: the same checks a dev machine runs before each commit (make check),
-# the unit suite (make test's suite, on the runner), and on a push to main or a version tag the app
-# image, built once, scanned and published. Everything else runs on a dev machine: the browser
-# suite with `make e2e` (or e2e.yml by hand), the simulator's and the panel's own suites with
-# their own tools. `CI OK` is the one check branch protection requires.
+# the unit suite (make test's suite, on the runner), the web UI's own checks and build (make
+# web-test), and on a push to main or a version tag the app image, built once, scanned and
+# published. Everything else runs on a dev machine: the browser suites with `make e2e` (or
+# e2e.yml by hand) and `make web-e2e`, the simulator's and the panel's own suites with their own
+# tools. `CI OK` is the one check branch protection requires.
 name: CI
 
 on:
@@ -24,6 +25,8 @@ permissions:
 env:
   UV_VERSION: "0.13.7"
   PYTHON_VERSION: "3.13"
+  # The web UI's build image runs the same major (the Dockerfile's web stage).
+  NODE_VERSION: "26"
   IMAGE: ghcr.io/varsitylunchbug/dayshift
 
 jobs:
@@ -46,6 +49,10 @@ jobs:
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
       - run: uv sync --frozen
       - run: uv run --frozen pre-commit run --all-files --show-diff-on-failure
+        env:
+          # The web UI's browser smoke run is local only, and its checks (web-check) need its
+          # node_modules: the Web UI job below runs them.
+          SKIP: web-e2e-smoke,web-check
 
   # Named for Scorecard's CI-Tests check, which looks for "test" in a check's name.
   tests:
@@ -82,11 +89,38 @@ jobs:
         env:
           HYPOTHESIS_PROFILE: ci
 
+  # The player web UI (services/web): types, lint, unit tests and the production build. Its
+  # Playwright suites run on a dev machine only (make web-e2e). Named for Scorecard's CI-Tests
+  # check too.
+  web:
+    name: Web UI tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      # The generated protocol types match the schema Django exported.
+      - run: npm run check:gen
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
   # The one required status check.
   ok:
     name: CI OK
     if: always()
-    needs: [checks, tests]
+    needs: [checks, tests, web]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

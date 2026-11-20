@@ -16,6 +16,17 @@ tests/e2e/
 !services/control-panel/src/api/control.ts
 !services/control-panel/src/lib/match.ts
 !services/discord-sim/src/
+# The player web UI's sources, for the Dockerfile's web stage, which installs and builds its own:
+# never a local install, build or test output.
+!services/web/
+services/web/node_modules/
+services/web/dist/
+services/web/e2e/
+services/web/test-results/
+services/web/playwright-report/
+services/web/blob-report/
+services/web/playwright/.cache/
+services/web/*.tsbuildinfo
 !manage.py
 !pyproject.toml
 !uv.lock

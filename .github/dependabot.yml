@@ -59,7 +59,20 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
 
-  # Base images in every Dockerfile.
+  # The player web UI. Its toolchain pins match the control panel's: move them together.
+  - package-ecosystem: npm
+    directory: "/services/web"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      web:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Base images in every Dockerfile (the root one's Node stage builds the web UI).
   - package-ecosystem: docker
     directories:
       - "/"
