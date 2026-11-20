@@ -49,8 +49,21 @@ healing (healing counts barriers given, as the in-game scoreboard does), and the
 It posts once per Deadlock match ID, so a corrected ID gets a reply of its own. A match none of the
 linked players were in is taken for a wrong ID and gets none.
 
-Without `DEADLOCK_API_KEY` deadlock-api rate-limits hard. A 429 waits at least as long as its
-`Retry-After` asks, and never less than 10 minutes, before the next try.
+Without `DEADLOCK_API_KEY` deadlock-api rate-limits hard: a match it has to fetch from Steam is
+3 requests an hour per IP, and custom lobbies 10 an hour. So the bot keeps its requests down:
+
+- **One lookup for every check.** Each check first asks deadlock-api's bulk endpoint
+  (`/v1/matches/metadata`) for every match whose check is still queued, in any server. That
+  endpoint reads deadlock-api's own store, never Steam, and has a much larger budget. A match it
+  answers is recorded at once, and its own queued check is dropped.
+- **Steam only when needed.** A match the bulk lookup doesn't have is fetched on its own
+  (`/v1/matches/{id}/metadata`), which may go to Steam and so counts against the 3 an hour.
+- **A 429 is waited out.** deadlock-api says when to come back (`next_request_in`, or
+  `Retry-After`). Until then the bot sends no more of that kind of request, with a minute's wait
+  when a 429 doesn't say. A check that comes up meanwhile waits too, without using one of its
+  tries; the one that got the 429 is retried no sooner than it asked, and never under 10 minutes.
+  Lobbies and the started lobby's match ID have quotas of their own and keep working. The wait
+  is the bot process's, so a restart forgets it and may spend one request finding out again.
 
 ### Lobbies
 
