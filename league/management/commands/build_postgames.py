@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import gzip
+import json
+from pathlib import Path
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
@@ -26,9 +29,30 @@ class Command(BaseCommand):
         parser.add_argument(
             "--match", type=int, action="append", dest="matches", help="A match ID; repeatable."
         )
+        parser.add_argument(
+            "--metadata-file",
+            type=Path,
+            help=(
+                "Build from this deadlock-api metadata file (JSON, or .json.gz) instead of "
+                "fetching it, for one --match. For local testing and replays."
+            ),
+        )
+
+    def _metadata(self, path: Path) -> dict[str, Any]:
+        raw = path.read_bytes()
+        if path.suffix == ".gz":
+            raw = gzip.decompress(raw)
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise CommandError(f"{path} isn't a deadlock-api metadata object.")
+        return data
 
     def handle(self, *args: Any, **options: Any) -> None:
         ids: list[int] | None = options.get("matches")
+        metadata_file: Path | None = options.get("metadata_file")
+        if metadata_file is not None and (not ids or len(ids) != 1):
+            raise CommandError("--metadata-file builds one match: give exactly one --match.")
+        metadata = self._metadata(metadata_file) if metadata_file is not None else None
         matches = Match.objects.exclude(deadlock_match_id=None).select_related("community")
         if ids:
             matches = matches.filter(pk__in=ids)
@@ -44,7 +68,7 @@ class Command(BaseCommand):
         built = absent = failed = 0
         for match in matches.order_by("pk"):
             try:
-                row = postgame.build(match)
+                row = postgame.build(match, metadata)
             except deadlock_api.ApiError as exc:
                 failed += 1
                 self.stdout.write(f"Match {match.pk}: {exc}")

@@ -11,7 +11,12 @@ export async function expectNoA11yViolations(
   page: Page,
   options: { label?: string; include?: string; exclude?: string[] } = {},
 ): Promise<void> {
-  let builder = new AxeBuilder({ page }).withTags(TAGS);
+  let builder = new AxeBuilder({ page })
+    .withTags(TAGS)
+    // React Aria's off-screen toast announcer: after a toast closes it leaves a role=img that
+    // points at the closed toast's title (a library quirk, not page content). Every rule still
+    // runs on everything else.
+    .exclude("[data-live-announcer]");
   if (options.include) builder = builder.include(options.include);
   for (const selector of options.exclude ?? []) builder = builder.exclude(selector);
   const results = await builder.analyze();
@@ -26,7 +31,9 @@ export async function expectNoA11yViolations(
       rule: violation.id,
       impact: violation.impact,
       help: violation.help,
-      targets: violation.nodes.slice(0, 5).map((node) => node.target.join(" ")),
+      count: violation.nodes.length,
+      first: violation.nodes[0]?.html.slice(0, 160),
     }));
-  expect(blocking, `axe: serious or critical violations on ${label}`).toEqual([]);
+  // Soft: the test goes on, so one run lists every page's violations, and still fails at the end.
+  expect.soft(blocking, `axe: serious or critical violations on ${label}`).toEqual([]);
 }

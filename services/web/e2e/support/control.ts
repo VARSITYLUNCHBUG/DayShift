@@ -186,6 +186,10 @@ export class Control {
     return found;
   }
 
+  updatePlayer(id: number, changes: { rating?: number; name?: string }): Promise<ControlPlayer> {
+    return this.call("PATCH", `players/${id}`, changes);
+  }
+
   setPicks(id: number, picks: { prefer?: string[]; ban?: string[] }): Promise<ControlPlayer> {
     return this.call("PUT", `players/${id}/picks`, picks);
   }

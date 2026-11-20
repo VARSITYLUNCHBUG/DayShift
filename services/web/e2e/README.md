@@ -73,6 +73,30 @@ Everything goes to `services/web/test-results/` (gitignored):
 | `desktop` | everything not tagged `@phone` | desktop Chromium, 1440×900 |
 | `phone` | tests tagged `@phone` | Pixel-like, 390×844, touch |
 
+## What's covered
+
+| File | Covers |
+|---|---|
+| `smoke.e2e.ts` (`@smoke`) | The built app renders with no page errors. Sign-in and the dev login. Join and leave the queue, live. The 404. axe on sign-in and Play. |
+| `match-captain.e2e.ts` | A whole ranked match as captain: the queue, Ready Up, the check-in, the player draft, the coinflip and a wish, the hero draft (Random, ban, lock in), the lobby code fallback, the report with a match ID, the confirm, the result. axe on each step. |
+| `match-live.e2e.ts` | The other captain's pick shows without a reload. A dropped socket shows the banner and catches up. |
+| `match-teams.e2e.ts` | Wishes and the team chat reach teammates and not the other team. The lobby chat reaches everyone. Each player has their own browser context. |
+| `match-changes.e2e.ts` | A swap both ways. A sub through the queue. An early leave reported and agreed (void). |
+| `pages.e2e.ts` | The postgame tabs (Summary, Timeline, Replay scrubbing, Advanced). Privacy (Me, the ladder, the API). The share card (toggles, PNG download). axe on the main pages. |
+| `phone.e2e.ts` (`@phone`) | The sticky room action. The full-screen chat. No sideways scroll at 390 and 320 px. |
+
+Captains: new players can't be voted for (they need five matches), so `support/match.ts` gives the
+browser player and one rival the top two ratings, and the captains are appointed by rating.
+
+The postgame test reports a match with the Deadlock match ID of
+`tests/fixtures/deadlock/match_140328807_metadata.json.gz` and builds its postgame from that file
+with `manage.py build_postgames --match <id> --metadata-file <file>`, so nothing goes to
+deadlock-api. That runs in the stack's environment, which `web-e2e.sh` exports. Against
+`--serve`, export what it prints first.
+
+Dropping the connection: Chromium's offline mode keeps an open websocket, so
+`support/network.ts` routes `/ws/` through Playwright and closes it on demand.
+
 ## Writing tests
 
 - Import `test` and `expect` from `./support/fixtures`, not from `@playwright/test`. Each test then:

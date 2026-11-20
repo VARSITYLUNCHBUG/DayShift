@@ -3,9 +3,10 @@
 import { sessionPlayer, signInAs } from "./support/auth";
 import { expectNoA11yViolations } from "./support/axe";
 import { expect, test } from "./support/fixtures";
+import { JOIN_QUEUE, LEAVE_QUEUE } from "./support/names";
 
-const JOIN = /^join( the)? queue$/i;
-const LEAVE = /^leave( the)? queue$/i;
+const JOIN = JOIN_QUEUE;
+const LEAVE = LEAVE_QUEUE;
 
 test.describe("smoke", { tag: "@smoke" }, () => {
   test("the built app renders the sign-in screen with no errors in the page", async ({ page, pageErrors }) => {
@@ -45,21 +46,25 @@ test.describe("smoke", { tag: "@smoke" }, () => {
     await page.getByRole("button", { name: JOIN }).click();
     await expect(page.getByRole("button", { name: LEAVE })).toBeVisible();
     await expect.poll(async () => (await control.player(me.id)).queued).toBe(true);
+    await expect(page.getByRole("img", { name: "1 of 12 in the queue" })).toBeVisible();
 
     // Someone else joins through the services: the page hears it over the socket, no reload.
     const other = await control.createPlayer("Queuemate");
     await control.joinQueue([other.id]);
-    await expect(page.getByText(other.name, { exact: true })).toBeVisible();
+    // Only you see your place, so the page shows the count: it goes from 1 to 2 of 12.
+    await expect(page.getByRole("img", { name: "2 of 12 in the queue" })).toBeVisible();
 
+    // Leaving holds your place for a few minutes, and Play offers it back.
     await page.getByRole("button", { name: LEAVE }).click();
-    await expect(page.getByRole("button", { name: JOIN })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your place is held" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Rejoin/ })).toBeVisible();
     await expect.poll(async () => (await control.player(me.id)).queued).toBe(false);
   });
 
   test("an unknown page says so and leads back to Play", async ({ page, me }) => {
     expect((await sessionPlayer(page))?.id).toBe(String(me.id));
     await page.goto("/no-such-page");
-    await expect(page.getByRole("heading", { name: /nothing here|not found/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /can.t find that page|nothing here|not found/i })).toBeVisible();
     await page.getByRole("link", { name: /back to play/i }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("button", { name: JOIN })).toBeVisible();

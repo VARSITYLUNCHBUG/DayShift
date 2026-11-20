@@ -165,6 +165,8 @@ cd "$web"
 if [[ "$mode" == serve ]]; then
   say "serving on $base_url until Ctrl-C. Run tests against it with:"
   say "  cd services/web && BASE_URL=$base_url npx playwright test --project=desktop"
+  say "Tests that run manage.py (the postgame) also need this stack's environment:"
+  say "  DEBUG=true DEV_CONTROL=true DJANGO_DOTENV=off DJANGO_SECRET_KEY=e2e-only DISCORD_GUILD_ID=$DISCORD_GUILD_ID DATABASE_URL=$DATABASE_URL"
   wait "$server_pid"
   exit 0
 fi
