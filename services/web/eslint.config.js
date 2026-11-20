@@ -49,7 +49,7 @@ export default defineConfig(
     languageOptions: {
       globals: globals.browser,
       parserOptions: {
-        projectService: { allowDefaultProject: ["vite.config.ts"] },
+        projectService: { allowDefaultProject: ["vite.config.ts", "playwright.config.ts"] },
         tsconfigRootDir: import.meta.dirname,
       },
     },

@@ -15,7 +15,11 @@
     "lint": "eslint . --max-warnings 0 && stylelint \"src/**/*.css\"",
     "test": "vitest run",
     "gen": "node scripts/gen-protocol.mjs",
-    "check:gen": "node scripts/gen-protocol.mjs --check"
+    "check:gen": "node scripts/gen-protocol.mjs --check",
+    "check": "npm run typecheck && npm run typecheck:e2e && npm run lint && npm test",
+    "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
+    "e2e": "bash ../../scripts/web-e2e.sh --full",
+    "e2e:smoke": "bash ../../scripts/web-e2e.sh --smoke"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "5.3.0",
@@ -34,7 +38,9 @@
     "react-router": "7.18.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.65.1",
     "@tailwindcss/vite": "4.3.5",
     "@testing-library/dom": "10.4.2",
     "@testing-library/jest-dom": "7.0.1",

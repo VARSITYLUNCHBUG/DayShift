@@ -5,6 +5,11 @@
 # Hooks are pinned by commit, like the workflows' actions; `uv run pre-commit autoupdate --freeze`
 # moves them. Keep ruff's rev on the version uv.lock pins. The Docker hooks need Docker running.
 minimum_pre_commit_version: "4.0.0"
+# `make setup` (pre-commit install) installs both git hooks. Every hook runs at commit unless it
+# says otherwise; only the web UI's full browser suite (web-e2e) runs at push. Three of
+# pre-commit-hooks' hooks name their own stages, push included, so they say pre-commit below.
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -15,7 +20,9 @@ repos:
         args: [--markdown-linebreak-ext=md]
         # The fonts' licences stay word for word as their authors ship them.
         exclude: ^bot/assets/fonts/.*-OFL\.txt$
+        stages: [pre-commit]
       - id: end-of-file-fixer
+        stages: [pre-commit]
       - id: mixed-line-ending
         args: [--fix=no]
       - id: check-json
@@ -23,6 +30,7 @@ repos:
       - id: check-merge-conflict
       - id: check-case-conflict
       - id: check-added-large-files
+        stages: [pre-commit]
       - id: detect-private-key
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -117,3 +125,32 @@ repos:
         entry: bash -c 'cd deploy/ansible && ansible-lint'
         files: ^deploy/ansible/
         pass_filenames: false
+
+      # The web UI's own checks: types (app and e2e), lint and Vitest. CI runs these in a job of
+      # its own (with the build), so its pre-commit step SKIPs this one.
+      - id: web-check
+        name: web UI typecheck, lint and unit tests
+        language: system
+        entry: npm --prefix services/web run check
+        files: ^services/web/
+        pass_filenames: false
+        stages: [pre-commit]
+
+      # The web UI's Playwright suite against a throwaway stack (scripts/web-e2e.sh, which needs
+      # Docker, and services/web/e2e/README.md). Local only: the script exits at once when CI is
+      # set, and CI SKIPs the smoke hook too. The @smoke tests run at commit, everything at push.
+      - id: web-e2e-smoke
+        name: web UI end-to-end, smoke tests
+        language: system
+        entry: bash scripts/web-e2e.sh --smoke
+        files: ^(services/web/|league/web/|league/services/|config/)
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: web-e2e
+        name: web UI end-to-end, full suite
+        language: system
+        entry: bash scripts/web-e2e.sh --full
+        files: ^(services/web/|league/web/|league/services/|config/)
+        pass_filenames: false
+        stages: [pre-push]
