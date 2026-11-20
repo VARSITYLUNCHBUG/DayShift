@@ -144,6 +144,28 @@ def test_pending_requests_can_use_returned_quota_in_a_long_window() -> None:
     asyncio.run(scenario())
 
 
+def test_a_waiter_gets_quota_that_frees_up_while_others_are_in_flight() -> None:
+    """Quota returns with requests still out (tokens <= 0 but remaining > 0): the waiter takes
+    it at once, rather than spinning on a timeout after the window expires."""
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        bucket = QuotaAwareRatelimit(60)
+        bucket.limit = 5
+        bucket.remaining = 0
+        bucket.outgoing = 4
+        bucket.expires = loop.time() + 0.05
+        task = asyncio.create_task(bucket.acquire())
+        await asyncio.sleep(0)
+        assert len(bucket._pending_requests) == 1
+        bucket.remaining = 1  # A response came back: min(header, limit - outgoing).
+        await bucket.__aexit__(None, None, None)  # outgoing 3, so tokens = 1 - 3.
+        await asyncio.wait_for(task, 0.5)
+        assert bucket.remaining == 0 and bucket.outgoing == 4
+
+    asyncio.run(scenario())
+
+
 def test_an_exhausted_short_window_waits_before_resetting() -> None:
     async def scenario() -> None:
         bucket = QuotaAwareRatelimit(60)

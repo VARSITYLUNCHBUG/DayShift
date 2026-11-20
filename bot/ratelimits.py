@@ -61,7 +61,10 @@ class QuotaAwareRatelimit(Ratelimit):
 
     async def _refresh(self) -> None:
         if self.remaining > 0:
-            return  # A long reset window is not a reason to discard usable quota.
+            # A long reset window is not a reason to discard usable quota, but the quota is
+            # free now: hand it to whoever is already waiting, or they'd wait on a timeout.
+            self._wake(self.remaining)
+            return
         delay = max(0.0, self.expires - self._loop.time()) if self.expires else self.reset_after
         if self._max_ratelimit_timeout is not None and delay > self._max_ratelimit_timeout:
             self._wake(len(self._pending_requests), exception=RateLimited(delay))
