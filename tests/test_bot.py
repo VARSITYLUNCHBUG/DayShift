@@ -1049,7 +1049,7 @@ def test_full_match_through_effects(wired: Community) -> None:
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("closed_dms", [False, True])
-def test_team_voice_does_not_notify_players_outside_the_waiting_room(
+def test_team_voice_pings_players_outside_the_waiting_room_once(
     wired: Community, closed_dms: bool
 ) -> None:
     players = [make_player(n) for n in range(1, 13)]
@@ -1069,9 +1069,10 @@ def test_team_voice_does_not_notify_players_outside_the_waiting_room(
     gateway.send_dm.assert_not_awaited()
     gateway.create_invite.assert_not_awaited()
     assert not OutboxEffect.objects.filter(match=match, kind="team_move_player").exists()
-    assert not any(
-        "Join your team's voice channel" in text for _channel, text, _users in gateway.texts
-    )
+    # Nobody was in the Waiting Room: one ping names them all, with no DMs or invites.
+    pings = [row for row in gateway.texts if "Join your team's voice channel" in row[1]]
+    assert len(pings) == 1
+    assert set(pings[0][2]) == set(discord_ids(players))
 
 
 def _http_error(status: int, code: int) -> discord.HTTPException:
@@ -1323,7 +1324,9 @@ def test_board_stays_last_and_only_current_pings_survive_a_whole_match(wired: Co
     assert_board_last(gateway, match)
     assert live_notice_texts(gateway, match) == [
         "teams are set and you won the coinflip! Choose your side on the board. The Hidden King "
-        "bans and picks first."
+        "bans and picks first.",
+        # Nobody is in the Waiting Room here, so team voice pings them all, once.
+        "teams are set. Join your team's voice channel.",
     ]
 
     match = settle_coinflip_for(match)

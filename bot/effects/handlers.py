@@ -799,11 +799,15 @@ async def create_team_voice(env: Env) -> None:
     moves = [(user_id, team) for user_id, team in assignments if user_id in in_lobby]
     if moves:
         await db(_enqueue_team_moves, env.match_id, moves)
+    # Anyone elsewhere hears once, in one channel ping, rather than a DM and invite each.
+    away = [user_id for user_id, _team in assignments if user_id not in in_lobby]
+    if away:
+        await _notice(env, "teams are set. Join your team's voice channel.", user_ids=away)
 
 
 @effect("team_move_player")
 async def team_move_player(env: Env) -> None:
-    """Move players still in the Waiting Room; team setup sends no per-player notice."""
+    """Move players still in the Waiting Room. Team setup pings anyone elsewhere, once."""
     if not await db(_voice_needed, env.match_id):
         raise Skip("The players have left this match.")
     user_id = int(env.effect.payload["discord_user_id"])
