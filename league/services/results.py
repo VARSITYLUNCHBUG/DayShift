@@ -14,7 +14,16 @@ from league.models.matches import Source
 from league.models.permissions import Area
 from league.models.results import Verdict
 from league.models.scoreboards import AwardSource
-from league.services import alerts, api_results, interim, leaderboards, ratings, runtime, standing
+from league.services import (
+    alerts,
+    api_results,
+    effects,
+    interim,
+    leaderboards,
+    ratings,
+    runtime,
+    standing,
+)
 from league.services import awards as award_service
 from league.services.boards import outcome_label
 from league.services.common import (
@@ -123,7 +132,7 @@ def _end_game(match: Match) -> None:
     finalising never runs the voice cleanup twice. Caller holds the match lock."""
     community = lock_community(match.community_id)
     match.participants.filter(is_active=True).update(is_active=False)
-    add_effect(community, "cleanup_voice", match=match, dedupe_key=f"cleanup_voice:{match.pk}")
+    effects.queue_voice_cleanup(match)
     render_queue(community)
     try_pop(community)
 

@@ -67,6 +67,7 @@ class Outbox:
 def outbox(monkeypatch: pytest.MonkeyPatch) -> Outbox:
     box = Outbox()
     monkeypatch.setattr(worker_module.effects, "due_by_match", box.due_by_match)
+    monkeypatch.setattr(worker_module.effects, "next_due_at", lambda _after: None)
     monkeypatch.setattr(worker_module.effects, "mark_started", box.mark_started)
     monkeypatch.setattr(worker_module.effects, "mark_done", box.mark_done)
     return box
@@ -161,6 +162,29 @@ def test_lane_keys() -> None:
     assert lane_key(None, "staff_alerts:7", "post_staff_alert", 1) == "staff_alerts:7"
     # Rows written before lanes existed have a blank lane: one per kind and server.
     assert lane_key(None, "", "render_queue", 3) == "render_queue:3"
+    assert lane_key(101, "", "create_team_voice", 1) == "voice:101"
+    assert lane_key(101, "", "team_move_player", 1) == "voice:101"
+    assert lane_key(101, "", "cleanup_voice", 1) == "voice:101"
+
+
+def test_slow_voice_setup_does_not_block_its_own_match_board(
+    outbox: Outbox, slow_and_fast: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(worker_module.HANDLERS, "create_team_voice", worker_module.HANDLERS["slow"])
+    monkeypatch.setitem(worker_module.HANDLERS, "render_board", worker_module.HANDLERS["fast"])
+    outbox.pending = [fake_effect(1, 101, "create_team_voice"), fake_effect(2, 101, "render_board")]
+
+    async def scenario() -> None:
+        slow_and_fast.release = asyncio.Event()
+        slow_and_fast.fast_ran = asyncio.Event()
+        worker = EffectWorker(gateway=None)  # type: ignore[arg-type]
+        assert await worker.dispatch() == 2
+        await asyncio.wait_for(slow_and_fast.fast_ran.wait(), 15)
+        assert not slow_and_fast.release.is_set()
+        slow_and_fast.release.set()
+        await worker.run_once()
+
+    asyncio.run(scenario())
 
 
 def test_a_busy_match_keeps_its_effects_in_order(

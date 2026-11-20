@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import discord
 import pytest
@@ -666,6 +667,7 @@ class FakeGateway:
     text_mentions: dict[int, list[int]] = field(default_factory=dict)
     open_voice: dict[int, bool] = field(default_factory=dict)
     names: dict[int, str] = field(default_factory=dict)  # Display names Discord has cached.
+    unpaced: list[tuple[str, int]] = field(default_factory=list)  # Voice calls skipping pacing.
 
     def _id(self) -> int:
         self.next_id += 1
@@ -715,7 +717,9 @@ class FakeGateway:
             for user_id in self.voice_member_ids(guild_id, channel_id)
         }
 
-    async def move_member(self, guild_id, user_id, channel_id) -> bool:
+    async def move_member(self, guild_id, user_id, channel_id, *, paced=True) -> bool:
+        if not paced:
+            self.unpaced.append(("move_member", user_id))
         current = [c for c, users in self.voice.items() if user_id in users]
         if not current:
             return False  # Discord's 40032.
@@ -817,7 +821,9 @@ class FakeGateway:
     async def revoke_member(self, channel_id, user_id) -> None:
         self.revoked.append((channel_id, user_id))
 
-    async def set_voice_status(self, channel_id, text) -> None:
+    async def set_voice_status(self, channel_id, text, *, paced=True) -> None:
+        if not paced:
+            self.unpaced.append(("set_voice_status", channel_id))
         self.statuses[channel_id] = text
 
     async def fetch_attachment(self, channel_id, message_id, attachment_id):
@@ -1042,17 +1048,31 @@ def test_full_match_through_effects(wired: Community) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_player_not_in_the_waiting_room_gets_team_invite(wired: Community) -> None:
+@pytest.mark.parametrize("closed_dms", [False, True])
+def test_team_voice_pings_players_outside_the_waiting_room_once(
+    wired: Community, closed_dms: bool
+) -> None:
     players = [make_player(n) for n in range(1, 13)]
     gateway = FakeGateway()
+    if closed_dms:
+        gateway.closed_dms = set(discord_ids(players))
     for player in players:
         queue.join(wired.pk, player)
     drain(gateway)
     gateway.dms.clear()
-    to_champion_draft(Match.objects.get())
+    gateway.send_dm = AsyncMock(side_effect=AssertionError("No team-ready DM"))
+    gateway.create_invite = AsyncMock(side_effect=AssertionError("No team-ready invite"))
+    match = to_champion_draft(Match.objects.get())
     drain(gateway)
-    assert len(gateway.dms) == 12
-    assert "Join team voice" in str(gateway.dms[0][1].to_components())
+    assert resource(match, ResourceKind.TEAM_A_VOICE)
+    assert resource(match, ResourceKind.TEAM_B_VOICE)
+    gateway.send_dm.assert_not_awaited()
+    gateway.create_invite.assert_not_awaited()
+    assert not OutboxEffect.objects.filter(match=match, kind="team_move_player").exists()
+    # Nobody was in the Waiting Room: one ping names them all, with no DMs or invites.
+    pings = [row for row in gateway.texts if "Join your team's voice channel" in row[1]]
+    assert len(pings) == 1
+    assert set(pings[0][2]) == set(discord_ids(players))
 
 
 def _http_error(status: int, code: int) -> discord.HTTPException:
@@ -1304,7 +1324,9 @@ def test_board_stays_last_and_only_current_pings_survive_a_whole_match(wired: Co
     assert_board_last(gateway, match)
     assert live_notice_texts(gateway, match) == [
         "teams are set and you won the coinflip! Choose your side on the board. The Hidden King "
-        "bans and picks first."
+        "bans and picks first.",
+        # Nobody is in the Waiting Room here, so team voice pings them all, once.
+        "teams are set. Join your team's voice channel.",
     ]
 
     match = settle_coinflip_for(match)
@@ -2126,14 +2148,14 @@ def test_a_finished_match_channel_closes_after_three_minutes(wired: Community) -
 
 
 @pytest.mark.django_db(transaction=True)
-def test_the_teams_dm_is_just_its_heading(wired: Community) -> None:
+def test_team_voice_keeps_ready_dms_but_sends_no_team_dms(wired: Community) -> None:
     gateway = FakeGateway()
     match = run_player_draft(vote_captains(ready_all(popped_match(wired, gateway))))
     drain(gateway)
     teams = [
         str(v.to_components()) for _u, v in gateway.dms if "Teams picked" in str(v.to_components())
     ]
-    assert teams and all("Match #" not in dm for dm in teams)
+    assert not teams
     ready = [
         str(v.to_components()) for _u, v in gateway.dms if "Ready Up" in str(v.to_components())
     ]

@@ -37,16 +37,36 @@ BOARD_MOVE_IDLE_SECONDS = 3600
 
 
 Lane = int | str
+VOICE_SETUP_KINDS = frozenset({"create_team_voice", "team_move_player", "swap_team_voice"})
+VOICE_KINDS = VOICE_SETUP_KINDS | {"restart_voice", "cleanup_voice"}
+
+
+def cancel_voice_setup(match_id: int) -> None:
+    """Cleanup must not sit behind a day-long setup retry or move players back afterwards."""
+    OutboxEffect.objects.filter(
+        match_id=match_id, kind__in=VOICE_SETUP_KINDS, status=EffectStatus.PENDING
+    ).update(status=EffectStatus.SKIPPED, done_at=now())
+
+
+def queue_voice_cleanup(match: Match) -> None:
+    """The match's voice is finished: drop its pending setup, then queue the one cleanup."""
+    cancel_voice_setup(match.pk)
+    add_effect(
+        match.community, "cleanup_voice", match=match, dedupe_key=f"cleanup_voice:{match.pk}"
+    )
 
 
 def lane_key(match_id: int | None, lane: str, kind: str, community_id: int) -> Lane:
     """Which effects must run in order with this one.
 
-    A match's effects share its lane, scrims included. Work outside a match runs in the lane it
+    A match's voice setup, moves and cleanup have a separate ordered lane; its other effects
+    share the main match lane, scrims included. Work outside a match runs in the lane it
     names (a server's staff alerts, say), or else one lane per kind and server, so a queue panel
     that keeps failing in one server never holds up another server or another kind of work.
     """
     if match_id is not None:
+        if kind in VOICE_KINDS:
+            return f"voice:{match_id}"
         return match_id
     return lane or f"{kind}:{community_id}"
 
@@ -83,6 +103,22 @@ def due_by_match(limit: int = 200) -> list[list[OutboxEffect]]:
             continue
         groups[key].append(effect)
     return list(groups.values())
+
+
+def next_due_at(after: datetime) -> datetime | None:
+    """The earliest pending effect due after `after`: a delayed render or a retry. The worker
+    sleeps until then instead of polling for it (the pending index covers this).
+
+    `after` is the moment taken before the worker's last look at what is due, not the time now:
+    an effect that fell due between that look and this query was seen by neither, and is
+    returned here, already due, so the worker looks again at once. One due by `after` was in
+    that look, or waits on a busy lane or a retry, which wake the worker themselves."""
+    return (
+        OutboxEffect.objects.filter(status=EffectStatus.PENDING, run_after__gt=after)
+        .order_by("run_after")
+        .values_list("run_after", flat=True)
+        .first()
+    )
 
 
 def mark_started(effect_id: int) -> bool:

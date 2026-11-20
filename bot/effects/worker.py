@@ -1,8 +1,8 @@
 """Runs outbox effects, in order per lane, with retry and backoff.
 
-Each match gets its own lane, so a slow Discord call in one match (deleting voice channels,
-uploading a screenshot, waiting out a rate limit) never holds up another match's board. Work
-outside a match is split the same way (see `effects.lane_key`).
+Each match gets a main lane and a voice lane, so a slow Discord call in one match (deleting
+voice channels, uploading a screenshot, waiting out a rate limit) never holds up another's board.
+Work outside a match is split the same way (see `effects.lane_key`).
 """
 
 from __future__ import annotations
@@ -10,22 +10,32 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import time
 from collections.abc import Callable
+from datetime import datetime
 
 import discord
 
 from bot.db import db
 from bot.effects.gateway import ChannelGone, EditCapped, Gateway
 from bot.effects.handlers import HANDLERS, Env, Skip
-from league import log_context
+from league import log_context, timings
 from league.models import OutboxEffect
 from league.models.outbox import EffectStatus
 from league.services import effects, lobby, scrims
+from league.services.common import now
 
 logger = logging.getLogger(__name__)
 
 # Discord will keep refusing these whatever we do, so retrying only delays the fallback.
 _PERMANENT_STATUS = {400, 401, 403, 404}
+
+
+def _due_and_next() -> tuple[list[list[OutboxEffect]], datetime | None]:
+    """What is due now and when the next delayed effect is, in one trip to the database thread.
+    The moment is taken before the look at what's due (see `effects.next_due_at`)."""
+    looked = now()
+    return effects.due_by_match(), effects.next_due_at(looked)
 
 
 class EffectWorker:
@@ -42,6 +52,8 @@ class EffectWorker:
         self.on_effect_done = on_effect_done
         # One running task per lane: a match ID, or a key for work outside any match.
         self._lanes: dict[effects.Lane, asyncio.Task[int]] = {}
+        # When the next delayed effect is due, as of the last dispatch. None: nothing delayed.
+        self.next_due_at: datetime | None = None
 
     @property
     def busy_matches(self) -> set[effects.Lane]:
@@ -54,7 +66,8 @@ class EffectWorker:
         finishes, which keeps that lane's effects in order.
         """
         started = 0
-        for group in await db(effects.due_by_match):
+        groups, self.next_due_at = await db(_due_and_next)
+        for group in groups:
             key = effects.lane_of(group[0])
             if key in self._lanes:
                 continue
@@ -116,9 +129,18 @@ class EffectWorker:
             return True
         if not await db(effects.mark_started, effect.pk):
             return True  # Finished or cancelled since it was fetched.
+        # How long it was due before it started: the worker's wake-up plus the lane ahead of it.
+        # Read defensively: a timing must never be what fails an effect.
+        if (due := getattr(effect, "run_after", None)) is not None:
+            timings.record("effect.late", max(0.0, (now() - due).total_seconds()))
         env = Env(self.gateway, effect, effect.community, effect.match)
+        started = time.perf_counter()
         try:
-            await handler(env)
+            try:
+                await handler(env)
+            finally:
+                # The handler alone, however it ends: its Discord calls and its own reads.
+                timings.record(f"effect.run:{effect.kind}", time.perf_counter() - started)
         except (Skip, ChannelGone) as exc:
             await db(effects.mark_done, effect.pk, EffectStatus.SKIPPED)
             logger.debug("Effect skipped", extra={"kind": effect.kind, "why": str(exc)})
@@ -132,6 +154,10 @@ class EffectWorker:
             )
             return True
         except discord.RateLimited as exc:
+            logger.warning(
+                "Discord effect deferred by rate limit",
+                extra={"kind": effect.kind, "retry_after_seconds": exc.retry_after},
+            )
             # A wait longer than the client's max_ratelimit_timeout. Sleeping it out here would
             # stall every later effect in this lane, so step aside and come back after it.
             return await self._retry(

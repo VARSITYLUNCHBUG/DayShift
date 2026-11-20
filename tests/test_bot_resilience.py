@@ -33,6 +33,8 @@ class FlakyDb:
         if self.left:
             self.left -= 1
             raise OperationalError(CACHED)
+        if fn is worker_module._due_and_next:
+            return [], None  # Nothing due, nothing delayed.
         return 0 if fn is deadlines.tick else []
 
 
@@ -71,6 +73,7 @@ def test_startup_recovery_waits_for_the_database_then_starts_the_loops(
             "watchdog",
             "watched-channels",
             "failed-requests",
+            "timings",
         }
     assert beat.exists()
     assert flaky.calls.count(deadlines.extend_past_due) == 4

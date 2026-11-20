@@ -133,8 +133,9 @@ def render_board(match: Match) -> None:
 
 
 # Joins and leaves come in bursts as a match pops or finishes, and Discord allows a channel about
-# five edits every five seconds. A short wait folds a burst into one edit of the queue panel.
-QUEUE_RENDER_DELAY_SECONDS = 1.5
+# five edits every five seconds. A one-second window folds a burst into one edit and keeps a
+# sustained rush at that limit, rather than leaning on 429s, which count toward Cloudflare's ban.
+QUEUE_RENDER_DELAY_SECONDS = 1.0
 
 
 def render_queue(community: Community) -> None:

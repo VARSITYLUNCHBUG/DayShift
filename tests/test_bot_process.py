@@ -91,7 +91,9 @@ def test_the_heartbeat_waits_for_every_loop(tmp_path: Path) -> None:
 # --- The loops --------------------------------------------------------------------------------
 
 
-async def _fake_db(fn: object, *args: object, **kwargs: object) -> list[object]:
+async def _fake_db(fn: object, *args: object, **kwargs: object) -> object:
+    if fn is worker_module._due_and_next:
+        return [], None  # Nothing due, nothing delayed.
     return []
 
 
@@ -123,6 +125,7 @@ def test_the_bot_runs_every_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         "watchdog",
         "watched-channels",
         "failed-requests",
+        "timings",
     }
     assert beat.exists()
 
