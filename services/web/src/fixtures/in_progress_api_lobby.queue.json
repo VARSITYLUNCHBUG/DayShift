@@ -1,0 +1,15 @@
+{
+  "size": 12,
+  "count": 1,
+  "players": [
+    {
+      "id": "13",
+      "name": "P13",
+      "avatar_url": null
+    }
+  ],
+  "mode_name": "3-ban draft",
+  "max_concurrent": 12,
+  "live_matches": 1,
+  "open": true
+}

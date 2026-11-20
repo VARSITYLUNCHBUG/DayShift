@@ -1,0 +1,851 @@
+{
+  "id": "1",
+  "status": "champion_draft",
+  "kind": "ranked",
+  "mode_name": "3-ban draft",
+  "rating_label": "Rating",
+  "deadline_at": "2026-01-05T19:00:40.000Z",
+  "closes_at": null,
+  "started_at": null,
+  "players": [
+    {
+      "id": "1",
+      "name": "P1",
+      "avatar_url": "/avatar/1/a1b2c3d4e5f60718293a4b5c6d7e8f90.png?size=64",
+      "rating": 0,
+      "team": "B",
+      "is_captain": true,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "10",
+      "name": "P10",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "A",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "11",
+      "name": "P11",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "A",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "12",
+      "name": "P12",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "B",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "2",
+      "name": "P2",
+      "avatar_url": "/avatar/2/0f1e2d3c4b5a6978.png?size=64",
+      "rating": 0,
+      "team": "A",
+      "is_captain": true,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "3",
+      "name": "P3",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "A",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "4",
+      "name": "P4",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "B",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "5",
+      "name": "P5",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "B",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "6",
+      "name": "P6",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "A",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "7",
+      "name": "P7",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "A",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "8",
+      "name": "P8",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "B",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    },
+    {
+      "id": "9",
+      "name": "P9",
+      "avatar_url": null,
+      "rating": 0,
+      "team": "B",
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": "",
+      "checked_in": false
+    }
+  ],
+  "captains": {
+    "A": "P2",
+    "B": "P1"
+  },
+  "team_names": {
+    "A": "P2's Team",
+    "B": "P1's Team"
+  },
+  "sides": {
+    "A": "hk",
+    "B": "am"
+  },
+  "draft": [
+    {
+      "action": "player_pick",
+      "team": "A",
+      "label": "P3",
+      "auto": false,
+      "random": false,
+      "player_id": "3",
+      "champion": null
+    },
+    {
+      "action": "player_pick",
+      "team": "B",
+      "label": "P4",
+      "auto": false,
+      "random": false,
+      "player_id": "4",
+      "champion": null
+    },
+    {
+      "action": "player_pick",
+      "team": "B",
+      "label": "P5",
+      "auto": false,
+      "random": false,
+      "player_id": "5",
+      "champion": null
+    },
+    {
+      "action": "player_pick",
+      "team": "A",
+      "label": "P6",
+      "auto": false,
+      "random": false,
+      "player_id": "6",
+      "champion": null
+    },
+    {
+      "action": "player_pick",
+      "team": "A",
+      "label": "P7",
+      "auto": false,
+      "random": false,
+      "player_id": "7",
+      "champion": null
+    },
+    {
+      "action": "player_pick",
+      "team": "B",
+      "label": "P8",
+      "auto": false,
+      "random": false,
+      "player_id": "8",
+      "champion": null
+    },
+    {
+      "action": "player_pick",
+      "team": "B",
+      "label": "P9",
+      "auto": false,
+      "random": false,
+      "player_id": "9",
+      "champion": null
+    },
+    {
+      "action": "player_pick",
+      "team": "A",
+      "label": "P10",
+      "auto": false,
+      "random": false,
+      "player_id": "10",
+      "champion": null
+    },
+    {
+      "action": "player_pick",
+      "team": "A",
+      "label": "P11",
+      "auto": false,
+      "random": false,
+      "player_id": "11",
+      "champion": null
+    },
+    {
+      "action": "player_pick",
+      "team": "B",
+      "label": "P12",
+      "auto": false,
+      "random": false,
+      "player_id": "12",
+      "champion": null
+    },
+    {
+      "action": "ban",
+      "team": "A",
+      "label": "Infernus",
+      "auto": false,
+      "random": false,
+      "player_id": null,
+      "champion": {
+        "id": "1",
+        "name": "Infernus",
+        "slug": "infernus",
+        "icon_url": "/static/hero-art/infernus.webp"
+      }
+    },
+    {
+      "action": "ban",
+      "team": "B",
+      "label": "Seven",
+      "auto": false,
+      "random": false,
+      "player_id": null,
+      "champion": {
+        "id": "2",
+        "name": "Seven",
+        "slug": "seven",
+        "icon_url": "/static/hero-art/seven.webp"
+      }
+    },
+    {
+      "action": "ban",
+      "team": "A",
+      "label": "Vindicta",
+      "auto": false,
+      "random": false,
+      "player_id": null,
+      "champion": {
+        "id": "3",
+        "name": "Vindicta",
+        "slug": "vindicta",
+        "icon_url": "/static/hero-art/vindicta.webp"
+      }
+    }
+  ],
+  "turn": {
+    "team": "B",
+    "captain_id": "1",
+    "captain_name": "P1",
+    "action": "ban",
+    "position": 4,
+    "total": 6,
+    "next_captain_name": "P2",
+    "next_action": "pick"
+  },
+  "step_index": 13,
+  "player_draft_order": [
+    {
+      "step_index": 0,
+      "team": "A"
+    },
+    {
+      "step_index": 1,
+      "team": "B"
+    },
+    {
+      "step_index": 2,
+      "team": "B"
+    },
+    {
+      "step_index": 3,
+      "team": "A"
+    },
+    {
+      "step_index": 4,
+      "team": "A"
+    },
+    {
+      "step_index": 5,
+      "team": "B"
+    },
+    {
+      "step_index": 6,
+      "team": "B"
+    },
+    {
+      "step_index": 7,
+      "team": "A"
+    },
+    {
+      "step_index": 8,
+      "team": "A"
+    },
+    {
+      "step_index": 9,
+      "team": "B"
+    }
+  ],
+  "champion_steps": [
+    {
+      "action": "ban",
+      "side": "hk"
+    },
+    {
+      "action": "ban",
+      "side": "am"
+    },
+    {
+      "action": "ban",
+      "side": "hk"
+    },
+    {
+      "action": "ban",
+      "side": "am"
+    },
+    {
+      "action": "pick",
+      "side": "hk"
+    },
+    {
+      "action": "pick",
+      "side": "am"
+    },
+    {
+      "action": "pick",
+      "side": "am"
+    },
+    {
+      "action": "pick",
+      "side": "hk"
+    },
+    {
+      "action": "pick",
+      "side": "am"
+    },
+    {
+      "action": "pick",
+      "side": "hk"
+    },
+    {
+      "action": "ban",
+      "side": "am"
+    },
+    {
+      "action": "ban",
+      "side": "hk"
+    },
+    {
+      "action": "pick",
+      "side": "am"
+    },
+    {
+      "action": "pick",
+      "side": "hk"
+    },
+    {
+      "action": "pick",
+      "side": "hk"
+    },
+    {
+      "action": "pick",
+      "side": "am"
+    },
+    {
+      "action": "pick",
+      "side": "hk"
+    },
+    {
+      "action": "pick",
+      "side": "am"
+    }
+  ],
+  "champion_step": 3,
+  "champions": [
+    {
+      "id": "6",
+      "name": "Abrams",
+      "slug": "abrams",
+      "icon_url": "/static/hero-art/abrams.webp",
+      "taken": false
+    },
+    {
+      "id": "77",
+      "name": "Apollo",
+      "slug": "apollo",
+      "icon_url": "/static/hero-art/apollo.webp",
+      "taken": false
+    },
+    {
+      "id": "88",
+      "name": "Baba",
+      "slug": "baba",
+      "icon_url": "/static/hero-art/baba.webp",
+      "taken": false
+    },
+    {
+      "id": "15",
+      "name": "Bebop",
+      "slug": "bebop",
+      "icon_url": "/static/hero-art/bebop.webp",
+      "taken": false
+    },
+    {
+      "id": "72",
+      "name": "Billy",
+      "slug": "billy",
+      "icon_url": "/static/hero-art/billy.webp",
+      "taken": false
+    },
+    {
+      "id": "16",
+      "name": "Calico",
+      "slug": "calico",
+      "icon_url": "/static/hero-art/calico.webp",
+      "taken": false
+    },
+    {
+      "id": "81",
+      "name": "Celeste",
+      "slug": "celeste",
+      "icon_url": "/static/hero-art/celeste.webp",
+      "taken": false
+    },
+    {
+      "id": "78",
+      "name": "Deadman Danny",
+      "slug": "deadman-danny",
+      "icon_url": "/static/hero-art/deadman-danny.webp",
+      "taken": false
+    },
+    {
+      "id": "64",
+      "name": "Drifter",
+      "slug": "drifter",
+      "icon_url": "/static/hero-art/drifter.webp",
+      "taken": false
+    },
+    {
+      "id": "11",
+      "name": "Dynamo",
+      "slug": "dynamo",
+      "icon_url": "/static/hero-art/dynamo.webp",
+      "taken": false
+    },
+    {
+      "id": "76",
+      "name": "Graves",
+      "slug": "graves",
+      "icon_url": "/static/hero-art/graves.webp",
+      "taken": false
+    },
+    {
+      "id": "17",
+      "name": "Grey Talon",
+      "slug": "grey-talon",
+      "icon_url": "/static/hero-art/grey-talon.webp",
+      "taken": false
+    },
+    {
+      "id": "13",
+      "name": "Haze",
+      "slug": "haze",
+      "icon_url": "/static/hero-art/haze.webp",
+      "taken": false
+    },
+    {
+      "id": "14",
+      "name": "Holliday",
+      "slug": "holliday",
+      "icon_url": "/static/hero-art/holliday.webp",
+      "taken": false
+    },
+    {
+      "id": "1",
+      "name": "Infernus",
+      "slug": "infernus",
+      "icon_url": "/static/hero-art/infernus.webp",
+      "taken": true
+    },
+    {
+      "id": "20",
+      "name": "Ivy",
+      "slug": "ivy",
+      "icon_url": "/static/hero-art/ivy.webp",
+      "taken": false
+    },
+    {
+      "id": "12",
+      "name": "Kelvin",
+      "slug": "kelvin",
+      "icon_url": "/static/hero-art/kelvin.webp",
+      "taken": false
+    },
+    {
+      "id": "4",
+      "name": "Lady Geist",
+      "slug": "lady-geist",
+      "icon_url": "/static/hero-art/lady-geist.webp",
+      "taken": false
+    },
+    {
+      "id": "31",
+      "name": "Lash",
+      "slug": "lash",
+      "icon_url": "/static/hero-art/lash.webp",
+      "taken": false
+    },
+    {
+      "id": "8",
+      "name": "McGinnis",
+      "slug": "mcginnis",
+      "icon_url": "/static/hero-art/mcginnis.webp",
+      "taken": false
+    },
+    {
+      "id": "63",
+      "name": "Mina",
+      "slug": "mina",
+      "icon_url": "/static/hero-art/mina.webp",
+      "taken": false
+    },
+    {
+      "id": "52",
+      "name": "Mirage",
+      "slug": "mirage",
+      "icon_url": "/static/hero-art/mirage.webp",
+      "taken": false
+    },
+    {
+      "id": "18",
+      "name": "Mo & Krill",
+      "slug": "mo-and-krill",
+      "icon_url": "/static/hero-art/mo-and-krill.webp",
+      "taken": false
+    },
+    {
+      "id": "87",
+      "name": "Nurse Harrow",
+      "slug": "nurse-harrow",
+      "icon_url": "/static/hero-art/nurse-harrow.webp",
+      "taken": false
+    },
+    {
+      "id": "67",
+      "name": "Paige",
+      "slug": "paige",
+      "icon_url": "/static/hero-art/paige.webp",
+      "taken": false
+    },
+    {
+      "id": "10",
+      "name": "Paradox",
+      "slug": "paradox",
+      "icon_url": "/static/hero-art/paradox.webp",
+      "taken": false
+    },
+    {
+      "id": "50",
+      "name": "Pocket",
+      "slug": "pocket",
+      "icon_url": "/static/hero-art/pocket.webp",
+      "taken": false
+    },
+    {
+      "id": "84",
+      "name": "Rat King",
+      "slug": "rat-king",
+      "icon_url": "/static/hero-art/rat-king.webp",
+      "taken": false
+    },
+    {
+      "id": "79",
+      "name": "Rem",
+      "slug": "rem",
+      "icon_url": "/static/hero-art/rem.webp",
+      "taken": false
+    },
+    {
+      "id": "2",
+      "name": "Seven",
+      "slug": "seven",
+      "icon_url": "/static/hero-art/seven.webp",
+      "taken": true
+    },
+    {
+      "id": "19",
+      "name": "Shiv",
+      "slug": "shiv",
+      "icon_url": "/static/hero-art/shiv.webp",
+      "taken": false
+    },
+    {
+      "id": "80",
+      "name": "Silver",
+      "slug": "silver",
+      "icon_url": "/static/hero-art/silver.webp",
+      "taken": false
+    },
+    {
+      "id": "60",
+      "name": "Sinclair",
+      "slug": "sinclair",
+      "icon_url": "/static/hero-art/sinclair.webp",
+      "taken": false
+    },
+    {
+      "id": "85",
+      "name": "Solomon",
+      "slug": "solomon",
+      "icon_url": "/static/hero-art/solomon.webp",
+      "taken": false
+    },
+    {
+      "id": "69",
+      "name": "The Doorman",
+      "slug": "the-doorman",
+      "icon_url": "/static/hero-art/the-doorman.webp",
+      "taken": false
+    },
+    {
+      "id": "65",
+      "name": "Venator",
+      "slug": "venator",
+      "icon_url": "/static/hero-art/venator.webp",
+      "taken": false
+    },
+    {
+      "id": "66",
+      "name": "Victor",
+      "slug": "victor",
+      "icon_url": "/static/hero-art/victor.webp",
+      "taken": false
+    },
+    {
+      "id": "3",
+      "name": "Vindicta",
+      "slug": "vindicta",
+      "icon_url": "/static/hero-art/vindicta.webp",
+      "taken": true
+    },
+    {
+      "id": "86",
+      "name": "Violet",
+      "slug": "violet",
+      "icon_url": "/static/hero-art/violet.webp",
+      "taken": false
+    },
+    {
+      "id": "35",
+      "name": "Viscous",
+      "slug": "viscous",
+      "icon_url": "/static/hero-art/viscous.webp",
+      "taken": false
+    },
+    {
+      "id": "58",
+      "name": "Vyper",
+      "slug": "vyper",
+      "icon_url": "/static/hero-art/vyper.webp",
+      "taken": false
+    },
+    {
+      "id": "25",
+      "name": "Warden",
+      "slug": "warden",
+      "icon_url": "/static/hero-art/warden.webp",
+      "taken": false
+    },
+    {
+      "id": "7",
+      "name": "Wraith",
+      "slug": "wraith",
+      "icon_url": "/static/hero-art/wraith.webp",
+      "taken": false
+    },
+    {
+      "id": "27",
+      "name": "Yamato",
+      "slug": "yamato",
+      "icon_url": "/static/hero-art/yamato.webp",
+      "taken": false
+    }
+  ],
+  "coinflip": {
+    "winner": "B",
+    "winner_choice": "archmother",
+    "loser_choice": null,
+    "options": [],
+    "chooser_team": null,
+    "chooser_id": null
+  },
+  "host": null,
+  "lobby_code": null,
+  "lobby": {
+    "state": "none",
+    "api_lobby": false,
+    "api_started": false,
+    "api_leaves_at": null
+  },
+  "swap": {
+    "open": true,
+    "pending": null
+  },
+  "result": {
+    "winner": null,
+    "reported_winner": null,
+    "reported_by_id": null,
+    "reported_by_name": null,
+    "deltas": {},
+    "responses": [],
+    "void_reason": null
+  },
+  "subs": [],
+  "subs_done": [],
+  "on_hold": false,
+  "hold_until": null,
+  "early_leave": {
+    "open": false,
+    "minutes": 5,
+    "pending": null
+  },
+  "win_chance_a": 0.5,
+  "captain_min_games": 0,
+  "votes_per_player": 2,
+  "draft_name": "Blazing Lion",
+  "gif_url": "https://media.tenor.com/Mir1PQM5jfwAAAAM/deadlock-hop-on-deadlock.gif",
+  "restarted_from": null,
+  "scoreboard": null,
+  "viewer": {
+    "is_player": true,
+    "team": "B",
+    "is_captain": true,
+    "is_acting": true,
+    "has_voted": false,
+    "votes": [],
+    "checked_in": false,
+    "can_request_sub": true,
+    "swap_give": [
+      {
+        "player_id": "4",
+        "name": "P4"
+      },
+      {
+        "player_id": "5",
+        "name": "P5"
+      },
+      {
+        "player_id": "8",
+        "name": "P8"
+      },
+      {
+        "player_id": "9",
+        "name": "P9"
+      },
+      {
+        "player_id": "12",
+        "name": "P12"
+      }
+    ],
+    "swap_take": [
+      {
+        "player_id": "3",
+        "name": "P3"
+      },
+      {
+        "player_id": "6",
+        "name": "P6"
+      },
+      {
+        "player_id": "7",
+        "name": "P7"
+      },
+      {
+        "player_id": "10",
+        "name": "P10"
+      },
+      {
+        "player_id": "11",
+        "name": "P11"
+      }
+    ]
+  }
+}

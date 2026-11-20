@@ -1,0 +1,32 @@
+{
+  "player": {
+    "id": "1",
+    "name": "P1",
+    "avatar_url": "/avatar/1/a1b2c3d4e5f60718293a4b5c6d7e8f90.png?size=64",
+    "steam": []
+  },
+  "queue": {
+    "in_queue": false,
+    "position": null,
+    "joined_at": null,
+    "place": null
+  },
+  "cooldown": null,
+  "match": {
+    "id": "1",
+    "status": "captain_phase",
+    "kind": "ranked",
+    "team": null,
+    "is_captain": false
+  },
+  "scrim": null,
+  "offers": [],
+  "last_offer": null,
+  "strikes": 0,
+  "flags": {
+    "auto_captain": false,
+    "api_results": true,
+    "score_ocr": "off",
+    "rating_label": "Rating"
+  }
+}

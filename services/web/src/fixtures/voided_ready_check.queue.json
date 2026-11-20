@@ -1,0 +1,65 @@
+{
+  "size": 12,
+  "count": 11,
+  "players": [
+    {
+      "id": "1",
+      "name": "P1",
+      "avatar_url": "/avatar/1/a1b2c3d4e5f60718293a4b5c6d7e8f90.png?size=64"
+    },
+    {
+      "id": "2",
+      "name": "P2",
+      "avatar_url": "/avatar/2/0f1e2d3c4b5a6978.png?size=64"
+    },
+    {
+      "id": "3",
+      "name": "P3",
+      "avatar_url": null
+    },
+    {
+      "id": "4",
+      "name": "P4",
+      "avatar_url": null
+    },
+    {
+      "id": "5",
+      "name": "P5",
+      "avatar_url": null
+    },
+    {
+      "id": "6",
+      "name": "P6",
+      "avatar_url": null
+    },
+    {
+      "id": "7",
+      "name": "P7",
+      "avatar_url": null
+    },
+    {
+      "id": "8",
+      "name": "P8",
+      "avatar_url": null
+    },
+    {
+      "id": "9",
+      "name": "P9",
+      "avatar_url": null
+    },
+    {
+      "id": "10",
+      "name": "P10",
+      "avatar_url": null
+    },
+    {
+      "id": "11",
+      "name": "P11",
+      "avatar_url": null
+    }
+  ],
+  "mode_name": "3-ban draft",
+  "max_concurrent": 12,
+  "live_matches": 0,
+  "open": true
+}

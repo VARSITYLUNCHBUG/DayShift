@@ -1,0 +1,5458 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LiveProtocol",
+  "description": "Messages on the player web UI's websocket, /ws/, and the HTTP API's responses, /api/.",
+  "type": "object",
+  "properties": {
+    "client": {
+      "$ref": "#/$defs/ClientMessage"
+    },
+    "server": {
+      "$ref": "#/$defs/ServerMessage"
+    },
+    "actions": {
+      "$ref": "#/$defs/ActionArgs"
+    },
+    "http": {
+      "$ref": "#/$defs/HttpApi"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Accounts": {
+      "additionalProperties": false,
+      "properties": {
+        "discord_name": {
+          "type": "string"
+        },
+        "avatar_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steam": {
+          "items": {
+            "$ref": "#/$defs/SteamRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "discord_name",
+        "avatar_url",
+        "steam"
+      ],
+      "title": "Accounts",
+      "type": "object"
+    },
+    "Ack": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "ack",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "t",
+        "id",
+        "ok",
+        "error",
+        "result"
+      ],
+      "title": "Ack",
+      "type": "object"
+    },
+    "Act": {
+      "additionalProperties": false,
+      "description": "An action (`league.web.live.actions`): `name` is one of `ActionName`, and `args` that\naction's arguments, as `ActionArgs` lists them. The ack carries the same `id`.",
+      "properties": {
+        "t": {
+          "const": "act",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "args": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "required": [
+        "t",
+        "id",
+        "name"
+      ],
+      "title": "Act",
+      "type": "object"
+    },
+    "ActionArgs": {
+      "properties": {
+        "draft.api_start": {
+          "$ref": "#/$defs/MatchArgs"
+        },
+        "draft.champion": {
+          "$ref": "#/$defs/ChampionArgs"
+        },
+        "draft.coinflip": {
+          "$ref": "#/$defs/CoinflipArgs"
+        },
+        "draft.lobby_code": {
+          "$ref": "#/$defs/LobbyCodeArgs"
+        },
+        "draft.pick_player": {
+          "$ref": "#/$defs/PickPlayerArgs"
+        },
+        "draft.random_champion": {
+          "$ref": "#/$defs/StepArgs"
+        },
+        "early_leave.answer": {
+          "$ref": "#/$defs/AnswerArgs"
+        },
+        "early_leave.report": {
+          "$ref": "#/$defs/PlayerInMatchArgs"
+        },
+        "lobby.checkin": {
+          "$ref": "#/$defs/MatchArgs"
+        },
+        "lobby.ready": {
+          "$ref": "#/$defs/MatchArgs"
+        },
+        "lobby.vote": {
+          "$ref": "#/$defs/VoteArgs"
+        },
+        "ocr.map_row": {
+          "$ref": "#/$defs/MapRowArgs"
+        },
+        "queue.join": {
+          "$ref": "#/$defs/NoArgs"
+        },
+        "queue.leave": {
+          "$ref": "#/$defs/NoArgs"
+        },
+        "results.confirm": {
+          "$ref": "#/$defs/MatchArgs"
+        },
+        "results.dispute": {
+          "$ref": "#/$defs/DisputeArgs"
+        },
+        "scrims.claim": {
+          "$ref": "#/$defs/ClaimArgs"
+        },
+        "scrims.start": {
+          "$ref": "#/$defs/MatchArgs"
+        },
+        "subs.answer_offer": {
+          "$ref": "#/$defs/AnswerOfferArgs"
+        },
+        "subs.answer_request": {
+          "$ref": "#/$defs/AnswerRequestArgs"
+        },
+        "subs.cancel": {
+          "$ref": "#/$defs/RequestArgs"
+        },
+        "subs.invite": {
+          "$ref": "#/$defs/InviteArgs"
+        },
+        "subs.offer_queue": {
+          "$ref": "#/$defs/RequestArgs"
+        },
+        "subs.options": {
+          "$ref": "#/$defs/MatchArgs"
+        },
+        "subs.request": {
+          "$ref": "#/$defs/PlayerInMatchArgs"
+        },
+        "swap.answer": {
+          "$ref": "#/$defs/SwapAnswerArgs"
+        },
+        "swap.propose": {
+          "$ref": "#/$defs/SwapProposeArgs"
+        }
+      },
+      "required": [
+        "draft.api_start",
+        "draft.champion",
+        "draft.coinflip",
+        "draft.lobby_code",
+        "draft.pick_player",
+        "draft.random_champion",
+        "early_leave.answer",
+        "early_leave.report",
+        "lobby.checkin",
+        "lobby.ready",
+        "lobby.vote",
+        "ocr.map_row",
+        "queue.join",
+        "queue.leave",
+        "results.confirm",
+        "results.dispute",
+        "scrims.claim",
+        "scrims.start",
+        "subs.answer_offer",
+        "subs.answer_request",
+        "subs.cancel",
+        "subs.invite",
+        "subs.offer_queue",
+        "subs.options",
+        "subs.request",
+        "swap.answer",
+        "swap.propose"
+      ],
+      "title": "ActionArgs",
+      "type": "object"
+    },
+    "ActionResult": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RandomChampion"
+        },
+        {
+          "$ref": "#/$defs/SubRequested"
+        },
+        {
+          "$ref": "#/$defs/SubOutOptions"
+        },
+        {
+          "$ref": "#/$defs/SwapProposed"
+        }
+      ]
+    },
+    "AnswerArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "agree": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "match_id",
+        "agree"
+      ],
+      "title": "AnswerArgs",
+      "type": "object"
+    },
+    "AnswerOfferArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "offer_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "accept": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "offer_id",
+        "accept"
+      ],
+      "title": "AnswerOfferArgs",
+      "type": "object"
+    },
+    "AnswerRequestArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "approve": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "request_id",
+        "approve"
+      ],
+      "title": "AnswerRequestArgs",
+      "type": "object"
+    },
+    "ApiError": {
+      "additionalProperties": false,
+      "description": "Any refusal that isn't a sentence. `not-set-up`: the web's server has no league or no\nopen season yet.",
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ErrorCode"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ApiError",
+      "type": "object"
+    },
+    "Award": {
+      "additionalProperties": false,
+      "description": "One of the six postgame awards. `stats` holds the numbers its line quotes:\nmvp: kills, souls, damage. wrecking_ball: objective_damage. first_blood: t, victim.\nthe_wall: taken, mitigated. field_medic: healing. dead_eye: accuracy, crit_rate.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "mvp",
+            "wrecking_ball",
+            "first_blood",
+            "the_wall",
+            "field_medic",
+            "dead_eye"
+          ],
+          "type": "string"
+        },
+        "slot": {
+          "type": "integer"
+        },
+        "stats": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "slot",
+        "stats"
+      ],
+      "title": "Award",
+      "type": "object"
+    },
+    "Awards": {
+      "additionalProperties": false,
+      "properties": {
+        "mvps": {
+          "type": "integer"
+        },
+        "keys": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mvps",
+        "keys"
+      ],
+      "title": "Awards",
+      "type": "object"
+    },
+    "Beat": {
+      "additionalProperties": false,
+      "description": "A story beat for the Summary's soul-lead line.",
+      "properties": {
+        "t": {
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "first_walker",
+            "mid_boss",
+            "biggest_fight",
+            "patron"
+          ],
+          "type": "string"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "enum": [
+                "hk",
+                "am"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "soul_lead": {
+          "type": "integer"
+        },
+        "ref": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "t",
+        "type",
+        "team",
+        "soul_lead",
+        "ref"
+      ],
+      "title": "Beat",
+      "type": "object"
+    },
+    "ByTeam": {
+      "additionalProperties": false,
+      "properties": {
+        "A": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "B": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "A",
+        "B"
+      ],
+      "title": "ByTeam",
+      "type": "object"
+    },
+    "CaptainStatus": {
+      "additionalProperties": false,
+      "description": "Whether they can be a captain now, under the mode's rule.",
+      "properties": {
+        "eligible": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "eligible",
+        "reason"
+      ],
+      "title": "CaptainStatus",
+      "type": "object"
+    },
+    "ChampionAction": {
+      "enum": [
+        "ban",
+        "pick"
+      ],
+      "type": "string"
+    },
+    "ChampionArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "step_index": {
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "champion_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "match_id",
+        "step_index",
+        "champion_id"
+      ],
+      "title": "ChampionArgs",
+      "type": "object"
+    },
+    "ChampionChoice": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slug": {
+          "type": "string"
+        },
+        "icon_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "taken": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "slug",
+        "icon_url",
+        "taken"
+      ],
+      "title": "ChampionChoice",
+      "type": "object"
+    },
+    "ChampionRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slug": {
+          "type": "string"
+        },
+        "icon_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "slug",
+        "icon_url"
+      ],
+      "title": "ChampionRef",
+      "type": "object"
+    },
+    "ChampionStep": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/ChampionAction"
+        },
+        "side": {
+          "$ref": "#/$defs/Side"
+        }
+      },
+      "required": [
+        "action",
+        "side"
+      ],
+      "title": "ChampionStep",
+      "type": "object"
+    },
+    "ClaimArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "side": {
+          "$ref": "#/$defs/Side"
+        }
+      },
+      "required": [
+        "match_id",
+        "side"
+      ],
+      "title": "ClaimArgs",
+      "type": "object"
+    },
+    "ClientMessage": {
+      "discriminator": {
+        "mapping": {
+          "act": "#/$defs/Act",
+          "ping": "#/$defs/Ping",
+          "sub": "#/$defs/Subscribe",
+          "unsub": "#/$defs/Unsubscribe"
+        },
+        "propertyName": "t"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Subscribe"
+        },
+        {
+          "$ref": "#/$defs/Unsubscribe"
+        },
+        {
+          "$ref": "#/$defs/Ping"
+        },
+        {
+          "$ref": "#/$defs/Act"
+        }
+      ],
+      "title": "ClientMessage"
+    },
+    "Coinflip": {
+      "additionalProperties": false,
+      "properties": {
+        "winner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "winner_choice": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CoinflipChoice"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loser_choice": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CoinflipChoice"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/CoinflipChoice"
+          },
+          "type": "array"
+        },
+        "chooser_team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "chooser_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "winner",
+        "winner_choice",
+        "loser_choice",
+        "options",
+        "chooser_team",
+        "chooser_id"
+      ],
+      "title": "Coinflip",
+      "type": "object"
+    },
+    "CoinflipArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "choice": {
+          "$ref": "#/$defs/CoinflipChoice"
+        }
+      },
+      "required": [
+        "match_id",
+        "choice"
+      ],
+      "title": "CoinflipArgs",
+      "type": "object"
+    },
+    "CoinflipChoice": {
+      "enum": [
+        "first_pick",
+        "last_pick",
+        "hidden_king",
+        "archmother"
+      ],
+      "type": "string"
+    },
+    "Cooldown": {
+      "additionalProperties": false,
+      "properties": {
+        "until": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PenaltyKind"
+        },
+        "strikes": {
+          "type": "integer"
+        },
+        "games_to_next": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "until",
+        "text",
+        "kind",
+        "strikes",
+        "games_to_next"
+      ],
+      "title": "Cooldown",
+      "type": "object"
+    },
+    "DamageTo": {
+      "additionalProperties": false,
+      "description": "Hero damage to one enemy. A player's list adds up to their `damage`.",
+      "properties": {
+        "slot": {
+          "type": "integer"
+        },
+        "damage": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "slot",
+        "damage"
+      ],
+      "title": "DamageTo",
+      "type": "object"
+    },
+    "Death": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "type": "integer"
+        },
+        "victim": {
+          "type": "integer"
+        },
+        "killer": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        },
+        "respawn_s": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "t",
+        "victim",
+        "killer",
+        "x",
+        "y",
+        "respawn_s"
+      ],
+      "title": "Death",
+      "type": "object"
+    },
+    "DisputeArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "maxLength": 500,
+          "type": "string"
+        }
+      },
+      "required": [
+        "match_id"
+      ],
+      "title": "DisputeArgs",
+      "type": "object"
+    },
+    "DraftActionKind": {
+      "enum": [
+        "player_pick",
+        "ban",
+        "pick"
+      ],
+      "type": "string"
+    },
+    "DraftEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/DraftActionKind"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "auto": {
+          "type": "boolean"
+        },
+        "random": {
+          "type": "boolean"
+        },
+        "player_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "champion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChampionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "team",
+        "label",
+        "auto",
+        "random",
+        "player_id",
+        "champion"
+      ],
+      "title": "DraftEntry",
+      "type": "object"
+    },
+    "DraftPick": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/ChampionAction"
+        },
+        "team": {
+          "$ref": "#/$defs/Team"
+        },
+        "champion": {
+          "$ref": "#/$defs/ChampionRef"
+        }
+      },
+      "required": [
+        "action",
+        "team",
+        "champion"
+      ],
+      "title": "DraftPick",
+      "type": "object"
+    },
+    "DraftSide": {
+      "additionalProperties": false,
+      "properties": {
+        "bans": {
+          "items": {
+            "$ref": "#/$defs/ChampionRef"
+          },
+          "type": "array"
+        },
+        "picks": {
+          "items": {
+            "$ref": "#/$defs/ChampionRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bans",
+        "picks"
+      ],
+      "title": "DraftSide",
+      "type": "object"
+    },
+    "EarlyLeave": {
+      "additionalProperties": false,
+      "properties": {
+        "open": {
+          "type": "boolean"
+        },
+        "minutes": {
+          "type": "integer"
+        },
+        "pending": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EarlyLeaveClaim"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "open",
+        "minutes",
+        "pending"
+      ],
+      "title": "EarlyLeave",
+      "type": "object"
+    },
+    "EarlyLeaveClaim": {
+      "additionalProperties": false,
+      "properties": {
+        "leaver_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leaver_name": {
+          "type": "string"
+        },
+        "by_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "by_name": {
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "leaver_id",
+        "leaver_name",
+        "by_id",
+        "by_name",
+        "deadline_at"
+      ],
+      "title": "EarlyLeaveClaim",
+      "type": "object"
+    },
+    "ErrorCode": {
+      "enum": [
+        "signed-out",
+        "not-found",
+        "bad-request",
+        "not-set-up"
+      ],
+      "type": "string"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "description": "The timeline's list, in time order. `ref` indexes `fights`, `objectives` or `mid_boss`\nby `type`; it's 0 for first blood.",
+      "properties": {
+        "t": {
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "first_blood",
+            "fight",
+            "objective",
+            "mid_boss"
+          ],
+          "type": "string"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "enum": [
+                "hk",
+                "am"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ref": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "t",
+        "type",
+        "team",
+        "ref"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Fight": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "type": "integer"
+        },
+        "end": {
+          "type": "integer"
+        },
+        "hk": {
+          "type": "integer"
+        },
+        "am": {
+          "type": "integer"
+        },
+        "winner": {
+          "anyOf": [
+            {
+              "enum": [
+                "hk",
+                "am"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "hk",
+        "am",
+        "winner",
+        "x",
+        "y"
+      ],
+      "title": "Fight",
+      "type": "object"
+    },
+    "FirstBlood": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "type": "integer"
+        },
+        "killer": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "victim": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "t",
+        "killer",
+        "victim"
+      ],
+      "title": "FirstBlood",
+      "type": "object"
+    },
+    "Flags": {
+      "additionalProperties": false,
+      "properties": {
+        "auto_captain": {
+          "type": "boolean"
+        },
+        "api_results": {
+          "type": "boolean"
+        },
+        "score_ocr": {
+          "$ref": "#/$defs/ScoreOcr"
+        },
+        "rating_label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "auto_captain",
+        "api_results",
+        "score_ocr",
+        "rating_label"
+      ],
+      "title": "Flags",
+      "type": "object"
+    },
+    "Gone": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "gone",
+          "type": "string"
+        },
+        "topic": {
+          "type": "string"
+        },
+        "reason": {
+          "const": "not_found",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t",
+        "topic",
+        "reason"
+      ],
+      "title": "Gone",
+      "type": "object"
+    },
+    "Hello": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "hello",
+          "type": "string"
+        },
+        "server_time": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "player_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "t",
+        "server_time",
+        "player_id"
+      ],
+      "title": "Hello",
+      "type": "object"
+    },
+    "HeroGames": {
+      "additionalProperties": false,
+      "properties": {
+        "hero": {
+          "$ref": "#/$defs/ChampionRef"
+        },
+        "games": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "hero",
+        "games"
+      ],
+      "title": "HeroGames",
+      "type": "object"
+    },
+    "Host": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "Host",
+      "type": "object"
+    },
+    "HttpApi": {
+      "additionalProperties": false,
+      "description": "Each endpoint's response body, for the generated types. Never sent itself.\n`/api/session/` is `league.web.auth.views.session_view`'s own, and the share card is a PNG.",
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ApiError"
+        },
+        "refusal": {
+          "$ref": "#/$defs/Refusal"
+        },
+        "matches": {
+          "$ref": "#/$defs/MatchList"
+        },
+        "match": {
+          "$ref": "#/$defs/MatchDetail"
+        },
+        "postgame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PostgameReady"
+            },
+            {
+              "$ref": "#/$defs/PostgamePending"
+            }
+          ]
+        },
+        "report": {
+          "$ref": "#/$defs/ReportDone"
+        },
+        "ladder": {
+          "$ref": "#/$defs/Ladder"
+        },
+        "seasons": {
+          "$ref": "#/$defs/SeasonList"
+        },
+        "me": {
+          "$ref": "#/$defs/MyProfile"
+        },
+        "steam_unlinked": {
+          "$ref": "#/$defs/SteamUnlinked"
+        },
+        "player_search": {
+          "$ref": "#/$defs/PlayerSearch"
+        },
+        "random_draft": {
+          "$ref": "#/$defs/RandomDraft"
+        }
+      },
+      "required": [
+        "error",
+        "refusal",
+        "matches",
+        "match",
+        "postgame",
+        "report",
+        "ladder",
+        "seasons",
+        "me",
+        "steam_unlinked",
+        "player_search",
+        "random_draft"
+      ],
+      "title": "HttpApi",
+      "type": "object"
+    },
+    "Id": {
+      "type": "string"
+    },
+    "InviteArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "player_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "player_id"
+      ],
+      "title": "InviteArgs",
+      "type": "object"
+    },
+    "Ladder": {
+      "additionalProperties": false,
+      "properties": {
+        "season": {
+          "type": "string"
+        },
+        "season_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "rating_label": {
+          "type": "string"
+        },
+        "tiers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/LadderRow"
+          },
+          "type": "array"
+        },
+        "me": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LadderRow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_offset": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "season",
+        "season_id",
+        "rating_label",
+        "tiers",
+        "total",
+        "rows",
+        "me",
+        "next_offset"
+      ],
+      "title": "Ladder",
+      "type": "object"
+    },
+    "LadderRow": {
+      "additionalProperties": false,
+      "description": "One line of the table. No player ID: profiles are private, so there's nothing to open.",
+      "properties": {
+        "rank": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatar_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rating": {
+          "type": "integer"
+        },
+        "tier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wins": {
+          "type": "integer"
+        },
+        "losses": {
+          "type": "integer"
+        },
+        "is_you": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "rank",
+        "name",
+        "avatar_url",
+        "rating",
+        "tier",
+        "wins",
+        "losses",
+        "is_you"
+      ],
+      "title": "LadderRow",
+      "type": "object"
+    },
+    "LeagueAward": {
+      "enum": [
+        "mvp",
+        "key"
+      ],
+      "type": "string"
+    },
+    "LiveMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "$ref": "#/$defs/MatchStatus"
+        },
+        "kind": {
+          "$ref": "#/$defs/MatchKind"
+        },
+        "mode_name": {
+          "type": "string"
+        },
+        "draft_name": {
+          "type": "string"
+        },
+        "captains": {
+          "$ref": "#/$defs/ByTeam"
+        },
+        "sides": {
+          "$ref": "#/$defs/Sides"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "kind",
+        "mode_name",
+        "draft_name",
+        "captains",
+        "sides",
+        "started_at"
+      ],
+      "title": "LiveMatch",
+      "type": "object"
+    },
+    "LiveSnap": {
+      "additionalProperties": false,
+      "properties": {
+        "matches": {
+          "items": {
+            "$ref": "#/$defs/LiveMatch"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "matches"
+      ],
+      "title": "LiveSnap",
+      "type": "object"
+    },
+    "LiveSnapMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "snap",
+          "type": "string"
+        },
+        "topic": {
+          "const": "live",
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "data": {
+          "$ref": "#/$defs/LiveSnap"
+        }
+      },
+      "required": [
+        "t",
+        "topic",
+        "rev",
+        "data"
+      ],
+      "title": "LiveSnapMessage",
+      "type": "object"
+    },
+    "Lobby": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/LobbyState"
+        },
+        "api_lobby": {
+          "type": "boolean"
+        },
+        "api_started": {
+          "type": "boolean"
+        },
+        "api_leaves_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "api_lobby",
+        "api_started",
+        "api_leaves_at"
+      ],
+      "title": "Lobby",
+      "type": "object"
+    },
+    "LobbyCodeArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "code": {
+          "maxLength": 32,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "match_id",
+        "code"
+      ],
+      "title": "LobbyCodeArgs",
+      "type": "object"
+    },
+    "LobbyState": {
+      "enum": [
+        "none",
+        "making",
+        "failed",
+        "ready",
+        "started"
+      ],
+      "type": "string"
+    },
+    "MapFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "radius": {
+          "type": "number"
+        },
+        "scale": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "radius",
+        "scale"
+      ],
+      "title": "MapFrame",
+      "type": "object"
+    },
+    "MapRowArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "read_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "row": {
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "player_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "read_id",
+        "row",
+        "player_id"
+      ],
+      "title": "MapRowArgs",
+      "type": "object"
+    },
+    "MatchArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "match_id"
+      ],
+      "title": "MatchArgs",
+      "type": "object"
+    },
+    "MatchDetail": {
+      "additionalProperties": false,
+      "description": "A match's public record. The same for every signed-in viewer.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "$ref": "#/$defs/MatchStatus"
+        },
+        "kind": {
+          "$ref": "#/$defs/MatchKind"
+        },
+        "mode_name": {
+          "type": "string"
+        },
+        "draft_name": {
+          "type": "string"
+        },
+        "gif_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rating_label": {
+          "type": "string"
+        },
+        "rated": {
+          "type": "boolean"
+        },
+        "winner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duration_s": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "teams": {
+          "items": {
+            "$ref": "#/$defs/TeamResult"
+          },
+          "type": "array"
+        },
+        "draft": {
+          "items": {
+            "$ref": "#/$defs/DraftPick"
+          },
+          "type": "array"
+        },
+        "win_chance_a": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deadlock_match_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_postgame": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "kind",
+        "mode_name",
+        "draft_name",
+        "gif_url",
+        "rating_label",
+        "rated",
+        "winner",
+        "started_at",
+        "ended_at",
+        "duration_s",
+        "teams",
+        "draft",
+        "win_chance_a",
+        "deadlock_match_id",
+        "has_postgame"
+      ],
+      "title": "MatchDetail",
+      "type": "object"
+    },
+    "MatchKind": {
+      "enum": [
+        "ranked",
+        "scrim"
+      ],
+      "type": "string"
+    },
+    "MatchList": {
+      "additionalProperties": false,
+      "properties": {
+        "matches": {
+          "items": {
+            "$ref": "#/$defs/MatchRow"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "matches",
+        "next_cursor"
+      ],
+      "title": "MatchList",
+      "type": "object"
+    },
+    "MatchPlayer": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatar_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rating": {
+          "type": "integer"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_captain": {
+          "type": "boolean"
+        },
+        "is_ready": {
+          "type": "boolean"
+        },
+        "has_voted": {
+          "type": "boolean"
+        },
+        "captain_ok": {
+          "type": "boolean"
+        },
+        "captain_note": {
+          "type": "string"
+        },
+        "checked_in": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "avatar_url",
+        "rating",
+        "team",
+        "is_captain",
+        "is_ready",
+        "has_voted",
+        "captain_ok",
+        "captain_note",
+        "checked_in"
+      ],
+      "title": "MatchPlayer",
+      "type": "object"
+    },
+    "MatchRow": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "$ref": "#/$defs/MatchStatus"
+        },
+        "kind": {
+          "$ref": "#/$defs/MatchKind"
+        },
+        "mode_name": {
+          "type": "string"
+        },
+        "draft_name": {
+          "type": "string"
+        },
+        "captains": {
+          "$ref": "#/$defs/ByTeam"
+        },
+        "team_names": {
+          "$ref": "#/$defs/ByTeam"
+        },
+        "sides": {
+          "$ref": "#/$defs/Sides"
+        },
+        "winner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "your_team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "kind",
+        "mode_name",
+        "draft_name",
+        "captains",
+        "team_names",
+        "sides",
+        "winner",
+        "started_at",
+        "ended_at",
+        "your_team"
+      ],
+      "title": "MatchRow",
+      "type": "object"
+    },
+    "MatchSnap": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "$ref": "#/$defs/MatchStatus"
+        },
+        "kind": {
+          "$ref": "#/$defs/MatchKind"
+        },
+        "mode_name": {
+          "type": "string"
+        },
+        "rating_label": {
+          "type": "string"
+        },
+        "deadline_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closes_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "players": {
+          "items": {
+            "$ref": "#/$defs/MatchPlayer"
+          },
+          "type": "array"
+        },
+        "captains": {
+          "$ref": "#/$defs/ByTeam"
+        },
+        "team_names": {
+          "$ref": "#/$defs/ByTeam"
+        },
+        "sides": {
+          "$ref": "#/$defs/Sides"
+        },
+        "draft": {
+          "items": {
+            "$ref": "#/$defs/DraftEntry"
+          },
+          "type": "array"
+        },
+        "turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Turn"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "step_index": {
+          "type": "integer"
+        },
+        "player_draft_order": {
+          "items": {
+            "$ref": "#/$defs/PlayerDraftStep"
+          },
+          "type": "array"
+        },
+        "champion_steps": {
+          "items": {
+            "$ref": "#/$defs/ChampionStep"
+          },
+          "type": "array"
+        },
+        "champion_step": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "champions": {
+          "items": {
+            "$ref": "#/$defs/ChampionChoice"
+          },
+          "type": "array"
+        },
+        "coinflip": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Coinflip"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "host": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Host"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lobby_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lobby": {
+          "$ref": "#/$defs/Lobby"
+        },
+        "swap": {
+          "$ref": "#/$defs/Swap"
+        },
+        "result": {
+          "$ref": "#/$defs/Result"
+        },
+        "subs": {
+          "items": {
+            "$ref": "#/$defs/SubEntry"
+          },
+          "type": "array"
+        },
+        "subs_done": {
+          "items": {
+            "$ref": "#/$defs/SubDone"
+          },
+          "type": "array"
+        },
+        "on_hold": {
+          "type": "boolean"
+        },
+        "hold_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "early_leave": {
+          "$ref": "#/$defs/EarlyLeave"
+        },
+        "win_chance_a": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "captain_min_games": {
+          "type": "integer"
+        },
+        "votes_per_player": {
+          "type": "integer"
+        },
+        "draft_name": {
+          "type": "string"
+        },
+        "gif_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restarted_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scoreboard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Scoreboard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "viewer": {
+          "$ref": "#/$defs/Viewer"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "kind",
+        "mode_name",
+        "rating_label",
+        "deadline_at",
+        "closes_at",
+        "started_at",
+        "players",
+        "captains",
+        "team_names",
+        "sides",
+        "draft",
+        "turn",
+        "step_index",
+        "player_draft_order",
+        "champion_steps",
+        "champion_step",
+        "champions",
+        "coinflip",
+        "host",
+        "lobby_code",
+        "lobby",
+        "swap",
+        "result",
+        "subs",
+        "subs_done",
+        "on_hold",
+        "hold_until",
+        "early_leave",
+        "win_chance_a",
+        "captain_min_games",
+        "votes_per_player",
+        "draft_name",
+        "gif_url",
+        "restarted_from",
+        "scoreboard",
+        "viewer"
+      ],
+      "title": "MatchSnap",
+      "type": "object"
+    },
+    "MatchSnapMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "snap",
+          "type": "string"
+        },
+        "topic": {
+          "pattern": "^match:[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "data": {
+          "$ref": "#/$defs/MatchSnap"
+        }
+      },
+      "required": [
+        "t",
+        "topic",
+        "rev",
+        "data"
+      ],
+      "title": "MatchSnapMessage",
+      "type": "object"
+    },
+    "MatchStatus": {
+      "enum": [
+        "ready_check",
+        "captain_phase",
+        "captain_checkin",
+        "player_draft",
+        "coinflip",
+        "champion_draft",
+        "lobby_code",
+        "in_progress",
+        "awaiting_confirmation",
+        "disputed",
+        "completed",
+        "voided",
+        "captain_claim",
+        "ready_to_draft",
+        "drafted"
+      ],
+      "type": "string"
+    },
+    "MeMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "$ref": "#/$defs/MatchStatus"
+        },
+        "kind": {
+          "$ref": "#/$defs/MatchKind"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_captain": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "kind",
+        "team",
+        "is_captain"
+      ],
+      "title": "MeMatch",
+      "type": "object"
+    },
+    "MePlayer": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatar_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steam": {
+          "items": {
+            "$ref": "#/$defs/SteamLink"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "avatar_url",
+        "steam"
+      ],
+      "title": "MePlayer",
+      "type": "object"
+    },
+    "MeQueue": {
+      "additionalProperties": false,
+      "properties": {
+        "in_queue": {
+          "type": "boolean"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "joined_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "place": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueuePlace"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "in_queue",
+        "position",
+        "joined_at",
+        "place"
+      ],
+      "title": "MeQueue",
+      "type": "object"
+    },
+    "MeSnap": {
+      "additionalProperties": false,
+      "properties": {
+        "player": {
+          "$ref": "#/$defs/MePlayer"
+        },
+        "queue": {
+          "$ref": "#/$defs/MeQueue"
+        },
+        "cooldown": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cooldown"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "match": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeMatch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scrim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeMatch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offers": {
+          "items": {
+            "$ref": "#/$defs/Offer"
+          },
+          "type": "array"
+        },
+        "last_offer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OfferEnd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strikes": {
+          "type": "integer"
+        },
+        "flags": {
+          "$ref": "#/$defs/Flags"
+        }
+      },
+      "required": [
+        "player",
+        "queue",
+        "cooldown",
+        "match",
+        "scrim",
+        "offers",
+        "last_offer",
+        "strikes",
+        "flags"
+      ],
+      "title": "MeSnap",
+      "type": "object"
+    },
+    "MeSnapMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "snap",
+          "type": "string"
+        },
+        "topic": {
+          "const": "me",
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "data": {
+          "$ref": "#/$defs/MeSnap"
+        }
+      },
+      "required": [
+        "t",
+        "topic",
+        "rev",
+        "data"
+      ],
+      "title": "MeSnapMessage",
+      "type": "object"
+    },
+    "MidBoss": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "type": "integer"
+        },
+        "by": {
+          "enum": [
+            "hk",
+            "am"
+          ],
+          "type": "string"
+        },
+        "killed_by": {
+          "anyOf": [
+            {
+              "enum": [
+                "hk",
+                "am"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "t",
+        "by",
+        "killed_by"
+      ],
+      "title": "MidBoss",
+      "type": "object"
+    },
+    "MyProfile": {
+      "additionalProperties": false,
+      "description": "The signed-in player's own profile. Nobody else's is ever sent.",
+      "properties": {
+        "player": {
+          "$ref": "#/$defs/PlayerRef"
+        },
+        "season": {
+          "type": "string"
+        },
+        "season_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "rating_label": {
+          "type": "string"
+        },
+        "rating": {
+          "type": "integer"
+        },
+        "tier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tiers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rank": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ranked": {
+          "type": "integer"
+        },
+        "games": {
+          "type": "integer"
+        },
+        "wins": {
+          "type": "integer"
+        },
+        "losses": {
+          "type": "integer"
+        },
+        "placement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Placement"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strikes": {
+          "$ref": "#/$defs/Strikes"
+        },
+        "captain": {
+          "$ref": "#/$defs/CaptainStatus"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/RatingPoint"
+          },
+          "type": "array"
+        },
+        "recent": {
+          "items": {
+            "$ref": "#/$defs/RecentMatch"
+          },
+          "type": "array"
+        },
+        "heroes": {
+          "items": {
+            "$ref": "#/$defs/HeroGames"
+          },
+          "type": "array"
+        },
+        "awards": {
+          "$ref": "#/$defs/Awards"
+        },
+        "accounts": {
+          "$ref": "#/$defs/Accounts"
+        }
+      },
+      "required": [
+        "player",
+        "season",
+        "season_id",
+        "rating_label",
+        "rating",
+        "tier",
+        "tiers",
+        "rank",
+        "ranked",
+        "games",
+        "wins",
+        "losses",
+        "placement",
+        "strikes",
+        "captain",
+        "history",
+        "recent",
+        "heroes",
+        "awards",
+        "accounts"
+      ],
+      "title": "MyProfile",
+      "type": "object"
+    },
+    "NoArgs": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "NoArgs",
+      "type": "object"
+    },
+    "Objective": {
+      "additionalProperties": false,
+      "description": "A structure that fell.",
+      "properties": {
+        "t": {
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "guardian",
+            "walker",
+            "base_guardian",
+            "shrine",
+            "patron_shield",
+            "patron",
+            "objective"
+          ],
+          "type": "string"
+        },
+        "lane": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "team": {
+          "enum": [
+            "hk",
+            "am"
+          ],
+          "type": "string"
+        },
+        "by": {
+          "enum": [
+            "hk",
+            "am"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "lane",
+        "team",
+        "by"
+      ],
+      "title": "Objective",
+      "type": "object"
+    },
+    "Offer": {
+      "additionalProperties": false,
+      "description": "A spot in someone else's match, offered to this player.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "match_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfferSource"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "team_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leaving_name": {
+          "type": "string"
+        },
+        "invited_by_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "match_status": {
+          "$ref": "#/$defs/MatchStatus"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "match_id",
+        "deadline_at",
+        "source",
+        "team",
+        "team_name",
+        "leaving_name",
+        "invited_by_name",
+        "match_status",
+        "started_at"
+      ],
+      "title": "Offer",
+      "type": "object"
+    },
+    "OfferEnd": {
+      "additionalProperties": false,
+      "description": "The player's most recent offer that has ended, so the page can say how.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "match_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "$ref": "#/$defs/OfferEndStatus"
+        },
+        "team_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "match_id",
+        "status",
+        "team_name"
+      ],
+      "title": "OfferEnd",
+      "type": "object"
+    },
+    "OfferEndStatus": {
+      "enum": [
+        "accepted",
+        "declined",
+        "expired",
+        "failed",
+        "withdrawn"
+      ],
+      "type": "string"
+    },
+    "OfferSource": {
+      "enum": [
+        "invite",
+        "prio",
+        "queue"
+      ],
+      "type": "string"
+    },
+    "Outcome": {
+      "enum": [
+        "win",
+        "loss",
+        "void"
+      ],
+      "type": "string"
+    },
+    "PenaltyKind": {
+      "enum": [
+        "missed_ready",
+        "dodge",
+        "leaver",
+        "false_report",
+        "manual"
+      ],
+      "type": "string"
+    },
+    "PendingReason": {
+      "enum": [
+        "later",
+        "no-match-id",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "PickPlayerArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "step_index": {
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "player_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "match_id",
+        "step_index",
+        "player_id"
+      ],
+      "title": "PickPlayerArgs",
+      "type": "object"
+    },
+    "Ping": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "ping",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "title": "Ping",
+      "type": "object"
+    },
+    "Placement": {
+      "additionalProperties": false,
+      "properties": {
+        "played": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "played",
+        "total"
+      ],
+      "title": "Placement",
+      "type": "object"
+    },
+    "PlayerDraftStep": {
+      "additionalProperties": false,
+      "properties": {
+        "step_index": {
+          "type": "integer"
+        },
+        "team": {
+          "$ref": "#/$defs/Team"
+        }
+      },
+      "required": [
+        "step_index",
+        "team"
+      ],
+      "title": "PlayerDraftStep",
+      "type": "object"
+    },
+    "PlayerInMatchArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "player_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "match_id",
+        "player_id"
+      ],
+      "title": "PlayerInMatchArgs",
+      "type": "object"
+    },
+    "PlayerLine": {
+      "additionalProperties": false,
+      "properties": {
+        "slot": {
+          "type": "integer"
+        },
+        "team": {
+          "enum": [
+            "hk",
+            "am"
+          ],
+          "type": "string"
+        },
+        "player_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "hero_id": {
+          "type": "integer"
+        },
+        "hero": {
+          "type": "string"
+        },
+        "hero_slug": {
+          "type": "string"
+        },
+        "level": {
+          "type": "integer"
+        },
+        "kills": {
+          "type": "integer"
+        },
+        "deaths": {
+          "type": "integer"
+        },
+        "assists": {
+          "type": "integer"
+        },
+        "kda": {
+          "type": "number"
+        },
+        "souls": {
+          "type": "integer"
+        },
+        "souls_per_min": {
+          "type": "integer"
+        },
+        "last_hits": {
+          "type": "integer"
+        },
+        "denies": {
+          "type": "integer"
+        },
+        "damage": {
+          "type": "integer"
+        },
+        "damage_per_min": {
+          "type": "integer"
+        },
+        "taken": {
+          "type": "integer"
+        },
+        "mitigated": {
+          "type": "integer"
+        },
+        "healing": {
+          "type": "integer"
+        },
+        "objective_damage": {
+          "type": "integer"
+        },
+        "accuracy": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "crit_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shots": {
+          "type": "integer"
+        },
+        "time_dead_s": {
+          "type": "integer"
+        },
+        "abandoned_s": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mvp_rank": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "$ref": "#/$defs/SoulSources"
+        },
+        "worth": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "damage_to": {
+          "items": {
+            "$ref": "#/$defs/DamageTo"
+          },
+          "type": "array"
+        },
+        "build": {
+          "items": {
+            "$ref": "#/$defs/Purchase"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "slot",
+        "team",
+        "player_id",
+        "name",
+        "hero_id",
+        "hero",
+        "hero_slug",
+        "level",
+        "kills",
+        "deaths",
+        "assists",
+        "kda",
+        "souls",
+        "souls_per_min",
+        "last_hits",
+        "denies",
+        "damage",
+        "damage_per_min",
+        "taken",
+        "mitigated",
+        "healing",
+        "objective_damage",
+        "accuracy",
+        "crit_rate",
+        "shots",
+        "time_dead_s",
+        "abandoned_s",
+        "mvp_rank",
+        "sources",
+        "worth",
+        "damage_to",
+        "build"
+      ],
+      "title": "PlayerLine",
+      "type": "object"
+    },
+    "PlayerRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatar_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "avatar_url"
+      ],
+      "title": "PlayerRef",
+      "type": "object"
+    },
+    "PlayerSearch": {
+      "additionalProperties": false,
+      "properties": {
+        "players": {
+          "items": {
+            "$ref": "#/$defs/SearchPlayer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "players"
+      ],
+      "title": "PlayerSearch",
+      "type": "object"
+    },
+    "Pong": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "pong",
+          "type": "string"
+        },
+        "server_time": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t",
+        "server_time"
+      ],
+      "title": "Pong",
+      "type": "object"
+    },
+    "Postgame": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer"
+        },
+        "deadlock_match_id": {
+          "type": "integer"
+        },
+        "duration_s": {
+          "type": "integer"
+        },
+        "start_time": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "winner": {
+          "anyOf": [
+            {
+              "enum": [
+                "hk",
+                "am"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "teams": {
+          "$ref": "#/$defs/Teams"
+        },
+        "players": {
+          "items": {
+            "$ref": "#/$defs/PlayerLine"
+          },
+          "type": "array"
+        },
+        "timeline": {
+          "$ref": "#/$defs/Timeline"
+        },
+        "deaths": {
+          "items": {
+            "$ref": "#/$defs/Death"
+          },
+          "type": "array"
+        },
+        "first_blood": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FirstBlood"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fights": {
+          "items": {
+            "$ref": "#/$defs/Fight"
+          },
+          "type": "array"
+        },
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/Objective"
+          },
+          "type": "array"
+        },
+        "structures": {
+          "items": {
+            "$ref": "#/$defs/Structure"
+          },
+          "type": "array"
+        },
+        "mid_boss": {
+          "items": {
+            "$ref": "#/$defs/MidBoss"
+          },
+          "type": "array"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/Event"
+          },
+          "type": "array"
+        },
+        "beats": {
+          "items": {
+            "$ref": "#/$defs/Beat"
+          },
+          "type": "array"
+        },
+        "awards": {
+          "items": {
+            "$ref": "#/$defs/Award"
+          },
+          "type": "array"
+        },
+        "map": {
+          "$ref": "#/$defs/MapFrame"
+        },
+        "replay": {
+          "$ref": "#/$defs/Replay"
+        },
+        "item_names": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "deadlock_match_id",
+        "duration_s",
+        "start_time",
+        "winner",
+        "teams",
+        "players",
+        "timeline",
+        "deaths",
+        "first_blood",
+        "fights",
+        "objectives",
+        "structures",
+        "mid_boss",
+        "events",
+        "beats",
+        "awards",
+        "map",
+        "replay",
+        "item_names"
+      ],
+      "title": "Postgame",
+      "type": "object"
+    },
+    "PostgamePending": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "pending",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/PendingReason"
+        }
+      },
+      "required": [
+        "status",
+        "reason"
+      ],
+      "title": "PostgamePending",
+      "type": "object"
+    },
+    "PostgameReady": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "ready",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/Postgame"
+        },
+        "you": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/YourNight"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "data",
+        "you"
+      ],
+      "title": "PostgameReady",
+      "type": "object"
+    },
+    "Purchase": {
+      "additionalProperties": false,
+      "description": "An item bought, by deadlock-api's item ID, and when it was sold, if it was.",
+      "properties": {
+        "t": {
+          "type": "integer"
+        },
+        "item_id": {
+          "type": "integer"
+        },
+        "sold_t": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "t",
+        "item_id",
+        "sold_t"
+      ],
+      "title": "Purchase",
+      "type": "object"
+    },
+    "QueuePlace": {
+      "additionalProperties": false,
+      "description": "The player's own place on the priority list. Nobody else's is ever sent.",
+      "properties": {
+        "position": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "held_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "position",
+        "total",
+        "held_until"
+      ],
+      "title": "QueuePlace",
+      "type": "object"
+    },
+    "QueueSnap": {
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "type": "integer"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "players": {
+          "items": {
+            "$ref": "#/$defs/PlayerRef"
+          },
+          "type": "array"
+        },
+        "mode_name": {
+          "type": "string"
+        },
+        "max_concurrent": {
+          "type": "integer"
+        },
+        "live_matches": {
+          "type": "integer"
+        },
+        "open": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "size",
+        "count",
+        "players",
+        "mode_name",
+        "max_concurrent",
+        "live_matches",
+        "open"
+      ],
+      "title": "QueueSnap",
+      "type": "object"
+    },
+    "QueueSnapMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "snap",
+          "type": "string"
+        },
+        "topic": {
+          "const": "queue",
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer"
+        },
+        "data": {
+          "$ref": "#/$defs/QueueSnap"
+        }
+      },
+      "required": [
+        "t",
+        "topic",
+        "rev",
+        "data"
+      ],
+      "title": "QueueSnapMessage",
+      "type": "object"
+    },
+    "RandomChampion": {
+      "additionalProperties": false,
+      "description": "`draft.random_champion`: the hero it took.",
+      "properties": {
+        "champion_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "champion_id"
+      ],
+      "title": "RandomChampion",
+      "type": "object"
+    },
+    "RandomDraft": {
+      "additionalProperties": false,
+      "description": "Every ban and pick in the mode's order, chosen at random. Nothing is recorded.",
+      "properties": {
+        "hk": {
+          "$ref": "#/$defs/DraftSide"
+        },
+        "am": {
+          "$ref": "#/$defs/DraftSide"
+        }
+      },
+      "required": [
+        "hk",
+        "am"
+      ],
+      "title": "RandomDraft",
+      "type": "object"
+    },
+    "RatingPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "match_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delta": {
+          "type": "integer"
+        },
+        "rating_after": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "match_id",
+        "delta",
+        "rating_after"
+      ],
+      "title": "RatingPoint",
+      "type": "object"
+    },
+    "RecentMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "draft_name": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/MatchStatus"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "side": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Side"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Outcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hero": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChampionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rating_after": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "award": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LeagueAward"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_postgame": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "match_id",
+        "draft_name",
+        "status",
+        "ended_at",
+        "team",
+        "side",
+        "result",
+        "hero",
+        "delta",
+        "rating_after",
+        "award",
+        "has_postgame"
+      ],
+      "title": "RecentMatch",
+      "type": "object"
+    },
+    "Refusal": {
+      "additionalProperties": false,
+      "description": "The request wasn't taken. A plain sentence for the player, as the Discord bot says it.",
+      "properties": {
+        "refusal": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "refusal"
+      ],
+      "title": "Refusal",
+      "type": "object"
+    },
+    "Replay": {
+      "additionalProperties": false,
+      "properties": {
+        "step_s": {
+          "type": "integer"
+        },
+        "frames": {
+          "type": "integer"
+        },
+        "positions": {
+          "items": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "step_s",
+        "frames",
+        "positions"
+      ],
+      "title": "Replay",
+      "type": "object"
+    },
+    "ReportDone": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/MatchStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "ReportDone",
+      "type": "object"
+    },
+    "RequestArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "title": "RequestArgs",
+      "type": "object"
+    },
+    "Result": {
+      "additionalProperties": false,
+      "properties": {
+        "winner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reported_winner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reported_by_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reported_by_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deltas": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/Id"
+          },
+          "type": "object"
+        },
+        "responses": {
+          "items": {
+            "$ref": "#/$defs/ResultResponse"
+          },
+          "type": "array"
+        },
+        "void_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "winner",
+        "reported_winner",
+        "reported_by_id",
+        "reported_by_name",
+        "deltas",
+        "responses",
+        "void_reason"
+      ],
+      "title": "Result",
+      "type": "object"
+    },
+    "ResultPlayer": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatar_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_captain": {
+          "type": "boolean"
+        },
+        "rating_before": {
+          "type": "integer"
+        },
+        "rating_after": {
+          "type": "integer"
+        },
+        "delta": {
+          "type": "integer"
+        },
+        "award": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LeagueAward"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hero": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChampionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stat_line": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "avatar_url",
+        "is_captain",
+        "rating_before",
+        "rating_after",
+        "delta",
+        "award",
+        "hero",
+        "stat_line"
+      ],
+      "title": "ResultPlayer",
+      "type": "object"
+    },
+    "ResultResponse": {
+      "additionalProperties": false,
+      "description": "One captain's answer: a report, or a confirm or dispute of the other captain's.",
+      "properties": {
+        "player_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict"
+        },
+        "winner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "player_id",
+        "name",
+        "verdict",
+        "winner"
+      ],
+      "title": "ResultResponse",
+      "type": "object"
+    },
+    "ScoreOcr": {
+      "enum": [
+        "off",
+        "shadow",
+        "on"
+      ],
+      "type": "string"
+    },
+    "Scoreboard": {
+      "additionalProperties": false,
+      "description": "Names on the latest scoreboard read that nobody has matched to a player yet. Only ever\nsent to the match's captains, who can match them.",
+      "properties": {
+        "read_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/ScoreboardRow"
+          },
+          "type": "array"
+        },
+        "players": {
+          "items": {
+            "$ref": "#/$defs/ScoreboardPlayer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "read_id",
+        "rows",
+        "players"
+      ],
+      "title": "Scoreboard",
+      "type": "object"
+    },
+    "ScoreboardPlayer": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "team": {
+          "$ref": "#/$defs/Team"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "team"
+      ],
+      "title": "ScoreboardPlayer",
+      "type": "object"
+    },
+    "ScoreboardRow": {
+      "additionalProperties": false,
+      "properties": {
+        "row": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "team": {
+          "$ref": "#/$defs/Team"
+        },
+        "hero": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChampionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hero_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "row",
+        "name",
+        "team",
+        "hero",
+        "hero_name"
+      ],
+      "title": "ScoreboardRow",
+      "type": "object"
+    },
+    "SearchPlayer": {
+      "additionalProperties": false,
+      "description": "Someone to name as a sub. No stats: profiles are private.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatar_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "in_match": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "avatar_url",
+        "in_match"
+      ],
+      "title": "SearchPlayer",
+      "type": "object"
+    },
+    "SeasonList": {
+      "additionalProperties": false,
+      "properties": {
+        "seasons": {
+          "items": {
+            "$ref": "#/$defs/SeasonRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "seasons"
+      ],
+      "title": "SeasonList",
+      "type": "object"
+    },
+    "SeasonRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "is_open": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "is_open"
+      ],
+      "title": "SeasonRef",
+      "type": "object"
+    },
+    "ServerMessage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Hello"
+        },
+        {
+          "$ref": "#/$defs/MeSnapMessage"
+        },
+        {
+          "$ref": "#/$defs/QueueSnapMessage"
+        },
+        {
+          "$ref": "#/$defs/LiveSnapMessage"
+        },
+        {
+          "$ref": "#/$defs/MatchSnapMessage"
+        },
+        {
+          "$ref": "#/$defs/Gone"
+        },
+        {
+          "$ref": "#/$defs/Pong"
+        },
+        {
+          "$ref": "#/$defs/Ack"
+        }
+      ],
+      "title": "ServerMessage"
+    },
+    "Side": {
+      "enum": [
+        "hk",
+        "am"
+      ],
+      "type": "string"
+    },
+    "Sides": {
+      "additionalProperties": false,
+      "properties": {
+        "A": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Side"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "B": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Side"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "A",
+        "B"
+      ],
+      "title": "Sides",
+      "type": "object"
+    },
+    "SoulSources": {
+      "additionalProperties": false,
+      "description": "Where a player's souls came from. Orbs count with what dropped them.",
+      "properties": {
+        "players": {
+          "type": "integer"
+        },
+        "troopers": {
+          "type": "integer"
+        },
+        "neutrals": {
+          "type": "integer"
+        },
+        "bosses": {
+          "type": "integer"
+        },
+        "treasure": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "players",
+        "troopers",
+        "neutrals",
+        "bosses",
+        "treasure"
+      ],
+      "title": "SoulSources",
+      "type": "object"
+    },
+    "SteamLink": {
+      "additionalProperties": false,
+      "description": "One of the player's own Steam accounts. Only ever sent to that player.",
+      "properties": {
+        "account_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "proven": {
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "account_id",
+        "name",
+        "proven",
+        "verified"
+      ],
+      "title": "SteamLink",
+      "type": "object"
+    },
+    "SteamRow": {
+      "additionalProperties": false,
+      "description": "One of the viewer's own Steam accounts. `id` is the link's own handle, for unlinking;\nnever the Steam ID.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "proven": {
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "linked_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "proven",
+        "verified",
+        "linked_at"
+      ],
+      "title": "SteamRow",
+      "type": "object"
+    },
+    "SteamUnlinked": {
+      "additionalProperties": false,
+      "properties": {
+        "steam": {
+          "items": {
+            "$ref": "#/$defs/SteamRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steam"
+      ],
+      "title": "SteamUnlinked",
+      "type": "object"
+    },
+    "StepArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "step_index": {
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "match_id",
+        "step_index"
+      ],
+      "title": "StepArgs",
+      "type": "object"
+    },
+    "StrikeEntry": {
+      "additionalProperties": false,
+      "description": "An offence that gave strikes, or a staff adjustment. Clean matches aren't listed.",
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/StrikeEntryKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "strikes": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "match_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "waived": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "at",
+        "kind",
+        "label",
+        "strikes",
+        "reason",
+        "match_id",
+        "waived"
+      ],
+      "title": "StrikeEntry",
+      "type": "object"
+    },
+    "StrikeEntryKind": {
+      "enum": [
+        "offence",
+        "adjustment"
+      ],
+      "type": "string"
+    },
+    "Strikes": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "progress": {
+          "type": "integer"
+        },
+        "games_per_strike": {
+          "type": "integer"
+        },
+        "games_to_next": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_decay_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "log": {
+          "items": {
+            "$ref": "#/$defs/StrikeEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "count",
+        "progress",
+        "games_per_strike",
+        "games_to_next",
+        "next_decay_at",
+        "log"
+      ],
+      "title": "Strikes",
+      "type": "object"
+    },
+    "Structure": {
+      "additionalProperties": false,
+      "description": "Every structure, standing or not, for the replay's map. Positions are the web's: the\nmetadata doesn't place them.",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "guardian",
+            "walker",
+            "base_guardian",
+            "shrine",
+            "patron_shield",
+            "patron",
+            "objective"
+          ],
+          "type": "string"
+        },
+        "lane": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "team": {
+          "enum": [
+            "hk",
+            "am"
+          ],
+          "type": "string"
+        },
+        "falls_t": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "lane",
+        "team",
+        "falls_t"
+      ],
+      "title": "Structure",
+      "type": "object"
+    },
+    "SubDone": {
+      "additionalProperties": false,
+      "description": "A sub request that has ended.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "$ref": "#/$defs/SubDoneStatus"
+        },
+        "reason": {
+          "$ref": "#/$defs/SubReason"
+        },
+        "leaving_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "leaving_name": {
+          "type": "string"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "joined_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "joined_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "reason",
+        "leaving_id",
+        "leaving_name",
+        "team",
+        "joined_id",
+        "joined_name"
+      ],
+      "title": "SubDone",
+      "type": "object"
+    },
+    "SubDoneStatus": {
+      "enum": [
+        "filled",
+        "cancelled",
+        "rejected",
+        "expired"
+      ],
+      "type": "string"
+    },
+    "SubEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "$ref": "#/$defs/SubStatus"
+        },
+        "reason": {
+          "$ref": "#/$defs/SubReason"
+        },
+        "leaving_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leaving_name": {
+          "type": "string"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requested_by_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requested_by_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_self": {
+          "type": "boolean"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "name_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubOfferRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "reason",
+        "leaving_id",
+        "leaving_name",
+        "team",
+        "requested_by_id",
+        "requested_by_name",
+        "is_self",
+        "deadline_at",
+        "name_until",
+        "offer"
+      ],
+      "title": "SubEntry",
+      "type": "object"
+    },
+    "SubOfferRef": {
+      "additionalProperties": false,
+      "properties": {
+        "player_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/OfferSource"
+        },
+        "deadline_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "player_id",
+        "name",
+        "source",
+        "deadline_at"
+      ],
+      "title": "SubOfferRef",
+      "type": "object"
+    },
+    "SubOutChoice": {
+      "additionalProperties": false,
+      "properties": {
+        "player_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "is_self": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "player_id",
+        "name",
+        "is_self"
+      ],
+      "title": "SubOutChoice",
+      "type": "object"
+    },
+    "SubOutOptions": {
+      "additionalProperties": false,
+      "description": "`subs.options`: who this player may ask to sub out, and what it would cost them.",
+      "properties": {
+        "choices": {
+          "items": {
+            "$ref": "#/$defs/SubOutChoice"
+          },
+          "type": "array"
+        },
+        "game_on": {
+          "type": "boolean"
+        },
+        "dodge": {
+          "type": "boolean"
+        },
+        "strikes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "choices",
+        "game_on",
+        "dodge",
+        "strikes"
+      ],
+      "title": "SubOutOptions",
+      "type": "object"
+    },
+    "SubReason": {
+      "enum": [
+        "sub_out",
+        "missed_ready",
+        "restart"
+      ],
+      "type": "string"
+    },
+    "SubRequested": {
+      "additionalProperties": false,
+      "description": "`subs.request`: the request it opened.",
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "title": "SubRequested",
+      "type": "object"
+    },
+    "SubStatus": {
+      "enum": [
+        "approval",
+        "open"
+      ],
+      "type": "string"
+    },
+    "Subscribe": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "sub",
+          "type": "string"
+        },
+        "topics": {
+          "items": {
+            "pattern": "^(me|queue|live|match:[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "t",
+        "topics"
+      ],
+      "title": "Subscribe",
+      "type": "object"
+    },
+    "Swap": {
+      "additionalProperties": false,
+      "properties": {
+        "open": {
+          "type": "boolean"
+        },
+        "pending": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SwapOffer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "open",
+        "pending"
+      ],
+      "title": "Swap",
+      "type": "object"
+    },
+    "SwapAnswerArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "swap_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "accept": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "match_id",
+        "swap_id",
+        "accept"
+      ],
+      "title": "SwapAnswerArgs",
+      "type": "object"
+    },
+    "SwapChoice": {
+      "additionalProperties": false,
+      "properties": {
+        "player_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "player_id",
+        "name"
+      ],
+      "title": "SwapChoice",
+      "type": "object"
+    },
+    "SwapOffer": {
+      "additionalProperties": false,
+      "description": "A captain's offer of one of their players for one of the other team's.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "requested_by_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requested_by_name": {
+          "type": "string"
+        },
+        "give_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "give_name": {
+          "type": "string"
+        },
+        "take_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "take_name": {
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "requested_by_id",
+        "requested_by_name",
+        "give_id",
+        "give_name",
+        "take_id",
+        "take_name",
+        "deadline_at"
+      ],
+      "title": "SwapOffer",
+      "type": "object"
+    },
+    "SwapProposeArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "give_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "take_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "match_id",
+        "give_id",
+        "take_id"
+      ],
+      "title": "SwapProposeArgs",
+      "type": "object"
+    },
+    "SwapProposed": {
+      "additionalProperties": false,
+      "description": "`swap.propose`: the offer it made.",
+      "properties": {
+        "swap_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "swap_id"
+      ],
+      "title": "SwapProposed",
+      "type": "object"
+    },
+    "Team": {
+      "enum": [
+        "A",
+        "B"
+      ],
+      "type": "string"
+    },
+    "TeamLine": {
+      "additionalProperties": false,
+      "properties": {
+        "letter": {
+          "type": "string"
+        },
+        "kills": {
+          "type": "integer"
+        },
+        "souls": {
+          "type": "integer"
+        },
+        "objectives": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "letter",
+        "kills",
+        "souls",
+        "objectives"
+      ],
+      "title": "TeamLine",
+      "type": "object"
+    },
+    "TeamResult": {
+      "additionalProperties": false,
+      "properties": {
+        "team": {
+          "$ref": "#/$defs/Team"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "side": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Side"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "average_rating": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "players": {
+          "items": {
+            "$ref": "#/$defs/ResultPlayer"
+          },
+          "type": "array"
+        },
+        "picks": {
+          "items": {
+            "$ref": "#/$defs/ChampionRef"
+          },
+          "type": "array"
+        },
+        "bans": {
+          "items": {
+            "$ref": "#/$defs/ChampionRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "team",
+        "name",
+        "side",
+        "average_rating",
+        "players",
+        "picks",
+        "bans"
+      ],
+      "title": "TeamResult",
+      "type": "object"
+    },
+    "Teams": {
+      "additionalProperties": false,
+      "properties": {
+        "hk": {
+          "$ref": "#/$defs/TeamLine"
+        },
+        "am": {
+          "$ref": "#/$defs/TeamLine"
+        }
+      },
+      "required": [
+        "hk",
+        "am"
+      ],
+      "title": "Teams",
+      "type": "object"
+    },
+    "Timeline": {
+      "additionalProperties": false,
+      "description": "Leads at each minute, and at the end. `souls` is interpolated between the game's stat\nsnapshots (every few minutes); `kills` is exact.",
+      "properties": {
+        "t": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "souls": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "kills": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "t",
+        "souls",
+        "kills"
+      ],
+      "title": "Timeline",
+      "type": "object"
+    },
+    "Turn": {
+      "additionalProperties": false,
+      "properties": {
+        "team": {
+          "$ref": "#/$defs/Team"
+        },
+        "captain_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "captain_name": {
+          "type": "string"
+        },
+        "action": {
+          "$ref": "#/$defs/DraftActionKind"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "next_captain_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DraftActionKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "team",
+        "captain_id",
+        "captain_name",
+        "action",
+        "position",
+        "total",
+        "next_captain_name",
+        "next_action"
+      ],
+      "title": "Turn",
+      "type": "object"
+    },
+    "Unsubscribe": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "const": "unsub",
+          "type": "string"
+        },
+        "topics": {
+          "items": {
+            "pattern": "^(me|queue|live|match:[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "t",
+        "topics"
+      ],
+      "title": "Unsubscribe",
+      "type": "object"
+    },
+    "Verdict": {
+      "enum": [
+        "report",
+        "confirm",
+        "dispute"
+      ],
+      "type": "string"
+    },
+    "Viewer": {
+      "additionalProperties": false,
+      "description": "What the page needs to know about whoever is looking.",
+      "properties": {
+        "is_player": {
+          "type": "boolean"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_captain": {
+          "type": "boolean"
+        },
+        "is_acting": {
+          "type": "boolean"
+        },
+        "has_voted": {
+          "type": "boolean"
+        },
+        "votes": {
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "type": "array"
+        },
+        "checked_in": {
+          "type": "boolean"
+        },
+        "can_request_sub": {
+          "type": "boolean"
+        },
+        "swap_give": {
+          "items": {
+            "$ref": "#/$defs/SwapChoice"
+          },
+          "type": "array"
+        },
+        "swap_take": {
+          "items": {
+            "$ref": "#/$defs/SwapChoice"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "is_player",
+        "team",
+        "is_captain",
+        "is_acting",
+        "has_voted",
+        "votes",
+        "checked_in",
+        "can_request_sub",
+        "swap_give",
+        "swap_take"
+      ],
+      "title": "Viewer",
+      "type": "object"
+    },
+    "VoteArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "candidate_ids": {
+          "items": {
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "match_id",
+        "candidate_ids"
+      ],
+      "title": "VoteArgs",
+      "type": "object"
+    },
+    "YourNight": {
+      "additionalProperties": false,
+      "description": "The viewer's own part in the match. Only for a player on its roster.",
+      "properties": {
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "side": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Side"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slot": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Outcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rating_label": {
+          "type": "string"
+        },
+        "rating_before": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rating_after": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "award": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LeagueAward"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "team",
+        "side",
+        "slot",
+        "result",
+        "rating_label",
+        "rating_before",
+        "rating_after",
+        "delta",
+        "award"
+      ],
+      "title": "YourNight",
+      "type": "object"
+    }
+  }
+}

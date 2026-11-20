@@ -1,0 +1,37 @@
+{
+  "player": {
+    "id": "13",
+    "name": "P13",
+    "avatar_url": null,
+    "steam": []
+  },
+  "queue": {
+    "in_queue": false,
+    "position": null,
+    "joined_at": null,
+    "place": null
+  },
+  "cooldown": null,
+  "match": {
+    "id": "1",
+    "status": "ready_check",
+    "kind": "ranked",
+    "team": null,
+    "is_captain": false
+  },
+  "scrim": null,
+  "offers": [],
+  "last_offer": {
+    "id": "1",
+    "match_id": "1",
+    "status": "accepted",
+    "team_name": null
+  },
+  "strikes": 0,
+  "flags": {
+    "auto_captain": false,
+    "api_results": true,
+    "score_ocr": "off",
+    "rating_label": "Rating"
+  }
+}
