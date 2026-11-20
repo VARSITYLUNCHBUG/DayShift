@@ -58,8 +58,8 @@ test("a whole ranked match as captain: queue, ready, vote, check-in, drafts, lob
     if (match.turn?.player_ids.includes(me.id)) {
       const pool = page.getByRole("listbox", { name: "Players left: press one to pick" });
       const option = pool.getByRole("option").first();
-      // "Bot 18, 1,000 rating": the name, then what the captain picks by.
-      const name = (await accessibleName(option)).split(",")[0] ?? "";
+      // "Bot 18 1,000 rating": the name from the card's own text, then what the captain picks by.
+      const name = (await accessibleName(option)).replace(/\s+[\d,]+ rating$/, "").trim();
       await option.click();
       picked.push(name);
       await control.waitForMatch(id, (m) => m.step_index !== match.step_index || m.status !== "player_draft", "my pick lands");

@@ -4,6 +4,7 @@ import { cn } from "../lib/cn";
 import { initials } from "../lib/format";
 import type { TeamKey } from "./team";
 import { TEAM_CLASS } from "./team";
+import { Glyphs } from "./Glyphs";
 
 const SIZE = {
   sm: "size-8 text-micro",
@@ -42,7 +43,7 @@ export function Avatar({ name, src, size = "lg", team, ready = null, className }
           className={cn("font-extrabold", fill)}
           delayMs={src ? 600 : 0}
         >
-          {initials(name)}
+          <Glyphs text={initials(name)} />
         </HeroAvatar.Fallback>
       </HeroAvatar>
       {ready ? (

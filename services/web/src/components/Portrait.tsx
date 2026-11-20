@@ -4,6 +4,7 @@ import { cn } from "../lib/cn";
 import { initials } from "../lib/format";
 import type { TeamKey } from "./team";
 import { TEAM_CLASS } from "./team";
+import { Glyphs } from "./Glyphs";
 
 const SIZE = {
   sm: "size-6.5 border-2",
@@ -50,7 +51,7 @@ export function Portrait({ hero, src, size = "md", team, isYou = false, isDead =
           className={cn("size-full object-cover object-top", isDead && "brightness-60 grayscale")}
         />
       ) : (
-        <span className="text-micro font-extrabold text-muted">{initials(hero)}</span>
+        <Glyphs text={initials(hero)} className="text-micro font-extrabold text-muted" />
       )}
       {isDead ? (
         <span className="absolute inset-0 flex items-center justify-center bg-background/50 font-extrabold text-foreground">×</span>

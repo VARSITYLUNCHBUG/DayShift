@@ -6,6 +6,7 @@ import { initials } from "../lib/format";
 import { Sticker } from "./Sticker";
 import type { TeamKey } from "./team";
 import { TEAM_CLASS } from "./team";
+import { Glyphs } from "./Glyphs";
 
 /** free: pickable · selected: your choice, not locked yet · banned · hk / am: picked by that side
  * · locked: your team's locked-in pick. */
@@ -47,6 +48,8 @@ export function HeroCard({ name, art, state = "free", tag, tagTone = "muted", wi
   const [broken, setBroken] = useState<string | null>(null);
   const dim = state === "banned" || state === "hk" || state === "am";
   const lifted = state === "selected" || state === "locked";
+  // The stickers are drawn, not written, so the line says the state in words when no tag does.
+  const line = tag ?? (state === "banned" ? "Banned" : state === "locked" ? "Locked" : null);
   return (
     <span
       className={cn(
@@ -73,33 +76,34 @@ export function HeroCard({ name, art, state = "free", tag, tagTone = "muted", wi
           aria-hidden="true"
           className={cn("flex aspect-14/19 w-full items-center justify-center bg-raised font-display text-section text-muted", dim && "opacity-60")}
         >
-          {initials(name)}
+          <Glyphs text={initials(name)} />
         </span>
       )}
       {state === "banned" ? (
         <span className="absolute top-2/5 left-1/2 -translate-x-1/2 -translate-y-1/2">
+          {/* The card's own line says it too: the sticker is drawn, so the name reads once. */}
           <Sticker tone="danger" tilt="none" className="-rotate-8">
-            Banned
+            <Glyphs text="Banned" />
           </Sticker>
         </span>
       ) : null}
       {state === "locked" ? (
         <span className="absolute top-2 right-2">
           <Sticker tone={lockedBy} tilt="right" size="sm">
-            Locked
+            <Glyphs text="Locked" />
           </Sticker>
         </span>
       ) : null}
       {wishes ? (
         <span className="absolute top-2 left-2">
           <Sticker tone="cream" size="sm" tilt="slight">
-            {wishes}
+            <Glyphs text={wishes} />
           </Sticker>
         </span>
       ) : null}
       <span className="flex min-h-10 flex-col gap-px px-2.25 pt-1.5 pb-2">
         <span className="line-clamp-2">{name}</span>
-        {tag ? <span className={cn("text-micro font-semibold", TAG_TONE[tagTone])}>{tag}</span> : null}
+        {line ? <span className={cn("text-micro font-semibold", TAG_TONE[tagTone])}>{line}</span> : null}
       </span>
     </span>
   );

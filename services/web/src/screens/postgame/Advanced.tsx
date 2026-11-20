@@ -42,12 +42,13 @@ function columnsFor(set: SetName, open: (slot: number) => void): SortColumn<Play
     isRowHeader: true,
     sortValue: (row) => row.name,
     cell: (row) => (
-      <button type="button" onClick={() => open(row.slot)} className="flex min-h-11 items-center gap-3 rounded-row text-left" aria-label={`${row.name}, ${row.hero}: open their numbers`}>
+      <button type="button" onClick={() => open(row.slot)} className="flex min-h-11 items-center gap-3 rounded-row text-left">
         <Portrait hero={row.hero} src={heroArt(row.hero_slug)} team={row.team} size="sm" />
         <span className="flex flex-col">
           <b className="text-label font-extrabold">{row.name}</b>
           <span className="text-micro text-muted">{row.hero}</span>
         </span>
+        <span className="sr-only">: open their numbers</span>
       </button>
     ),
   };

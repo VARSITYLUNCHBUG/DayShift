@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { renderPage } from "../test/render";
 import { Avatar } from "./Avatar";
@@ -63,7 +63,7 @@ describe("Stickers and tags", () => {
 describe("Avatar", () => {
   it("shows initials when there's no picture, and a tick once ready", async () => {
     render(<Avatar name="Grey Talon" team="am" ready />);
-    expect(await screen.findByText("GT")).toBeInTheDocument();
+    await vi.waitFor(() => expect(document.querySelector('[data-glyphs="GT"]')).toBeInTheDocument());
     expect(screen.getByRole("img", { name: "ready" })).toBeInTheDocument();
   });
 });
@@ -74,6 +74,6 @@ describe("Portrait", () => {
     const img = container.querySelector("img");
     expect(img).not.toBeNull();
     fireEvent.error(img!);
-    expect(screen.getByText("LG")).toBeInTheDocument();
+    expect(document.querySelector('[data-glyphs="LG"]')).toBeInTheDocument();
   });
 });

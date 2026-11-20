@@ -12,7 +12,8 @@ export interface PickState {
 interface Props<T> {
   items: readonly T[];
   getKey: (item: T) => string;
-  /** What a screen reader hears for the item: "Ivy, Pike wants her". */
+  /** The item's plain text, for type-to-select ("Ivy"). Screen readers hear the item's visible
+   * content, so whatever they need to know (taken, banned, who wants it) is written on the card. */
   getLabel: (item: T) => string;
   renderItem: (item: T, state: PickState) => ReactNode;
   /** The grid's name: "Heroes", "Players left". */
@@ -61,7 +62,6 @@ export function PickGrid<T>({
         <ListBoxItem
           id={id}
           textValue={getLabel(item)}
-          aria-label={getLabel(item)}
           className="cursor-pointer rounded-card outline-none data-disabled:cursor-default"
         >
           {({ isSelected, isDisabled, isFocusVisible }) => renderItem(item, { isSelected, isDisabled, isFocusVisible })}

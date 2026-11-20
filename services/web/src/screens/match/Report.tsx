@@ -114,7 +114,6 @@ export function ReportForm({ match, myId, onDone }: { match: MatchSnap; myId: st
                 onChange={() => setWinner(t)}
                 // The form replaces the page's stage: focus lands on its first question.
                 autoFocus={index === 0}
-                aria-label={`${nameOf(match, t)} won`}
                 className={cn(
                   "relative flex min-h-32 cursor-pointer flex-col items-start gap-2 rounded-panel border-3 p-6 text-left outline-none transition-state",
                   selected

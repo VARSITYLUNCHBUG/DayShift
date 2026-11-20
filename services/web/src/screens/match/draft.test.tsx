@@ -47,7 +47,7 @@ describe("hero draft", () => {
     expect(screen.getByRole("list", { name: "Draft order" }).children).toHaveLength(match.champion_steps.length);
     const banned = match.draft.find((d) => d.action === "ban" && d.champion);
     if (banned?.champion)
-      expect(screen.getByRole("option", { name: `${banned.champion.name}, banned` })).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByRole("option", { name: new RegExp(`^${banned.champion.name}`) })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("lets a teammate wish from the grid, straight away", async () => {

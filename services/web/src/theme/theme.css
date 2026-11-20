@@ -705,3 +705,9 @@
     color: currentcolor;
   }
 }
+
+/* Glyphs (components/Glyphs.tsx): decorative initials drawn from an attribute, so they never
+   become part of an accessible name. */
+.ds-glyphs::before {
+  content: attr(data-glyphs);
+}

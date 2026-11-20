@@ -32,22 +32,22 @@ describe("HeroGrid", () => {
     const onSelect = vi.fn();
     render(<HeroGrid heroes={heroChoices()} selectedId={null} onSelect={onSelect} />);
     const grid = screen.getByRole("listbox", { name: "Heroes" });
-    expect(within(grid).getByRole("option", { name: "Haze, banned" })).toHaveAttribute("aria-disabled", "true");
-    expect(within(grid).getByRole("option", { name: "Dynamo, Vesper's Team" })).toHaveAttribute("aria-disabled", "true");
-    await userEvent.click(within(grid).getByRole("option", { name: "Ivy, Pike wants her" }));
+    expect(within(grid).getByRole("option", { name: /^Haze/ })).toHaveAttribute("aria-disabled", "true");
+    expect(within(grid).getByRole("option", { name: /^Dynamo/ })).toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(within(grid).getByRole("option", { name: /^Ivy/ }));
     expect(onSelect).toHaveBeenCalledWith("Ivy");
-    await userEvent.click(within(grid).getByRole("option", { name: "Haze, banned" }));
+    await userEvent.click(within(grid).getByRole("option", { name: /^Haze/ }));
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
   it("marks the chosen hero selected", () => {
     render(<HeroGrid heroes={heroChoices()} selectedId="Ivy" onSelect={() => {}} />);
-    expect(screen.getByRole("option", { name: "Ivy, Pike wants her" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: /^Ivy/ })).toHaveAttribute("aria-selected", "true");
   });
 
   it("stays browsable but not pickable while waiting", () => {
     render(<HeroGrid heroes={heroChoices()} />);
-    expect(screen.getByRole("option", { name: "Mirage" })).not.toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: /^Mirage/ })).not.toHaveAttribute("aria-selected", "true");
   });
 });
 
@@ -73,7 +73,7 @@ describe("PlayerTile, TeamPanel and PlayerGrid", () => {
   it("picks a player from the grid", async () => {
     const onSelect = vi.fn();
     render(<PlayerGrid players={HK_PLAYERS.map((p) => ({ id: p.id, name: p.name, tag: p.tag, line: "Gold" }))} onSelect={onSelect} />);
-    await userEvent.click(screen.getByRole("option", { name: "Pike, Gold" }));
+    await userEvent.click(screen.getByRole("option", { name: /Pike/ }));
     expect(onSelect).toHaveBeenCalledWith("2");
   });
 });

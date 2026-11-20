@@ -89,7 +89,7 @@ describe("in game", () => {
     await roomReady();
     await userEvent.click(screen.getAllByRole("button", { name: "Report result" })[0] as HTMLElement);
     expect(screen.getByRole("heading", { name: `Who won No. ${match.id}?` })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "P2's Team won" }));
+    await userEvent.click(screen.getByRole("button", { name: /P2's Team won\s*Captain/ }));
     await userEvent.click(screen.getByRole("button", { name: "Send: P2's Team won" }));
     expect(screen.getByText(/Enter the Deadlock match ID/)).toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
@@ -111,7 +111,7 @@ describe("in game", () => {
     openRoom("in_progress", "captain");
     await roomReady();
     await userEvent.click(screen.getAllByRole("button", { name: "Report result" })[0] as HTMLElement);
-    await userEvent.click(screen.getByRole("button", { name: "P2's Team won" }));
+    await userEvent.click(screen.getByRole("button", { name: /P2's Team won\s*Captain/ }));
     await userEvent.type(screen.getByRole("textbox", { name: "Deadlock match ID" }), "41207733");
     await userEvent.click(screen.getByRole("button", { name: "Send: P2's Team won" }));
     expect(await screen.findByText("This match isn't waiting for a result.")).toBeInTheDocument();

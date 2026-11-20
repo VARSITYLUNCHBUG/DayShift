@@ -128,7 +128,7 @@ describe("the deep tabs", () => {
     await userEvent.click(within(header).getByRole("button"));
     expect(header).toHaveAttribute("aria-sort", "ascending");
     const someone = http.postgame().data.players[0];
-    await userEvent.click(screen.getByRole("button", { name: `${someone?.name}, ${someone?.hero}: open their numbers` }));
+    await userEvent.click(screen.getByRole("button", { name: new RegExp(`^${someone?.name ?? ""}.*${someone?.hero ?? ""}.*open their numbers$`) }));
     expect(screen.getByRole("heading", { level: 3, name: someone?.name })).toBeInTheDocument();
     expect(screen.getByText("Where the souls came from")).toBeInTheDocument();
   });
