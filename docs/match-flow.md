@@ -13,7 +13,7 @@ flowchart TB
     end
     subgraph Draft
         direction LR
-        V[Captain vote] --> C[Captain check-in] --> D[Player draft] --> F[Coinflip] --> H[Champion draft]
+        V[Captain vote] --> C[Captain check-in] --> D[Player draft] --> F[Coinflip] --> T[Team check] --> H[Champion draft]
     end
     subgraph Play
         direction LR
@@ -35,7 +35,8 @@ flowchart TB
 | Player draft | `FSSFFSSFFS`, lower-rated captain first. Last player is assigned. No message announces it: the board shows the captains and whose pick it is | 45 s, then highest rated |
 | Team voice | Each team borrows a channel from the server's [voice pool](#team-voice-pool), `Team Voice 1`, `Team Voice 2` and so on. The team is let in, and the channel's status says `Match 12 · Kestrel's Team` (with the lobby code once there is one). Anyone in the Waiting Room is moved. Everyone else gets one channel ping naming them all, with a link to each team's channel and no per-player DM or invite. Players arriving in the Waiting Room later are routed to their team as usual | Never blocks the draft |
 | Captain coinflip | The winner chooses a side: 🔶 Hidden King or 🔷 Archmother. The Hidden King is always Pick 1 (team 1) and bans and picks first. (Scrims keep Bebot's two-captain coinflip.) | 20 s, then a random side |
-| Player swap | From the coinflip until the game starts, a captain can press **Swap players** to offer one of their players for one of the other team's. Captains stay put. The other captain accepts and the two change teams and voice channels, or declines | 60 s to answer, then it lapses. One offer at a time |
+| Team check | Both captains look over the teams on the board, swap players with **Swap players** if they like, then each press **Teams ready**. The hero draft starts once both have. A swap that goes through means both confirm again, with the full time | 90 s (`champion_draft.team_confirm_seconds`), restarted by a swap. When time's up the teams stand as they are and the draft starts |
+| Player swap | From the coinflip until the game starts (the team check is the place for it), a captain can press **Swap players** to offer one of their players for one of the other team's. Captains stay put. The other captain accepts and the two change teams and voice channels, or declines | 60 s to answer, then it lapses. One offer at a time |
 | Champion draft | The mode's ban and pick order, from the team the coinflip put first. 🎲 Random takes a champion on purpose | 40 s a turn. A timeout takes a random champion, for bans too |
 | Draft summary | Named like "Crimson Wolf", with a GIF from `presets/draft_gifs.json` and GLHF, above the lobby code prompt | |
 | Lobby | deadlock-api's bot always creates the custom lobby; its code is posted and a captain presses Start match. Only if that fails is a random captain asked to create one and enter its code, with the settings checklist ([Lobbies](integrations.md#lobbies)) | No lobby in 3 min counts as a failure. Then 3 min for the host, then the other captain, then cancel |
@@ -43,16 +44,17 @@ flowchart TB
 | Confirm | The other captain confirms, disputes or adds their own report, from the match channel, which stays open until the result is settled | 5 min. Silence confirms |
 | Results | The first screenshot, the rating table, 🏅 MVP and ⭐ key players, and scoreboard stats go to the results channel. Once deadlock-api has the match, its scoreboard is posted as a reply ([Result checks](integrations.md#result-checks)). Every screenshot goes to the archive | Effects retry |
 
-Match channels are private to their players and staff to talk in. Anyone with the PUG role (set
-with `/setup pug_role`; everyone, without one) can read the text channel and see the team voices,
-but not join them unless Open match voice is on.
+A match's text channel is open to the PUG role (set with `/setup pug_role`; everyone, without
+one): they can read it and post in it, as its players and staff do. They can see who is in the
+team voices, but not join them unless Open match voice is on.
 
 ## Team voice pool
 
 Discord limits how many channels a server can create in a day. A day of matches that each made and deleted two team channels ran into it on 2026-11-20, and matches had no team voice for two hours. So each server keeps its team voice channels and reuses them:
 
 - When teams are set, a match takes two free channels from the pool and lets its teams in. When its voice is finished (the report, a void, or a restart), everyone in them goes to the Waiting Room, the team's overwrites and the status come off, and the channels go back for the next match. A restart's successor takes channels again once its own teams are set.
-- A channel is only created when the pool is short, up to two per Max concurrent match (24 by default). They're named `Team Voice 1` and up, in the match category, and keep that name: Discord allows a channel only two renames in ten minutes, so the match and team show in the voice status instead. Lowering Max concurrent matches deletes the highest-numbered channels as they come free.
+- The deploy that brings in the pool (migration `0004_voice_channel_slots`) has the bot make each server's first 8, `Team Voice 1` to `Team Voice 8`, empty, as soon as it starts, so no match waits on a channel being created. A migration can't reach Discord, so it queues the work for the bot.
+- After that, a channel is only created when the pool is short, up to two per Max concurrent match (24 by default). They're named `Team Voice 1` and up, in the match category, and keep that name: Discord allows a channel only two renames in ten minutes, so the match and team show in the voice status instead. Lowering Max concurrent matches deletes the highest-numbered channels as they come free.
 - If every pooled channel is busy and the pool is full, a match gets one-off channels named for it, `Match 12 · Kestrel's Team`, deleted after it as before.
 - A pooled channel deleted by hand just leaves the pool, and a new one is made when needed. A free channel with someone sitting in it is passed over.
 - A change to Open match voice reaches a pooled channel the next time a match takes it. Channels keep the staff and PUG role overwrites they were made with, so after changing match staff roles or the PUG role, delete the `Team Voice` channels and the bot remakes them.
