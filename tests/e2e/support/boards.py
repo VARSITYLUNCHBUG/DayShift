@@ -14,6 +14,7 @@ BOARD_TITLES = {
     "captain_checkin": "Captains check in",
     "player_draft": "Player draft",
     "coinflip": "Captain coinflip",
+    "team_confirm": "Confirm the teams",
     "lobby_code": "Lobby code",
     "in_progress": "Game on",
     "awaiting_confirmation": "Confirm the result",

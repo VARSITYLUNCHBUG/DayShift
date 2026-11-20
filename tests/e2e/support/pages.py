@@ -21,6 +21,7 @@ STATUS_LABELS = {
     "captain_checkin": "Captain check-in",
     "player_draft": "Player draft",
     "coinflip": "Captain coinflip",
+    "team_confirm": "Captains confirm teams",
     "champion_draft": "Champion draft",
     "lobby_code": "Lobby code",
     "in_progress": "In progress",
@@ -335,6 +336,10 @@ class BotModal:
             {"name": name, "mimeType": "image/png", "buffer": png}
         )
         expect(self.dialog.get_by_text("1 file chosen.")).to_be_visible()
+        return self
+
+    def fill(self, label: str, text: str) -> Self:
+        self.dialog.get_by_label(label).fill(text)
         return self
 
     def submit(self, as_user: str) -> None:

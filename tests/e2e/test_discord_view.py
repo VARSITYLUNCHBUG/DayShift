@@ -33,9 +33,9 @@ def test_report_a_win_with_a_screenshot(
     board.get_by_role("button", name=button).click()
     panel.finish(f"Click {button}", re.compile(rf"^Click {re.escape(button)}: the bot opened"))
 
-    screen.bot_modal(button).attach("Scoreboard screenshot", "scoreboard.png", screenshot).submit(
-        captain
-    )
+    screen.bot_modal(button).fill("Deadlock match ID", "123456789").attach(
+        "Scoreboard screenshot", "scoreboard.png", screenshot
+    ).submit(captain)
 
     reported, shown = wait_board(sim, control, match["id"])
     assert reported["status"] == "awaiting_confirmation"

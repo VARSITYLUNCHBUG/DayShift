@@ -48,7 +48,7 @@ from bot.routing import RouteButton, RouteSelect, RouteUserSelect
 from bot.watched import ChannelWatch
 from league import log_context, timings
 from league.services import community as community_service
-from league.services import deadlines, effects, health, leaderboards
+from league.services import deadlines, effects, health, leaderboards, voice_pool
 from league.services.common import now
 
 logger = logging.getLogger(__name__)
@@ -348,6 +348,7 @@ class DayShiftBot(discord.Client):
         for match_id, kind, channel_id in await db(effects.stale_resources):
             try:
                 await self.gateway.delete_channel(channel_id)
+                await db(voice_pool.forget, channel_id)  # A pooled one: the pool remakes it.
                 await db(effects.mark_resource_deleted, match_id, kind)
             except discord.HTTPException:
                 logger.exception("Sweep failed", extra={"match": match_id, "channel": channel_id})

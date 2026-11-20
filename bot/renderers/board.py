@@ -21,6 +21,7 @@ from league.domain.engine import (
     FIRST_PICK,
     HIDDEN_KING,
     LAST_PICK,
+    SIDE_LABELS,
     Status,
 )
 from league.models.subs import SubStatus
@@ -45,6 +46,7 @@ STATUS_TITLES = {
     Status.CAPTAIN_CHECKIN: "Captains check in",
     Status.PLAYER_DRAFT: "Player draft",
     Status.COINFLIP: "Captain coinflip",
+    Status.TEAM_CONFIRM: "Confirm the teams",
     Status.CHAMPION_DRAFT: "Champion draft",
     Status.LOBBY_CODE: "Lobby code",
     Status.IN_PROGRESS: "Game on",
@@ -71,6 +73,7 @@ TIMER_LABELS = {
     Status.CAPTAIN_CHECKIN: "Missing captains are replaced",
     Status.PLAYER_DRAFT: "Auto-pick",
     Status.COINFLIP: "Random choice",
+    Status.TEAM_CONFIRM: "The hero draft starts",
     Status.CHAMPION_DRAFT: "Auto-pick",
     Status.LOBBY_CODE: "Code due",
     Status.AWAITING_CONFIRMATION: "Confirms automatically",
@@ -225,6 +228,38 @@ def _captain_checkin(state: BoardState, box: Container[Any]) -> None:
     box.add_item(
         ActionRow(
             RouteButton("checkin", state.match_id, label="I'm here", style=ButtonStyle.success)
+        )
+    )
+
+
+def _team_confirm(state: BoardState, box: Container[Any]) -> None:
+    """After the coinflip: both captains look the teams over and confirm them. The Swap players
+    button below the board is how they change them first."""
+    box.add_item(TextDisplay(_team_block(state, "A") + "\n\n" + _team_block(state, "B")))
+    box.add_item(Separator())
+    rows = []
+    for team in state.side_order:
+        captain = _captain_line(state, team)
+        if captain is None:
+            continue
+        mark = "✅" if captain.player_id in state.teams_confirmed_ids else "⏳"
+        side = SIDE_LABELS[state.side_of(team)]
+        rows.append(
+            f"{mark} {style.side_emoji(state.side_of(team))} "
+            f"{player_mention(captain.discord_user_id)} ({side})"
+        )
+    box.add_item(
+        TextDisplay(
+            "Captains: check your teams. Swap players below if you need to, then press "
+            "**Teams ready**. The hero draft starts once you both have, or when time's up. "
+            "A swap means confirming again.\n" + "\n".join(rows)
+        )
+    )
+    box.add_item(
+        ActionRow(
+            RouteButton(
+                "teams_ready", state.match_id, label="Teams ready", style=ButtonStyle.success
+            )
         )
     )
 
@@ -729,6 +764,7 @@ _SECTIONS = {
     Status.CAPTAIN_CHECKIN: _captain_checkin,
     Status.PLAYER_DRAFT: _player_draft,
     Status.COINFLIP: _coinflip,
+    Status.TEAM_CONFIRM: _team_confirm,
     Status.CHAMPION_DRAFT: _champion_draft,
     Status.LOBBY_CODE: _lobby_code,
     Status.IN_PROGRESS: _in_progress,

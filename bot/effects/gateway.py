@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import logging
 import time
 from collections.abc import Awaitable, Iterable
 from typing import Any, Literal, Protocol
@@ -13,6 +14,8 @@ import discord
 from django.conf import settings
 
 from bot.voice_pacing import VoicePacer
+
+logger = logging.getLogger(__name__)
 
 # Discord errors that mean this person can't get a DM, so the caller mentions them in the match
 # channel instead: DMs closed (50007), or no such recipient, such as a deleted account (50033).
@@ -60,6 +63,7 @@ class Gateway(Protocol):
         *,
         open_to_everyone: bool = False,
         viewer_role_ids: Iterable[int] = (),
+        hidden: bool = False,
     ) -> int: ...
 
     def voice_member_ids(self, guild_id: int, channel_id: int | None) -> set[int]: ...
@@ -135,6 +139,33 @@ class Gateway(Protocol):
 
     async def set_voice_status(self, channel_id: int, text: str, *, paced: bool = True) -> None: ...
 
+    async def reset_voice_channel(
+        self, guild_id: int, channel_id: int, user_ids: Iterable[int] = ()
+    ) -> None:
+        """Ready a pooled voice channel for its next match: every member's overwrite comes off
+        (the bot's own stays) and the voice status is cleared. `user_ids` are revoked too, in
+        case the cache missed an overwrite. ChannelGone if the channel no longer exists."""
+        ...
+
+    async def show_voice_channel(
+        self,
+        guild_id: int,
+        channel_id: int,
+        open_to_everyone: bool,
+        *,
+        viewer_role_ids: Iterable[int] = (),
+    ) -> None:
+        """A pooled channel taken by a match: @everyone and `viewer_role_ids` get the overwrites
+        `create_voice_channel` would have given them. ChannelGone if it no longer exists."""
+        ...
+
+    async def hide_voice_channel(
+        self, guild_id: int, channel_id: int, *, viewer_role_ids: Iterable[int] = ()
+    ) -> None:
+        """A pooled channel back in the pool: hidden from @everyone and `viewer_role_ids`, so
+        only staff see the free ones. ChannelGone if it no longer exists."""
+        ...
+
     async def fetch_attachment(
         self, channel_id: int, message_id: int, attachment_id: int
     ) -> tuple[str, bytes] | None: ...
@@ -154,16 +185,10 @@ VOICE_MEMBER = discord.PermissionOverwrite(
     use_voice_activation=True,
 )
 HIDDEN = discord.PermissionOverwrite(view_channel=False, connect=False)
-# The PUGs role watches every match: it reads the text channel and sees who's in voice, but only
-# the match's own players and staff talk there. Member and staff overwrites outrank these denies.
-TEXT_VIEWER = discord.PermissionOverwrite(
-    view_channel=True,
-    read_message_history=True,
-    send_messages=False,
-    add_reactions=False,
-    create_public_threads=False,
-    create_private_threads=False,
-)
+# The PUGs role is welcome in every match's text channel: it reads and talks there like the
+# players. In team voice it only sees who's in, unless Open match voice is on, and member and
+# staff overwrites outrank that deny.
+TEXT_PUGS = TEXT_MEMBER
 VOICE_VIEWER = discord.PermissionOverwrite(view_channel=True, connect=False)
 # The API's overwrite type for a member (0 is a role).
 MEMBER_OVERWRITE: Literal[1] = 1
@@ -191,6 +216,18 @@ SELF_VOICE = discord.PermissionOverwrite(
 
 def _member(user_id: int) -> discord.Object:
     return discord.Object(id=user_id, type=discord.Member)
+
+
+def _role(guild: discord.Guild, role_id: int) -> discord.Role | None:
+    """The server's role, from the cache. It has to be a real Role: creating a channel, discord.py
+    sends every other overwrite target as a member's (2.7.1, Guild._create_channel), so a role
+    passed as an Object gave nobody anything. None for a role that's been deleted."""
+    if role_id == guild.id:
+        return guild.default_role
+    role = guild.get_role(role_id)
+    if role is None:
+        logger.warning("Match channel role is missing", extra={"role": role_id})
+    return role
 
 
 # A closed DM doesn't become reachable on the next effect. Retry after a short cooldown,
@@ -248,14 +285,13 @@ class DiscordGateway:
             for role_id in viewer_role_ids:
                 # The @everyone role's ID is the guild's, so a server with no PUGs role opens
                 # to all.
-                target = (
-                    guild.default_role
-                    if role_id == guild.id
-                    else discord.Object(role_id, type=discord.Role)
-                )
-                overwrites[target] = viewer_perms
+                viewer = _role(guild, role_id)
+                if viewer is not None:
+                    overwrites[viewer] = viewer_perms
         for role_id in staff_role_ids:
-            overwrites[discord.Object(id=role_id, type=discord.Role)] = member_perms
+            staff = _role(guild, role_id)
+            if staff is not None:
+                overwrites[staff] = member_perms
         for user_id in member_ids:
             overwrites[_member(user_id)] = member_perms
         return overwrites
@@ -273,10 +309,10 @@ class DiscordGateway:
         *,
         viewer_role_ids: Iterable[int] = (),
     ) -> int:
-        """A match text channel: its players and staff talk, `viewer_role_ids` only read."""
+        """A match text channel: its players, staff and `viewer_role_ids` (the PUGs role) talk."""
         guild = self._guild(guild_id)
         overwrites = self._overwrites(
-            guild, member_ids, staff_role_ids, TEXT_MEMBER, SELF_TEXT, viewer_role_ids, TEXT_VIEWER
+            guild, member_ids, staff_role_ids, TEXT_MEMBER, SELF_TEXT, viewer_role_ids, TEXT_PUGS
         )
         channel = await guild.create_text_channel(
             name, category=self._category(guild, category_id), overwrites=overwrites
@@ -293,10 +329,12 @@ class DiscordGateway:
         *,
         open_to_everyone: bool = False,
         viewer_role_ids: Iterable[int] = (),
+        hidden: bool = False,
     ) -> int:
         """A match voice channel for its players and staff, which `viewer_role_ids` can see but
         not join. With `open_to_everyone` (the server's Open match voice setting) anyone in the
-        server can see and join it too."""
+        server can see and join it too. `hidden`: a pooled channel made ahead of need, which
+        only staff see until a match takes it."""
         guild = self._guild(guild_id)
         overwrites = self._overwrites(
             guild,
@@ -309,6 +347,12 @@ class DiscordGateway:
         )
         if open_to_everyone:
             overwrites[guild.default_role] = VOICE_MEMBER
+        if hidden:
+            for target in overwrites:
+                if target is guild.default_role or getattr(target, "id", None) in set(
+                    viewer_role_ids
+                ):
+                    overwrites[target] = HIDDEN
         channel = await self._voice_pacer.run(
             guild_id,
             lambda: guild.create_voice_channel(
@@ -562,9 +606,68 @@ class DiscordGateway:
             voice = channel
 
             def edit() -> Awaitable[Any]:
-                return voice.edit(status=text[:500])
+                # None takes the status off.
+                return voice.edit(status=text[:500] or None)
 
             await (self._voice_pacer.run(voice.guild.id, edit) if paced else edit())
+
+    async def _voice_channel(self, channel_id: int) -> discord.VoiceChannel:
+        channel = await self._messageable(channel_id)
+        if not isinstance(channel, discord.VoiceChannel):
+            raise ChannelGone(f"{channel_id} isn't a voice channel.")
+        return channel
+
+    async def reset_voice_channel(
+        self, guild_id: int, channel_id: int, user_ids: Iterable[int] = ()
+    ) -> None:
+        channel = await self._voice_channel(channel_id)
+        bot_id = self.client.user.id  # type: ignore[union-attr]
+        members = {
+            target.id
+            for target in channel.overwrites
+            if not isinstance(target, discord.Role)
+            and not (isinstance(target, discord.Object) and target.type is discord.Role)
+        }
+        for user_id in (members | set(user_ids)) - {bot_id}:
+            await self.revoke_member(channel_id, user_id)
+        # discord.py doesn't cache the status, so it's cleared whether or not one is set.
+        await self.set_voice_status(channel_id, "")
+
+    async def _set_role_overwrites(
+        self, channel_id: int, overwrites: dict[int, discord.PermissionOverwrite]
+    ) -> None:
+        """Role overwrites by ID through the API (the @everyone role's ID is the guild's)."""
+        await self._voice_channel(channel_id)
+        for role_id, perms in overwrites.items():
+            allow, deny = perms.pair()
+            try:
+                await self.client.http.edit_channel_permissions(
+                    channel_id, role_id, str(allow.value), str(deny.value), 0
+                )
+            except discord.NotFound as exc:
+                raise ChannelGone(str(channel_id)) from exc
+
+    async def show_voice_channel(
+        self,
+        guild_id: int,
+        channel_id: int,
+        open_to_everyone: bool,
+        *,
+        viewer_role_ids: Iterable[int] = (),
+    ) -> None:
+        viewers = set(viewer_role_ids)
+        # @everyone is hidden, unless it's the viewer role (a server with no PUGs role).
+        overwrites = dict.fromkeys(viewers, VOICE_VIEWER)
+        overwrites[guild_id] = VOICE_VIEWER if guild_id in viewers else HIDDEN
+        if open_to_everyone:
+            overwrites[guild_id] = VOICE_MEMBER
+        await self._set_role_overwrites(channel_id, overwrites)
+
+    async def hide_voice_channel(
+        self, guild_id: int, channel_id: int, *, viewer_role_ids: Iterable[int] = ()
+    ) -> None:
+        overwrites = dict.fromkeys({guild_id, *viewer_role_ids}, HIDDEN)
+        await self._set_role_overwrites(channel_id, overwrites)
 
     async def fetch_attachment(
         self, channel_id: int, message_id: int, attachment_id: int

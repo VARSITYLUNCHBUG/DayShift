@@ -361,6 +361,8 @@ class BotLikeSim:
         elif status == Status.COINFLIP:
             for choice in RANKED_COINFLIP_CHOICES:
                 components.append(button(f"dl:v1:coin_choice:{mid}:{choice}"))
+        elif status == Status.TEAM_CONFIRM:
+            components.append(button(f"dl:v1:teams_ready:{mid}:", "Teams ready"))
         elif status == Status.CHAMPION_DRAFT:
             for cid in draft.available_champions(match):
                 step = f"{match.step_index}.{cid}"
@@ -494,6 +496,7 @@ class BotLikeSim:
             ),
             "checkin": lambda: lobby.check_in(mid, user),
             "coin_choice": lambda: draft.choose_coinflip(mid, user, arg),
+            "teams_ready": lambda: draft.confirm_teams(mid, user),
             "api_start": lambda: draft.mark_api_started(mid, user),
             "confirm": lambda: results.confirm(mid, user),
             "swap_yes": lambda: swaps.answer(mid, user, int(arg), True),

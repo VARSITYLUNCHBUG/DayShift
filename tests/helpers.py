@@ -110,13 +110,23 @@ def acting_captain(match: Match) -> Player:
     return match.captain_of(team_for_role(step.role, first)).player
 
 
+def confirm_teams(match: Match) -> Match:
+    """Both captains press Teams ready: the hero draft starts."""
+    match = fresh(match)
+    for team in ("A", "B"):
+        if match.status == Status.TEAM_CONFIRM:
+            draft.confirm_teams(match.pk, match.captain_of(team).player)
+            match = fresh(match)
+    return match
+
+
 def to_champion_draft(match: Match) -> Match:
     """From the ready check to the first champion draft step."""
-    return settle_coinflip_for(run_player_draft(vote_captains(ready_all(match))))
+    return confirm_teams(settle_coinflip_for(run_player_draft(vote_captains(ready_all(match)))))
 
 
 def run_champion_draft(match: Match) -> Match:
-    match = settle_coinflip_for(match)
+    match = confirm_teams(settle_coinflip_for(match))
     while match.status == Status.CHAMPION_DRAFT:
         step = build_plan(match.mode)[match.step_index]
         team = team_for_role(step.role, match.champion_first_pick)

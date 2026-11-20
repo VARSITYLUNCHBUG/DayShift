@@ -10,6 +10,7 @@ from django.db import transaction
 from django.db.models import Max, Q
 
 from league.domain import copy
+from league.domain.draft_plan import player_pick_seconds
 from league.domain.engine import (
     LIVE,
     TERMINAL,
@@ -402,14 +403,16 @@ def advance_checkin(match: Match) -> None:
 
 
 def on_checkin_timeout(match: Match) -> None:
-    """A captain who didn't check in is replaced by the next eligible player in captain order,
-    who gets the full time. With nobody left to ask, the draft starts with the captains it has."""
+    """A captain who didn't check in is replaced by the highest-rated eligible player left, who
+    gets the full time. Votes don't count here: letting the check-in lapse mustn't hand the
+    captaincy to a friend the lapser voted for. With nobody left to ask, the draft starts with
+    the captains it has."""
     participants = list(match.participants.active())
     absent = [p for p in participants if p.is_captain and p.checked_in_at is None]
     taken = {p.player_id for p in participants if p.is_captain or p.missed_checkin}
     pool = [p for p in participants if p.player_id not in taken]
     candidates = [c for c in _candidates(match, pool) if c.eligible]
-    order = rank_captains(vote_counts(match), candidates, match.rng_seed)
+    order = rank_captains({}, candidates, match.rng_seed)
     by_id = {p.player_id: p for p in pool}
     replaced = []
     for missing in absent:
@@ -449,7 +452,7 @@ def begin_player_draft(match: Match, source: str) -> None:
         match,
         Status.PLAYER_DRAFT,
         source=source,
-        deadline_at=seconds_from_now(mode.player_draft.seconds),
+        deadline_at=seconds_from_now(player_pick_seconds(mode, 0)),
     )
     match.save_transition("player_first_pick", "step_index")
     render_board(match)

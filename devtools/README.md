@@ -181,7 +181,7 @@ Discord ID came from the simulator.
 ```
 
 `turn.action` is who must act now: `ready`, `vote`, `checkin` (the captains),
-`player_pick`, `coinflip`, `ban`, `pick`, `api_lobby` (deadlock-api is making the lobby),
+`player_pick`, `coinflip`, `teams_ready` (the captains confirm the teams), `ban`, `pick`, `api_lobby` (deadlock-api is making the lobby),
 `lobby_code` (it couldn't: the host enters one), `start_match`, `report`, `confirm`, `resolve`
 (staff), or `null` once the match is over. `turn.player_ids` are the players who still have to
 do it. `step` (draft phases only) is `match.step_index`. When `frozen` is true, `seconds_left` is
@@ -342,7 +342,7 @@ Response: the Match read model.
 Without `until`, completes the current phase: every player who still has to act does, one step
 at a time, until the status changes (a draft phase is all of its steps). With `until`, keeps
 going phase by phase until the match reaches that status (`captain_phase`, `captain_checkin`,
-`player_draft`, `coinflip`, `champion_draft`, `lobby_code`, `in_progress`,
+`player_draft`, `coinflip`, `team_confirm`, `champion_draft`, `lobby_code`, `in_progress`,
 `awaiting_confirmation`, or `completed`). A status the match has already reached or passed is a
 200 that does nothing: the bot can move on by itself, as when deadlock-api's lobby takes the
 match straight past `lobby_code`. A disputed match is resolved with the script's `winner`. A
@@ -383,6 +383,7 @@ optional):
 | `pick` | player draft: `player_id`; champion draft: `champion` (slug or id) | `draft.pick_player` / `draft.choose_champion` |
 | `ban` | `champion` | `draft.choose_champion` |
 | `coinflip` | `choice`: `hidden_king` or `archmother` | `draft.choose_coinflip` |
+| `teams_ready` | | `draft.confirm_teams` (a captain's **Teams ready**) |
 | `swap` | `give`, `take`: player refs (default: the captain's first non-captain, and the other team's) | `swaps.propose` (default actor: captain A) |
 | `accept_swap`, `decline_swap` | `swap_id` (default: the pending one) | `swaps.answer` (default actor: the other captain) |
 | `api_lobby` | `create` (default: as `PUT lobbies` says) | `draft.accept_api_lobby` / `draft.api_lobby_failed` (nobody in the match: deadlock-api) |

@@ -8,7 +8,13 @@ import re
 from django.db import IntegrityError, transaction
 
 from league.domain import copy
-from league.domain.draft_plan import PlanStep, build_plan, player_draft_length, team_for_role
+from league.domain.draft_plan import (
+    PlanStep,
+    build_plan,
+    player_draft_length,
+    player_pick_seconds,
+    team_for_role,
+)
 from league.domain.engine import (
     DraftablePlayer,
     Status,
@@ -23,7 +29,7 @@ from league.domain.engine import (
 )
 from league.domain.errors import InvalidAction, NotAllowed, StaleAction
 from league.domain.mode_schema import DraftMode
-from league.models import Champion, DraftAction, Match, Player
+from league.models import Champion, DraftAction, Match, MatchParticipant, Player
 from league.models.matches import MatchKind, Source
 from league.services.common import (
     add_effect,
@@ -159,7 +165,7 @@ def _advance_player_draft(match: Match, mode: DraftMode) -> None:
         )
         _advance_player_draft(match, mode)
         return
-    match.deadline_at = seconds_from_now(mode.player_draft.seconds)
+    match.deadline_at = seconds_from_now(player_pick_seconds(mode, match.step_index))
     match.bump("step_index", "deadline_at")
     render_board(match)
 
@@ -251,7 +257,7 @@ def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | 
         match.hidden_king_team, match.champion_first_pick = apply_ranked_coinflip(
             match.coinflip_winner, choice
         )
-        begin_champion_draft(match, mode, source=source, actor=actor)
+        begin_team_confirm(match, mode, source=source, actor=actor)
         return
     if not match.coinflip_winner_choice:
         # As in Bebot: no turn timer, only the scrim's idle one.
@@ -275,6 +281,90 @@ def _record_coinflip(match: Match, choice: str, *, source: str, actor: Player | 
     )
     match.save_transition("champion_first_pick", "hidden_king_team", "coinflip_loser_choice")
     render_board(match)
+
+
+# --- Captains confirm the teams -----------------------------------------------------------------
+
+TEAM_CONFIRM_PING = (
+    "check your teams. Swap players on the board if you need to, then each press "
+    "**Teams ready** to start the hero draft."
+)
+
+
+def _captains(match: Match) -> list[MatchParticipant]:
+    return list(match.participants.active().filter(is_captain=True).order_by("team"))
+
+
+def begin_team_confirm(
+    match: Match, mode: DraftMode, *, source: str, actor: Player | None = None
+) -> None:
+    """The sides are set: both captains confirm the teams, swapping players first if they like,
+    before the hero draft starts."""
+    match.participants.filter(is_captain=True).update(teams_confirmed_at=None)
+    transition(
+        match,
+        Status.TEAM_CONFIRM,
+        source=source,
+        actor=actor,
+        deadline_at=seconds_from_now(mode.champion_draft.team_confirm_seconds),
+    )
+    match.save_transition(
+        "champion_first_pick",
+        "hidden_king_team",
+        "coinflip_winner_choice",
+        "coinflip_loser_choice",
+    )
+    add_effect(
+        match.community,
+        "ping",
+        {
+            "user_ids": [p.player.discord_user_id for p in _captains(match)],
+            "text": TEAM_CONFIRM_PING,
+        },
+        match=match,
+    )
+    render_board(match)
+
+
+@transaction.atomic
+def confirm_teams(match_id: int, captain: Player) -> None:
+    """A captain's Teams ready. The hero draft starts once both have pressed it."""
+    match = Match.objects.lock(match_id)
+    if match.status != Status.TEAM_CONFIRM:
+        raise StaleAction("The teams are already confirmed.")
+    match.require_not_on_hold()
+    participant = match.require_participant(captain)
+    if not participant.is_captain:
+        raise NotAllowed("Only the captains confirm the teams.")
+    if participant.teams_confirmed_at is not None:
+        raise InvalidAction("You've confirmed. The hero draft starts once the other captain has.")
+    participant.teams_confirmed_at = now()
+    participant.save(update_fields=["teams_confirmed_at"])
+    match.bump()
+    advance_team_confirm(match)
+
+
+def advance_team_confirm(match: Match) -> None:
+    """Start the hero draft once both captains have confirmed."""
+    if match.on_hold or any(p.teams_confirmed_at is None for p in _captains(match)):
+        render_board(match)
+        return
+    begin_champion_draft(match, match.mode, source=Source.USER)
+
+
+def teams_changed(match: Match) -> None:
+    """A swap went through while the captains were confirming: they confirm the new teams, with
+    the full time again. Caller holds the match lock."""
+    if match.status != Status.TEAM_CONFIRM:
+        return
+    match.participants.filter(is_captain=True).update(teams_confirmed_at=None)
+    match.deadline_at = seconds_from_now(match.mode.champion_draft.team_confirm_seconds)
+    match.bump("deadline_at")
+
+
+def on_team_confirm_timeout(match: Match) -> None:
+    """Time's up: the teams stand as they are, and the hero draft starts."""
+    begin_champion_draft(match, match.mode, source=Source.TIMEOUT)
 
 
 def begin_champion_draft(

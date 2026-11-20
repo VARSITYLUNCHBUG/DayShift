@@ -28,3 +28,9 @@ def team_voice(match_id: int, captain: str) -> str:
     who = _clean(captain)
     name = f"Match {match_id} · {who}'s Team" if who else f"Match {match_id} · Team"
     return name[:MAX_LENGTH]
+
+
+def pooled_voice(number: int) -> str:
+    """A server's reusable team voice channel. Its name never changes: Discord allows a channel
+    only two renames in ten minutes. The match and team it's serving show in its voice status."""
+    return f"Team Voice {number}"

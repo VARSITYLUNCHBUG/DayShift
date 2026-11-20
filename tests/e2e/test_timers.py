@@ -34,7 +34,7 @@ def test_pause_resume_and_fire_one_match(
     assert frozen["frozen"]
     assert until_deadline(frozen) > timedelta(days=365), "a frozen deadline is pushed years out"
     left = frozen["seconds_left"]
-    assert 0 < left <= 45
+    assert 0 < left <= 90  # The first pick has twice the usual 45 s.
     expect(card.timer()).to_have_attribute("aria-label", f"time left {clock(left)}")
 
     card.resume()

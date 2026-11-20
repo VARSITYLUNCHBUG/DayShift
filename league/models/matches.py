@@ -28,6 +28,7 @@ class MatchStatus(models.TextChoices):
     CAPTAIN_CHECKIN = S.CAPTAIN_CHECKIN, "Captain check-in"
     PLAYER_DRAFT = S.PLAYER_DRAFT, "Player draft"
     COINFLIP = S.COINFLIP, "Captain coinflip"
+    TEAM_CONFIRM = S.TEAM_CONFIRM, "Captains confirm teams"
     CHAMPION_DRAFT = S.CHAMPION_DRAFT, "Champion draft"
     LOBBY_CODE = S.LOBBY_CODE, "Lobby code"
     IN_PROGRESS = S.IN_PROGRESS, "In progress"
@@ -244,6 +245,8 @@ class MatchParticipant(models.Model):
     checked_in_at = models.DateTimeField(null=True, blank=True)
     # Chosen as captain but didn't check in, so someone else took it. Never asked again.
     missed_checkin = models.BooleanField(default=False)
+    # A captain pressed Teams ready after the coinflip. Cleared when a swap changes the teams.
+    teams_confirmed_at = models.DateTimeField(null=True, blank=True)
     draft_pick_number = models.PositiveSmallIntegerField(null=True, blank=True)
     # True from joining until the match ends or the player is removed. Backs the hard guarantee
     # below that nobody can be in two live matches.

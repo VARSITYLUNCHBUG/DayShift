@@ -55,6 +55,7 @@ async def start(request: web.Request) -> web.Response:
 
 @routes.get(PREFIX + "/matches/custom/{party_id}/match-id")
 @routes.get(PREFIX + "/matches/{match_id}/metadata")
+@routes.get(PREFIX + "/matches/metadata")
 async def unknown(request: web.Request) -> web.Response:
     """Nothing is ever played, so no match has an ID or metadata."""
     return _reply(request, {"error": "Not found."}, 404)

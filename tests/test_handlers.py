@@ -260,6 +260,10 @@ def test_coinflip_buttons(wired: Community) -> None:
 
     click(fake_interaction(match.captain_of(winner).player), "coin_choice", match.pk, "archmother")
     match = fresh(match)
+    assert match.status == Status.TEAM_CONFIRM
+    for team in (loser, winner):
+        click(fake_interaction(match.captain_of(team).player), "teams_ready", match.pk)
+    match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
     # The winner took The Archmother: the other team is Hidden King, and goes first.
     assert match.hidden_king_team == loser

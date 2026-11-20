@@ -87,11 +87,12 @@ def test_fire_on_a_frozen_draft_auto_picks_one_step_and_stays_frozen(popped: Mat
     assert match["step_index"] == 1
     assert match["picks"][0]["source"] == "timeout"
     assert match["frozen"]
-    assert match["seconds_left"] == 45  # The next step's full time, waiting.
+    # The next step's full time, waiting: the other captain's first pick, which has double.
+    assert match["seconds_left"] == 90
     assert far_off(popped)
     ok("POST", f"matches/{popped.pk}/resume")
     left = seconds_left(popped)
-    assert 40 <= left <= 45
+    assert 85 <= left <= 90
 
 
 def test_fire_on_a_match_on_hold_runs_the_sub_timer(popped: Match) -> None:

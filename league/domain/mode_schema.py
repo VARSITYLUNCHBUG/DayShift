@@ -65,6 +65,9 @@ class ChampionDraft(_Strict):
     timed-out ban or pick takes a random champion, and the acting captain can press Random."""
 
     coinflip_seconds: Seconds = 20  # Each captain's time to choose. Then a random choice.
+    # Both captains' time to confirm the teams, swapping players if they like. Then the draft
+    # starts as though they had.
+    team_confirm_seconds: Seconds = 90
     seconds: Seconds = 30
     excluded_champion_ids: tuple[int, ...] = ()
     steps: Annotated[tuple[Step, ...], Field(min_length=1)]

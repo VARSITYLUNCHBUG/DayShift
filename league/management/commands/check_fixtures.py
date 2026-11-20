@@ -42,6 +42,8 @@ EXEMPT: dict[str, str] = {
     "league.match": _PLAYED,
     "league.matchparticipant": _PLAYED,
     "league.matchresource": _PLAYED,
+    # Each names a real Discord channel, which the bot makes the first time a match needs one.
+    "league.voicechannelslot": _PLAYED,
     "league.matchtransition": _PLAYED,
     "league.draftaction": _PLAYED,
     "league.captainvote": _PLAYED,

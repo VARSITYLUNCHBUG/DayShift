@@ -163,6 +163,106 @@ def test_client_maps_errors_and_misses(mock_api: dict[str, Any]) -> None:
     assert deadlock_api.custom_match_id("1234") == 77
 
 
+RATE_LIMITED = {
+    "status": 429,
+    "error": {
+        "type": "IP",
+        "quota": {"limit": 3, "period": 3600},
+        "requests": 3,
+        "remaining": 0,
+        "next_request_in": 2278,
+    },
+}
+
+
+def _paths(mock_api: dict[str, Any]) -> list[str]:
+    return [request.url.path for request in mock_api["seen"]]
+
+
+def test_a_429_is_waited_out_without_sending_more(mock_api: dict[str, Any]) -> None:
+    """Live, 20 November 2026: deadlock-api's 429 says when to come back in its body. Until then
+    that kind of request isn't sent at all; other kinds are."""
+    path = f"/v1/matches/{DEADLOCK_ID}/metadata"
+    mock_api["routes"][("GET", path)] = (429, RATE_LIMITED)
+    with pytest.raises(deadlock_api.ApiError) as error:
+        deadlock_api.match_metadata(DEADLOCK_ID)
+    assert error.value.rate_limited and not error.value.held_back
+    assert error.value.retry_after == 2279  # Rounded up: a second early is another 429.
+    with pytest.raises(deadlock_api.ApiError) as error:
+        deadlock_api.match_metadata(DEADLOCK_ID + 1)  # Any match: the quota is the IP's.
+    assert error.value.held_back and error.value.retry_after
+    assert 2270 <= error.value.retry_after <= 2279
+    assert _paths(mock_api) == [path]  # The second was never sent.
+    # Lobbies have a quota of their own, so they still go out.
+    mock_api["routes"][("POST", "/v1/matches/custom/create")] = (
+        200,
+        {"party_id": "1", "party_code": "ABCD"},
+    )
+    assert deadlock_api.create_custom_match().party_code == "ABCD"
+
+
+def test_a_lobby_429_still_lets_a_started_lobbys_match_id_through(
+    mock_api: dict[str, Any],
+) -> None:
+    mock_api["routes"][("POST", "/v1/matches/custom/create")] = (429, RATE_LIMITED)
+    with pytest.raises(deadlock_api.ApiError):
+        deadlock_api.create_custom_match()
+    mock_api["routes"][("GET", "/v1/matches/custom/9/match-id")] = (200, {"match_id": 77})
+    assert deadlock_api.custom_match_id("9") == 77
+
+
+def test_a_429_without_a_wait_holds_back_for_a_minute(mock_api: dict[str, Any]) -> None:
+    mock_api["routes"][("POST", "/v1/matches/custom/create")] = (429, {"error": "slow down"})
+    with pytest.raises(deadlock_api.ApiError):
+        deadlock_api.create_custom_match()
+    with pytest.raises(deadlock_api.ApiError) as error:
+        deadlock_api.create_custom_match()
+    assert error.value.held_back
+    assert deadlock_api.wait_left("/v1/matches/custom/create") > 50
+
+
+def bulk_row(deadlock_id: int = DEADLOCK_ID) -> dict[str, Any]:
+    """The fixture match as the bulk endpoint returns it: flat, teams as "Team0", the start as
+    text, and the last stats sample as final_stats."""
+    from datetime import UTC, datetime
+
+    info = metadata()["match_info"]
+    team = {0: "Team0", 1: "Team1"}
+    start = datetime.fromtimestamp(info["start_time"], UTC).strftime("%Y-%m-%d %H:%M:%S")
+    players = []
+    for player in info["players"]:
+        row = {key: value for key, value in player.items() if key != "stats"}
+        row["team"] = team[player["team"]]
+        row["final_stats"] = player["stats"][-1]
+        players.append(row)
+    return {
+        "match_id": deadlock_id,
+        "start_time": start,
+        "winning_team": team[info["winning_team"]],
+        "duration_s": info["duration_s"],
+        "match_mode": "PrivateLobby",
+        "game_mode": "Normal",
+        "players": players,
+    }
+
+
+def test_a_bulk_answer_reads_like_a_single_one(mock_api: dict[str, Any]) -> None:
+    mock_api["routes"][("GET", "/v1/matches/metadata")] = (200, [bulk_row()])
+    found = deadlock_api.bulk_match_metadata([DEADLOCK_ID, 5])
+    assert set(found) == {DEADLOCK_ID}
+    single = api_results.summarise(metadata())
+    bulk = api_results.summarise(found[DEADLOCK_ID])
+    assert {k: v for k, v in bulk.items() if k != "match_id"} == {
+        k: v for k, v in single.items() if k != "match_id"
+    }
+    query = mock_api["seen"][0].url.params
+    assert query["match_ids"] == f"5,{DEADLOCK_ID}"
+    assert "private_lobby" in query["match_mode"] and query["extra_player_columns"] == "mvp_rank"
+    mock_api["routes"][("GET", "/v1/matches/metadata")] = (404, {"error": "No matches found"})
+    assert deadlock_api.bulk_match_metadata([1]) == {}
+    assert deadlock_api.bulk_match_metadata([]) == {}
+
+
 def test_client_reads_steam_names(mock_api: dict[str, Any]) -> None:
     mock_api["routes"][("GET", "/v1/players/steam")] = (
         200,
@@ -410,3 +510,99 @@ def test_the_dashboard_shows_the_season(staff_client: Client, live: Match) -> No
     assert "Candidate parameters" in compared.content.decode()
     refused = staff_client.get("/admin/calibration/", {"params": '{"nope": 1}'})
     assert "Unknown parameters: nope" in refused.content.decode()
+
+
+# --- Checking several matches in one lookup --------------------------------------------------
+
+
+@pytest.fixture
+def bot_db() -> Any:
+    """The handler's database calls run on the bot's database thread, so these tests commit.
+    That thread's connection is closed afterwards, or it would block dropping the test database."""
+    import asyncio
+
+    from django.db import connections
+
+    from bot.db import db
+
+    yield
+    asyncio.run(db(connections.close_all))
+
+
+def _second_match(league: Community, deadlock_id: int) -> Match:
+    others = [make_player(n) for n in range(40, 52)]
+    existing = set(Match.objects.values_list("pk", flat=True))
+    for player in others:
+        queue.join(league.pk, player)
+    match = to_in_progress(Match.objects.exclude(pk__in=existing).get())
+    _report(match, match.hidden_king_team, deadlock_id)
+    return fresh(match)
+
+
+def _run_check(match: Match) -> None:
+    import asyncio
+
+    from bot.effects.handlers import Env, check_match_api
+    from tests.test_bot import FakeGateway
+
+    effect = OutboxEffect.objects.filter(
+        kind="check_match_api", match=match, status="pending"
+    ).latest("id")
+    asyncio.run(check_match_api(Env(FakeGateway(), effect, match.community, match)))
+
+
+@pytest.mark.django_db(transaction=True)
+def test_one_bulk_lookup_answers_every_queued_check(
+    league: Community, live: Match, mock_api: dict[str, Any], bot_db: None
+) -> None:
+    other_id = DEADLOCK_ID + 1
+    _report(live, live.hidden_king_team)
+    other = _second_match(league, other_id)
+    mock_api["routes"][("GET", "/v1/matches/metadata")] = (
+        200,
+        [bulk_row(DEADLOCK_ID), bulk_row(other_id)],
+    )
+    mock_api["routes"][("GET", "/v1/players/steam")] = (200, [])
+    _run_check(live)
+    paths = _paths(mock_api)
+    assert paths.count("/v1/matches/metadata") == 1
+    assert not any(path.endswith(f"{DEADLOCK_ID}/metadata") for path in paths)  # No Steam fetch.
+    assert ApiMatchCheck.objects.get(match=live).status == CheckStatus.OK
+    assert ApiMatchCheck.objects.filter(match=other, deadlock_match_id=other_id).exists()
+    # The other match's own check was claimed: it won't fetch again.
+    queued = OutboxEffect.objects.get(kind="check_match_api", match=other)
+    assert queued.status == "skipped"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_check_waits_out_a_429_without_using_a_try(
+    league: Community, live: Match, mock_api: dict[str, Any], bot_db: None
+) -> None:
+    from bot.effects.handlers import Later
+
+    other_id = DEADLOCK_ID + 1
+    _report(live, live.hidden_king_team)
+    other = _second_match(league, other_id)
+    mock_api["routes"][("GET", f"/v1/matches/{DEADLOCK_ID}/metadata")] = (429, RATE_LIMITED)
+    _run_check(live)  # Not in the bulk store; its own fetch is refused.
+    miss = ApiMatchCheck.objects.get(match=live)
+    assert miss.http_status == 429
+    retry = OutboxEffect.objects.filter(kind="check_match_api", match=live).latest("id")
+    assert (retry.run_after - miss.created_at).total_seconds() >= 2279
+    with pytest.raises(Later) as later:
+        _run_check(other)  # The quota is still spent: it waits, and isn't sent.
+    assert 2270 <= later.value.seconds <= 2279
+    assert not ApiMatchCheck.objects.filter(match=other).exists()  # No try used.
+    assert not any(path.endswith(f"{other_id}/metadata") for path in _paths(mock_api))
+
+
+def test_putting_an_effect_off_uses_no_attempt(live: Match) -> None:
+    from league.services import effects
+
+    _report(live, live.hidden_king_team)
+    effect = OutboxEffect.objects.get(kind="check_match_api", match=live)
+    effects.mark_started(effect.pk)
+    effects.mark_later(effect.pk, 600, "deadlock-api rate limit")
+    effect.refresh_from_db()
+    assert (effect.status, effect.attempts, effect.started_at) == ("pending", 0, None)
+    assert (effect.run_after - effects.now()).total_seconds() > 590

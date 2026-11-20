@@ -27,10 +27,18 @@ from django.db import transaction
 from django.db.models import Count
 
 from league.domain.engine import Status
-from league.models import ApiMatchCheck, Community, Match, MatchParticipant, SteamAccount
+from league.models import (
+    ApiMatchCheck,
+    Community,
+    Match,
+    MatchParticipant,
+    OutboxEffect,
+    SteamAccount,
+)
 from league.models.alerts import AlertKind
 from league.models.api import CheckStatus
 from league.models.matches import MatchResource, ResourceKind
+from league.models.outbox import EffectStatus
 from league.models.permissions import Area
 from league.models.scoreboards import AwardSource
 from league.services import alerts, runtime, steam
@@ -38,6 +46,7 @@ from league.services.common import add_effect, now
 
 logger = logging.getLogger(__name__)
 
+CHECK_KIND = "check_match_api"
 # Minutes to wait before each fetch. About four hours in all.
 BACKOFF_MINUTES = (0, 2, 5, 15, 30, 60, 60, 60)
 # After a 429, the next try waits at least this long. Without an API key the limits are tight.
@@ -82,12 +91,51 @@ def schedule(match: Match, attempt: int = 1, *, wait_at_least: timedelta | None 
         wait = max(wait, wait_at_least)
     add_effect(
         match.community,
-        "check_match_api",
+        CHECK_KIND,
         {"attempt": attempt, "deadlock_match_id": match.deadlock_match_id},
         match=match,
         dedupe_key=f"check_match_api:{match.pk}:{match.deadlock_match_id}:{attempt}",
         run_after=now() + wait,
     )
+    return True
+
+
+def waiting_checks(limit: int = 1000) -> dict[int, int]:
+    """Every result check still queued, in any server, whether due or not: Deadlock match ID to
+    our match. One bulk lookup answers them all, ahead of their turn."""
+    rows = (
+        OutboxEffect.objects.filter(kind=CHECK_KIND, status=EffectStatus.PENDING)
+        .order_by("run_after")
+        .values_list("match_id", "payload")[:limit]
+    )
+    waiting: dict[int, int] = {}
+    for match_id, payload in rows:
+        deadlock_match_id = payload.get("deadlock_match_id") if isinstance(payload, dict) else None
+        if match_id is not None and isinstance(deadlock_match_id, int):
+            waiting.setdefault(deadlock_match_id, match_id)
+    return waiting
+
+
+@transaction.atomic
+def record_found(
+    match_id: int, deadlock_match_id: int, data: dict[str, Any], names: dict[int, str]
+) -> bool:
+    """Another match's check, answered early by a bulk lookup. Its queued check is claimed so
+    it doesn't fetch again, and the metadata is recorded as that check would have. False, and
+    nothing recorded, if its check has started meanwhile or the match no longer wants it."""
+    claimed = OutboxEffect.objects.filter(
+        kind=CHECK_KIND,
+        match_id=match_id,
+        status=EffectStatus.PENDING,
+        started_at__isnull=True,
+        payload__deadlock_match_id=deadlock_match_id,
+    ).update(status=EffectStatus.SKIPPED, done_at=now(), last_error="Answered by a bulk lookup")
+    if not claimed:
+        return False
+    match = Match.objects.lock(match_id)
+    if match.deadlock_match_id != deadlock_match_id or match.status not in CHECKABLE:
+        return False
+    record_metadata(match_id, deadlock_match_id, data, names)
     return True
 
 

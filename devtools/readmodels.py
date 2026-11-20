@@ -142,6 +142,13 @@ def _turn(match: Match) -> JSON:
         team, _ = draft.coinflip_turn(match)
         captain = active.filter(team=team, is_captain=True).values_list("player_id", flat=True)
         return {"action": "coinflip", "team": team, "player_ids": list(captain)}
+    if status == Status.TEAM_CONFIRM:
+        unconfirmed = active.filter(is_captain=True, teams_confirmed_at__isnull=True)
+        return {
+            "action": "teams_ready",
+            "team": None,
+            "player_ids": list(unconfirmed.order_by("team").values_list("player_id", flat=True)),
+        }
     if status == Status.LOBBY_CODE:
         if not match.api_lobby_failed:
             # deadlock-api is making the lobby: nobody's turn until it answers.

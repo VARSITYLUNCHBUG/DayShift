@@ -21,6 +21,7 @@ FLOW = [
     "captain_checkin",
     "player_draft",
     "coinflip",
+    "team_confirm",
     "champion_draft",
     "lobby_code",
     "in_progress",
@@ -50,6 +51,8 @@ def check_board(match: JSON, board: JSON) -> None:
         assert {label.rsplit(" (", 1)[0] for label in buttons if label.endswith(")")} == undrafted
     elif status == "coinflip":
         assert {"Hidden King", "Archmother"} <= buttons
+    elif status == "team_confirm":
+        assert {"Teams ready", "Swap players"} <= buttons
     elif status == "champion_draft":
         assert "**Bans**" in text
     elif status == "in_progress":

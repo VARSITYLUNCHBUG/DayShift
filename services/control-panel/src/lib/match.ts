@@ -8,6 +8,7 @@ export const RANKED_FLOW = [
   "captain_checkin",
   "player_draft",
   "coinflip",
+  "team_confirm",
   "champion_draft",
   "lobby_code",
   "in_progress",
@@ -18,7 +19,7 @@ export const RANKED_FLOW = [
 export const TERMINAL = new Set(["completed", "voided", "drafted"]);
 
 /** Between the player draft and the game, captains can swap players (`league/services/swaps.py`). */
-export const SWAPPABLE = new Set(["coinflip", "champion_draft", "lobby_code"]);
+export const SWAPPABLE = new Set(["coinflip", "team_confirm", "champion_draft", "lobby_code"]);
 
 export type ChipColor = "default" | "accent" | "success" | "warning" | "danger";
 
@@ -29,6 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
   captain_checkin: "Captain check-in",
   player_draft: "Player draft",
   coinflip: "Captain coinflip",
+  team_confirm: "Captains confirm teams",
   champion_draft: "Champion draft",
   lobby_code: "Lobby code",
   in_progress: "In progress",

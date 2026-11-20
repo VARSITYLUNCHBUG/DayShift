@@ -123,6 +123,14 @@ def _forget_leaderboard_pages() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _forget_deadlock_api_waits() -> None:
+    """The deadlock-api client remembers a 429 per process; tests start fresh."""
+    from league.integrations import deadlock_api
+
+    deadlock_api.forget_waits()
+
+
+@pytest.fixture(autouse=True)
 def _queue_renders_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
     """The queue panel waits a moment to fold bursts into one edit; tests drain at once, so they
     skip it. test_postmatch checks the wait itself."""

@@ -50,6 +50,7 @@ ORDER = (
     Status.CAPTAIN_CHECKIN,
     Status.PLAYER_DRAFT,
     Status.COINFLIP,
+    Status.TEAM_CONFIRM,
     Status.CHAMPION_DRAFT,
     Status.LOBBY_CODE,
     Status.IN_PROGRESS,
@@ -74,6 +75,7 @@ ACTIONS = (
     "pick",
     "ban",
     "coinflip",
+    "teams_ready",
     "swap",
     "accept_swap",
     "decline_swap",
@@ -103,6 +105,16 @@ FILE_UPLOAD = 19
 # that has just been disabled: the bot moved on in between, so look again. No bot on the gateway
 # is a 503 (BotOffline): waited out too, as the bot reconnects after a reset, but reported as such.
 MOVED_ON = frozenset({404, 409})
+
+
+def deadlock_match_id_of(match: Match) -> str:
+    """What a captain enters as the Deadlock match ID: the one deadlock-api's lobby got, or a
+    stand-in for a lobby a captain hosted."""
+    return str(match.deadlock_match_id or DEV_DEADLOCK_MATCH_ID_BASE + match.pk)
+
+
+# Far from deadlock-api's stand-in's own IDs, so a made-up one is never mistaken for a real one.
+DEV_DEADLOCK_MATCH_ID_BASE = 990_000_000
 
 
 @dataclass(slots=True)
@@ -290,6 +302,9 @@ def next_moves(match: Match) -> list[Move]:
         team, _ = draft.coinflip_turn(match)
         choice = str(script_of(match).get("coinflip", HIDDEN_KING))
         return [Move(match.captain_of(team).player, "coinflip", {"choice": choice})]
+    if status == Status.TEAM_CONFIRM:
+        waiting = active.filter(is_captain=True, teams_confirmed_at__isnull=True).order_by("team")
+        return [Move(p.player, "teams_ready") for p in waiting]
     if status == Status.CHAMPION_DRAFT:
         action, _ = _step(match)
         return [Move(lookup.acting_captain(match), action, {"champion": choose_champion(match)})]
@@ -368,6 +383,8 @@ def by_service(match: Match, move: Move) -> None:
         draft.choose_champion(mid, player, match.step_index, int(args["champion"]))
     elif action == "coinflip":
         draft.choose_coinflip(mid, player, str(args["choice"]))
+    elif action == "teams_ready":
+        draft.confirm_teams(mid, player)
     elif action == "lobby_code":
         draft.submit_lobby_code(mid, player, str(args["code"]))
     elif action == "start_match":
@@ -731,6 +748,8 @@ class Clicker:
             self._champion(user, step, int(args["champion"]))
         elif action == "coinflip":
             self.act(user, self._id("coin_choice", args["choice"]), "the coinflip buttons")
+        elif action == "teams_ready":
+            self.act(user, self._id("teams_ready"), "the Teams ready button")
         elif action == "lobby_code":
             opened = self.press(user, self._id("code_open"), "the Enter lobby code button")
             self.submit_modal(user, opened, "the lobby code", str(args["code"]))
@@ -738,7 +757,8 @@ class Clicker:
             self.act(user, self._id("api_start"), "the Start match button")
         elif action == "report":
             opened = self.press(user, self._id("report_open", args["winner"]), "the report")
-            self.submit_modal(user, opened, "the report")
+            # The report's one required text field is the Deadlock match ID.
+            self.submit_modal(user, opened, "the report", deadlock_match_id_of(match))
         elif action == "confirm":
             self.act(user, self._id("confirm"), "the Confirm button")
         elif action == "dispute":

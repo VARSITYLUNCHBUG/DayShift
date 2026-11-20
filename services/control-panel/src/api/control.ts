@@ -51,6 +51,7 @@ export const ACTIONS = [
   "pick",
   "ban",
   "coinflip",
+  "teams_ready",
   "swap",
   "accept_swap",
   "decline_swap",

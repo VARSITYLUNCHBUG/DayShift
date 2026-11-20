@@ -5,11 +5,23 @@ transaction (`asyncio.to_thread` from the bot). Nothing here touches the databas
 
 deadlock-api is community-run and unofficial, so callers treat every failure as ordinary: a
 lobby falls back to a captain entering a code, and a result check is retried or skipped.
+
+Rate limits. Without an API key they are tight: a match deadlock-api has to fetch from Steam is
+3 an hour per IP, and custom lobbies 10 an hour. A 429 says how long to wait (`next_request_in`
+in its body, or Retry-After). Until then this client turns that kind of request away itself,
+with no request sent, so a queue of retries can't keep the quota spent for ever (live, 20
+November 2026: three matches retrying in turn kept each other out for hours).
 """
 
 from __future__ import annotations
 
+import json
+import re
+import threading
+import time
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -31,15 +43,59 @@ class ApiError(Exception):
     """A request that didn't succeed. `status` is the HTTP status, or None for a network error."""
 
     def __init__(
-        self, message: str, status: int | None = None, retry_after: int | None = None
+        self,
+        message: str,
+        status: int | None = None,
+        retry_after: int | None = None,
+        *,
+        held_back: bool = False,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.retry_after = retry_after  # Seconds a 429 asks us to wait, when it says.
+        # Not sent at all: an earlier 429 for this kind of request is still being waited out.
+        self.held_back = held_back
 
     @property
     def rate_limited(self) -> bool:
         return self.status == 429
+
+
+# Each kind of request has its own quota. A 429 on one holds back only that kind.
+_KINDS = (
+    ("bulk_metadata", re.compile(r"^/v1/matches/metadata$")),
+    ("match_metadata", re.compile(r"^/v1/matches/\d+/metadata")),
+    # A started lobby's match ID has a quota of its own (100 a second), apart from lobbies'.
+    ("custom_match_id", re.compile(r"^/v1/matches/custom/[^/]+/match-id$")),
+    ("custom_lobby", re.compile(r"^/v1/matches/custom/")),
+)
+# A 429 that doesn't say how long: wait this long before trying that kind again.
+DEFAULT_WAIT_SECONDS = 60
+_waits: dict[str, float] = {}  # Kind to the monotonic time its wait ends.
+_waits_lock = threading.Lock()  # Calls run in worker threads (asyncio.to_thread).
+
+
+def _kind(path: str) -> str:
+    return next((name for name, pattern in _KINDS if pattern.match(path)), "other")
+
+
+def wait_left(path: str) -> int:
+    """Seconds until a request to `path` may be sent again, after a 429. 0: send it."""
+    with _waits_lock:
+        until = _waits.get(_kind(path), 0.0)
+    return max(0, round(until - time.monotonic()))
+
+
+def _hold_until(path: str, seconds: int) -> None:
+    with _waits_lock:
+        kind = _kind(path)
+        _waits[kind] = max(_waits.get(kind, 0.0), time.monotonic() + seconds)
+
+
+def forget_waits() -> None:
+    """For tests: forget every 429."""
+    with _waits_lock:
+        _waits.clear()
 
 
 def _headers() -> dict[str, str]:
@@ -54,6 +110,13 @@ def _client() -> httpx.Client:
 
 
 def _request(method: str, path: str, **kwargs: Any) -> httpx.Response:
+    if (left := wait_left(path)) > 0:
+        raise ApiError(
+            f"deadlock-api rate limit: waiting {left} s more before trying again",
+            429,
+            left,
+            held_back=True,
+        )
     try:
         with _client() as client:
             response = client.request(method, path, **kwargs)
@@ -61,18 +124,28 @@ def _request(method: str, path: str, **kwargs: Any) -> httpx.Response:
         raise ApiError(f"deadlock-api unreachable: {type(exc).__name__}") from exc
     if response.status_code >= 400 and response.status_code != 404:
         detail = response.text[:200].strip()
+        retry_after = _retry_after(response)
+        if response.status_code == 429:
+            _hold_until(path, retry_after or DEFAULT_WAIT_SECONDS)
         raise ApiError(
-            f"deadlock-api {response.status_code}: {detail}",
-            response.status_code,
-            _retry_after(response),
+            f"deadlock-api {response.status_code}: {detail}", response.status_code, retry_after
         )
     return response
 
 
 def _retry_after(response: httpx.Response) -> int | None:
-    """A 429's Retry-After, in seconds. deadlock-api sends seconds; a date form is ignored."""
+    """How long a 429 asks us to wait, in seconds: `error.next_request_in` in deadlock-api's
+    body, or else a Retry-After header in seconds (a date form is ignored)."""
     if response.status_code != 429:
         return None
+    try:
+        body = response.json()
+    except (json.JSONDecodeError, ValueError):
+        body = None
+    error = body.get("error") if isinstance(body, dict) else None
+    wait = error.get("next_request_in") if isinstance(error, dict) else None
+    if isinstance(wait, int | float) and wait > 0:
+        return int(wait) + 1  # Rounded up: a second early is another 429.
     raw = response.headers.get("retry-after", "").strip()
     return int(raw) if raw.isdigit() else None
 
@@ -81,12 +154,89 @@ def _retry_after(response: httpx.Response) -> int | None:
 
 
 def match_metadata(match_id: int) -> dict[str, Any] | None:
-    """A finished match's metadata, or None when deadlock-api doesn't have it (yet)."""
+    """A finished match's metadata, or None when deadlock-api doesn't have it (yet). A match it
+    hasn't stored yet is fetched from Steam, which is the 3-an-hour quota: try
+    `bulk_match_metadata` first."""
     response = _request("GET", f"/v1/matches/{match_id}/metadata")
     if response.status_code == 404:
         return None
     data = response.json()
     return data if isinstance(data, dict) else None
+
+
+BULK_PATH = "/v1/matches/metadata"
+# Up to deadlock-api's limit on match_ids.
+BULK_MAX = 1000
+_BULK_PARAMS = {
+    # Custom lobbies are private_lobby; the rest in case a match ID was mistyped as a public one.
+    "match_mode": "private_lobby,unranked,ranked",
+    "include_info": "true",
+    "include_player_info": "true",
+    "include_player_kda": "true",
+    # The last sample of each stat: far cheaper than the time series.
+    "include_player_final_stats": "true",
+    "extra_player_columns": "mvp_rank",
+}
+_TEAMS = {"Team0": 0, "Team1": 1}
+_GAME_MODES = {"Normal": 1}
+
+
+def _mapped(names: dict[str, int], value: Any) -> Any:
+    """The single-match form of a bulk value ("Team0" is 0), or the value as it came."""
+    return names.get(value, value) if isinstance(value, str) else value
+
+
+def bulk_match_metadata(match_ids: Iterable[int]) -> dict[int, dict[str, Any]]:
+    """Metadata for every one of these matches deadlock-api has already stored, in one request
+    and from its own database, never Steam: so it doesn't use the 3-an-hour quota. Matches it
+    doesn't have are left out. Each value has `match_metadata`'s shape."""
+    ids = sorted(set(match_ids))[:BULK_MAX]
+    if not ids:
+        return {}
+    params = {**_BULK_PARAMS, "match_ids": ",".join(map(str, ids)), "limit": str(len(ids))}
+    response = _request("GET", BULK_PATH, params=params)
+    if response.status_code == 404:  # "No matches found".
+        return {}
+    rows = response.json()
+    if not isinstance(rows, list):
+        return {}
+    found = {}
+    for row in rows:
+        if isinstance(row, dict) and isinstance(row.get("match_id"), int):
+            found[row["match_id"]] = _from_bulk(row)
+    return found
+
+
+def _from_bulk(row: dict[str, Any]) -> dict[str, Any]:
+    """A bulk row in the single-match shape the result check reads: a `match_info` wrapper,
+    teams as 0 and 1, the start as a Unix time, and the final stats as the last sample."""
+    players = [
+        {
+            **player,
+            "team": _mapped(_TEAMS, player.get("team")),
+            "stats": [player.get("final_stats") or {}],
+        }
+        for player in row.get("players") or []
+        if isinstance(player, dict)
+    ]
+    info = {key: value for key, value in row.items() if key != "players"}
+    info["winning_team"] = _mapped(_TEAMS, row.get("winning_team"))
+    info["game_mode"] = _mapped(_GAME_MODES, row.get("game_mode"))
+    info["start_time"] = _unix(row.get("start_time"))
+    info["players"] = players
+    return {"match_info": info}
+
+
+def _unix(value: Any) -> int | None:
+    """The bulk endpoint's "2026-11-19 22:16:47", in UTC, as a Unix time."""
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return int(datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC).timestamp())
+    except ValueError:
+        return None
 
 
 # --- Custom lobbies --------------------------------------------------------------------------

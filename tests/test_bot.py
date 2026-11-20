@@ -41,7 +41,16 @@ from league.domain.images import detect_image
 from league.models import Community, Match, OutboxEffect, Player, Season
 from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
-from league.services import boards, common, community, effects, integrity, lobby, queue
+from league.services import (
+    boards,
+    common,
+    community,
+    effects,
+    integrity,
+    lobby,
+    queue,
+    voice_pool,
+)
 from league.services import draft as draft_service
 from league.services.boards import ResultRow
 from league.services.common import add_effect
@@ -49,6 +58,7 @@ from league.services.common import render_queue as request_queue
 from tests.conftest import Clock, make_player
 from tests.helpers import (
     acting_captain,
+    confirm_teams,
     finish,
     fresh,
     ready_all,
@@ -185,6 +195,8 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
     check(match)
     match = settle_coinflip_for(match)
     check(match)
+    match = confirm_teams(match)
+    check(match)
     match = run_champion_draft(match)
     check(match)
     draft.api_lobby_failed(match.pk, "test: no API")
@@ -208,6 +220,7 @@ def test_every_phase_renders_within_discord_limits(popped: Match) -> None:
         Status.CAPTAIN_PHASE,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
+        Status.TEAM_CONFIRM,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,
@@ -668,6 +681,9 @@ class FakeGateway:
     open_voice: dict[int, bool] = field(default_factory=dict)
     names: dict[int, str] = field(default_factory=dict)  # Display names Discord has cached.
     unpaced: list[tuple[str, int]] = field(default_factory=list)  # Voice calls skipping pacing.
+    voice_created: list[str] = field(default_factory=list)  # Names, in the order made.
+    resets: list[int] = field(default_factory=list)  # Pooled channels made ready for reuse.
+    hidden: set[int] = field(default_factory=set)  # Voice channels only staff can see.
 
     def _id(self) -> int:
         self.next_id += 1
@@ -698,8 +714,12 @@ class FakeGateway:
         *,
         open_to_everyone=False,
         viewer_role_ids=(),
+        hidden=False,
     ) -> int:
         channel_id = self._id()
+        self.voice_created.append(name)
+        if hidden:
+            self.hidden.add(channel_id)
         self.viewers_seen[channel_id] = list(viewer_role_ids)
         self.open_voice[channel_id] = open_to_everyone
         self.channels[channel_id] = name
@@ -816,6 +836,8 @@ class FakeGateway:
         self.voice.pop(channel_id, None)
 
     async def grant_member(self, channel_id, user_id) -> None:
+        if channel_id in self.deleted:
+            raise ChannelGone(str(channel_id))
         self.granted.append((channel_id, user_id))
 
     async def revoke_member(self, channel_id, user_id) -> None:
@@ -825,6 +847,26 @@ class FakeGateway:
         if not paced:
             self.unpaced.append(("set_voice_status", channel_id))
         self.statuses[channel_id] = text
+
+    async def reset_voice_channel(self, guild_id, channel_id, user_ids=()) -> None:
+        if channel_id in self.deleted:
+            raise ChannelGone(str(channel_id))
+        self.revoked.extend((channel_id, user_id) for user_id in user_ids)
+        self.statuses[channel_id] = ""
+        self.resets.append(channel_id)
+
+    async def show_voice_channel(
+        self, guild_id, channel_id, open_to_everyone, *, viewer_role_ids=()
+    ) -> None:
+        if channel_id in self.deleted:
+            raise ChannelGone(str(channel_id))
+        self.hidden.discard(channel_id)
+        self.open_voice[channel_id] = open_to_everyone
+
+    async def hide_voice_channel(self, guild_id, channel_id, *, viewer_role_ids=()) -> None:
+        if channel_id in self.deleted:
+            raise ChannelGone(str(channel_id))
+        self.hidden.add(channel_id)
 
     async def fetch_attachment(self, channel_id, message_id, attachment_id):
         return ("shot.png", b"\x89PNG\r\n\x1a\ndata")
@@ -1025,7 +1067,8 @@ def test_full_match_through_effects(wired: Community) -> None:
     match = to_in_progress(match)
     drain(gateway)
     assert any("Lobby code: `ABC123`" in row[1] for row in gateway.texts)
-    assert gateway.statuses[team_a] == "Lobby code: ABC123"
+    captain_a = match.captain_of("A").player.display_name
+    assert gateway.statuses[team_a] == f"Match {match.pk} · {captain_a}'s Team · Lobby code: ABC123"
 
     match = finish(match, "A")
     drain(gateway)
@@ -1033,10 +1076,14 @@ def test_full_match_through_effects(wired: Community) -> None:
     assert len(posts) == 1
     assert posts[0][1][1].startswith(b"\x89PNG")
     assert resource(match, ResourceKind.RESULTS_MESSAGE)
-    # Everyone heads back to the Waiting Room and team channels go.
+    # Everyone heads back to the Waiting Room and the team channels go back to the pool, emptied
+    # of the team's overwrites and status, for the next match.
     assert gateway.voice[WAITING_ROOM] == set(ids)
-    assert team_a in gateway.deleted
-    assert team_b in gateway.deleted
+    assert team_a not in gateway.deleted and team_b not in gateway.deleted
+    assert gateway.resets == [team_a, team_b]
+    assert gateway.statuses[team_a] == gateway.statuses[team_b] == ""
+    assert {user for channel, user in gateway.revoked if channel == team_a} == a_ids
+    assert voice_pool.free_channels(wired.pk) == [team_a, team_b]
     # The text channel waits out its grace period.
     assert text_id not in gateway.deleted
     delayed = OutboxEffect.objects.get(kind="delete_text_channel", match=match)
@@ -1325,11 +1372,23 @@ def test_board_stays_last_and_only_current_pings_survive_a_whole_match(wired: Co
     assert live_notice_texts(gateway, match) == [
         "teams are set and you won the coinflip! Choose your side on the board. The Hidden King "
         "bans and picks first.",
-        # Nobody is in the Waiting Room here, so team voice pings them all, once.
-        "teams are set. Join your team's voice channel.",
+        # Nobody is in the Waiting Room here, so team voice pings them all, once, with links.
+        "teams are set. Join your team's voice channel: "
+        f"{fresh(match).captain_of('A').player.display_name}'s Team "
+        f"<#{resource(match, ResourceKind.TEAM_A_VOICE)}>, "
+        f"{fresh(match).captain_of('B').player.display_name}'s Team "
+        f"<#{resource(match, ResourceKind.TEAM_B_VOICE)}>.",
     ]
 
     match = settle_coinflip_for(match)
+    drain(gateway)
+    assert_board_last(gateway, match)
+    assert live_notice_texts(gateway, match) == [
+        "check your teams. Swap players on the board if you need to, then each press "
+        "**Teams ready** to start the hero draft."
+    ]
+
+    match = confirm_teams(match)
     drain(gateway)
     assert_board_last(gateway, match)
     assert live_notice_texts(gateway, match) == ["you ban first."]
@@ -1847,7 +1906,9 @@ def test_a_restart_keeps_the_channels_and_empties_team_voice_into_the_waiting_ro
     drain(gateway)
     successor = Match.objects.get(restarted_from=match)
     assert resource(successor, ResourceKind.TEXT) == text and text not in gateway.deleted
-    assert team_voice in gateway.deleted
+    # The team channels are kept: back in the pool, for the successor's teams.
+    assert team_voice not in gateway.deleted
+    assert team_voice in voice_pool.free_channels(wired.pk)
     assert sitting in gateway.voice[WAITING_ROOM]  # Back in the lobby: the Waiting Room.
     board = gateway.views[resource(successor, ResourceKind.BOARD_MESSAGE)]
     assert "Restarted from" not in str(board.to_components())
@@ -1947,7 +2008,21 @@ def test_coinflip_board_offers_the_winner_a_side(voting: Match) -> None:
     draft_service.choose_coinflip(
         match.pk, match.captain_of(match.coinflip_winner).player, "archmother"
     )
-    assert fresh(match).status == Status.CHAMPION_DRAFT
+    assert fresh(match).status == Status.TEAM_CONFIRM
+
+
+@pytest.mark.django_db
+def test_team_check_board_offers_teams_ready_and_swaps(voting: Match) -> None:
+    match = settle_coinflip_for(run_player_draft(vote_captains(voting)))
+    assert match.status == Status.TEAM_CONFIRM
+    view = _check(match)
+    text = str(view)
+    labels = {b["label"] for b in all_buttons(view)}
+    assert {"Teams ready", "Swap players"} <= labels
+    assert "⏳" in text and "✅" not in text
+    draft_service.confirm_teams(match.pk, match.captain_of("A").player)
+    text = str(_check(match))
+    assert text.count("✅") == 1 and text.count("⏳") == 1
 
 
 @pytest.mark.django_db
