@@ -15,7 +15,7 @@ from collections.abc import Callable
 import discord
 
 from bot.db import db
-from bot.effects.gateway import ChannelGone, Gateway
+from bot.effects.gateway import ChannelGone, EditCapped, Gateway
 from bot.effects.handlers import HANDLERS, Env, Skip
 from league import log_context
 from league.models import OutboxEffect
@@ -29,10 +29,17 @@ _PERMANENT_STATUS = {400, 401, 403, 404}
 
 
 class EffectWorker:
-    def __init__(self, gateway: Gateway, on_lane_done: Callable[[], None] | None = None) -> None:
+    def __init__(
+        self,
+        gateway: Gateway,
+        on_lane_done: Callable[[], None] | None = None,
+        on_effect_done: Callable[[str], None] | None = None,
+    ) -> None:
         self.gateway = gateway
         # Called when a lane finishes, since its effects may have queued more work.
         self.on_lane_done = on_lane_done
+        # Called with each effect's kind once it has run, however it ended.
+        self.on_effect_done = on_effect_done
         # One running task per lane: a match ID, or a key for work outside any match.
         self._lanes: dict[effects.Lane, asyncio.Task[int]] = {}
 
@@ -95,7 +102,11 @@ class EffectWorker:
         # So an error is posted to its own server's error channel, and nobody else's.
         guild = getattr(effect.community, "discord_guild_id", None)
         with log_context.bind(guild=guild, match=effect.match_id, effect=effect.pk):
-            return await self._run_bound(effect)
+            try:
+                return await self._run_bound(effect)
+            finally:
+                if self.on_effect_done is not None:
+                    self.on_effect_done(effect.kind)
 
     async def _run_bound(self, effect: OutboxEffect) -> bool:
         handler = HANDLERS.get(effect.kind)
@@ -112,6 +123,20 @@ class EffectWorker:
             await db(effects.mark_done, effect.pk, EffectStatus.SKIPPED)
             logger.debug("Effect skipped", extra={"kind": effect.kind, "why": str(exc)})
             return True
+        except EditCapped as exc:
+            # The panels that must stay current repost themselves; for anything else an old
+            # message keeping its last version beats failing the lane, and retrying can't help.
+            await db(effects.mark_done, effect.pk, EffectStatus.SKIPPED)
+            logger.warning(
+                "Edit refused: message too old", extra={"kind": effect.kind, "message": str(exc)}
+            )
+            return True
+        except discord.RateLimited as exc:
+            # A wait longer than the client's max_ratelimit_timeout. Sleeping it out here would
+            # stall every later effect in this lane, so step aside and come back after it.
+            return await self._retry(
+                effect, f"Rate limited for {exc.retry_after:.0f}s", wait_at_least=exc.retry_after
+            )
         except discord.HTTPException as exc:
             if exc.status in _PERMANENT_STATUS:
                 await self._fail(effect, f"{exc.status} {exc.code}: {exc.text}")
@@ -126,8 +151,8 @@ class EffectWorker:
         await db(effects.mark_done, effect.pk)
         return True
 
-    async def _retry(self, effect: OutboxEffect, error: str) -> bool:
-        status = await db(effects.mark_retry, effect.pk, error)
+    async def _retry(self, effect: OutboxEffect, error: str, wait_at_least: float = 0) -> bool:
+        status = await db(effects.mark_retry, effect.pk, error, wait_at_least)
         if status == EffectStatus.FAILED:
             await self._on_failed(effect, error)
             return True

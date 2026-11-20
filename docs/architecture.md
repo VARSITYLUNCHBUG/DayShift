@@ -89,6 +89,32 @@ sequenceDiagram
    Server errors and rate limits are retried with backoff; an effect that keeps failing ends as
    `failed`, visible in the admin and logged as an error.
 
+## Staying inside Discord's limits
+
+Discord allows 50 requests a second overall and limits each channel's requests of each kind on
+its own. Replies to button presses don't count towards the 50. 10,000 refused requests (401, 403
+and 429, except a shared-scope 429) in ten minutes get the bot's IP banned for a while. The bot
+keeps well clear of that:
+
+- **discord.py paces requests.** It reads the rate-limit headers, holds back a request it knows
+  would be refused, and waits out a 429. Past a minute (`max_ratelimit_timeout`) it raises
+  instead, and the worker retries that effect after the wait rather than stall its lane. The 12
+  member moves when teams are set, or at cleanup, are paced the same way; nothing batches them.
+- **Fewer calls.** Board, queue and leaderboard renders coalesce, and the queue and a ready
+  check's board wait a moment so a burst is one edit. A render that would show the same thing is
+  skipped (a fingerprint of the view, per message, forgotten every few hours and on restart).
+  Each channel's newest message is known from the gateway's events, so keeping a board in view
+  doesn't read history. One invite per channel serves a whole pop. Slash commands are synced
+  only when they change (`communities.commands_fingerprint`).
+- **Old messages.** Discord caps edits to a message over an hour old (error 30046). The queue
+  panel, leaderboard pages and boards post a fresh message and delete the old one; any other
+  effect hitting the cap is skipped.
+- **Counting.** Every response passes an aiohttp trace (`bot/request_health.py`) that counts the
+  refusals Discord counts, logs the ten-minute total, and posts an error past 1,000.
+- **Chat and voice events stay off the database thread.** The bot sees every message and voice
+  move in the server. An in-memory list of the channels that matter (`bot/watched.py`) drops
+  the rest before they queue behind button presses on the one database thread.
+
 ## A timer
 
 A timer is a row: `deadline_at` on the match, the sub request or the offer. The bot's deadline

@@ -79,16 +79,32 @@ async def reply_view(interaction: Interaction[Any], view: discord.ui.LayoutView)
         await interaction.response.send_message(view=view, ephemeral=True, allowed_mentions=allowed)
 
 
+UNKNOWN_INTERACTION = 10062  # Discord's code for an interaction past its 3-second window.
+
+
+async def _reply_if_alive(interaction: Interaction[Any], text: str) -> None:
+    """Tell the user, unless the interaction has already expired: then nobody can be told, and
+    a second traceback for the same failure is only noise."""
+    try:
+        await reply(interaction, text)
+    except discord.NotFound as exc:
+        if exc.code != UNKNOWN_INTERACTION:
+            raise
+        logger.warning("Interaction expired before a reply", extra={"interaction": interaction.id})
+
+
 async def guarded(interaction: Interaction[Any], call: Callable[[], Awaitable[None]]) -> None:
     """Show expected refusals to the user. Anything else is logged and never leaks details."""
     with log_context.bind(guild=interaction.guild_id, interaction=interaction.id):
         try:
             await call()
         except DomainError as exc:
-            await reply(interaction, exc.message)
+            await _reply_if_alive(interaction, exc.message)
         except Exception:
             logger.exception("Interaction failed", extra={"interaction": interaction.id})
-            await reply(interaction, "Something went wrong on our side. Please try again.")
+            await _reply_if_alive(
+                interaction, "Something went wrong on our side. Please try again."
+            )
         finally:
             wake = getattr(interaction.client, "wake_effects", None)
             if wake is not None:

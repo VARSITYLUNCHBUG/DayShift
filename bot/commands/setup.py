@@ -223,6 +223,11 @@ async def _clear_old_panels(interaction: Interaction[Any], community_id: int) ->
         if not isinstance(channel, discord.TextChannel):
             continue
         try:
+            if channel.permissions_for(guild.me).manage_messages:
+                # One bulk delete for messages under 14 days old; discord.py deletes older ones
+                # one by one itself.
+                await channel.purge(limit=100, check=lambda m: m.author.id == me.id)
+                continue
             async for message in channel.history(limit=100):
                 if message.author.id == me.id:
                     await message.delete()
@@ -268,6 +273,9 @@ async def setup_command(
         await sync_staff_access(guild, row.pk)
         await sync_pug_access(guild, row.pk)
         await db(_refresh_queue, row.pk)
+        watch = getattr(interaction.client, "watch", None)
+        if watch is not None:
+            watch.request_refresh()  # The Waiting Room may be new.
         access = (
             f"Only {pug_role.mention} sees the PUG channels."
             if pug_role is not None
