@@ -358,7 +358,7 @@ async def match_names(interaction: Interaction[Any], match_id: int) -> None:
 
 
 @match_group.command(
-    name="early_leave", description="Void a match because someone left in its first minutes"
+    name="early_leave", description="Void a match because someone left early in the game"
 )
 @app_commands.describe(leaver="Who left. They get a leaver penalty; nobody's rating changes")
 async def match_early_leave(

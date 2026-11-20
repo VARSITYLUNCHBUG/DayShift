@@ -41,17 +41,17 @@ costs nothing. Once the game is on it's a leaver. See [Subs](match-flow.md#subs)
 
 ## Early leaves
 
-While the game is on, a captain can press **Someone left in the first 5 min** and pick who. If the
-other captain agrees, the match is voided with no rating change: the leaver gets a leaver penalty
-and stays out of the queue, and everyone else goes back in. A disagreement, or no answer in
-2 minutes, goes to staff, who can void it with `/match early_leave`. Reports are open for 20
-minutes after the lobby code, or after the bot lobby starts. These timers are the draft mode's
+When someone leaves in the first minutes of the game, a captain can press **Someone left early** and
+pick who. If the other captain agrees, the match is voided with no rating change: the leaver gets a
+leaver penalty and stays out of the queue, and everyone else goes back in. A disagreement, or no
+answer in 2 minutes, goes to staff, who can void it with `/match early_leave`. Reports are open for
+20 minutes after the lobby code, or after the bot lobby starts. These timers are the draft mode's
 `results` values `early_leave_minutes`, `early_leave_report_minutes` and
 `early_leave_answer_seconds`.
 
 **Left early** is marked on a player's match record when they sub out once the game is on, leave
-early as above, or show as abandoning in deadlock-api's match data. An abandon inside the first
-5 minutes is put to staff.
+early as above, or show as abandoning in deadlock-api's match data. An abandon early in the game,
+inside the early-leave window, is put to staff.
 
 ## How strikes are worked out
 

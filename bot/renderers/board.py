@@ -572,9 +572,9 @@ def _early_leave(state: BoardState, box: Container[Any]) -> None:
         box.add_item(Separator())
         box.add_item(
             TextDisplay(
-                f"**{state.early_leave_by}** says **{state.early_leave_name}** left in the first "
-                f"{state.early_leave_minutes} minutes. The other captain: agree to void the "
-                "match with no rating change, or disagree and staff decide."
+                f"**{state.early_leave_by}** says **{state.early_leave_name}** left early in "
+                "the game. The other captain: agree to void the match with no rating change, "
+                "or disagree and staff decide."
             )
         )
         box.add_item(
@@ -591,7 +591,7 @@ def _early_leave(state: BoardState, box: Container[Any]) -> None:
                 RouteButton(
                     "early_open",
                     state.match_id,
-                    label=f"Someone left in the first {state.early_leave_minutes} min",
+                    label="Someone left early",
                 )
             )
         )

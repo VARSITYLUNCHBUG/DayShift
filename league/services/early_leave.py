@@ -88,9 +88,8 @@ def report(match_id: int, captain: Player, leaver_id: int) -> EarlyLeave:
             "ping",
             {
                 "user_ids": [other.player.discord_user_id],
-                "text": f"{captain.display_name} says **{leaver.player.display_name}** left in "
-                f"the first {results.early_leave_minutes} minutes. Agree on the board to void "
-                "the match.",
+                "text": f"{captain.display_name} says **{leaver.player.display_name}** left "
+                "early in the game. Agree on the board to void the match.",
             },
             match=match,
         )
