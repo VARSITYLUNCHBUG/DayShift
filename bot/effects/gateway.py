@@ -135,6 +135,25 @@ class Gateway(Protocol):
 
     async def set_voice_status(self, channel_id: int, text: str, *, paced: bool = True) -> None: ...
 
+    async def reset_voice_channel(
+        self, guild_id: int, channel_id: int, user_ids: Iterable[int] = ()
+    ) -> None:
+        """Ready a pooled voice channel for its next match: every member's overwrite comes off
+        (the bot's own stays) and the voice status is cleared. `user_ids` are revoked too, in
+        case the cache missed an overwrite. ChannelGone if the channel no longer exists."""
+        ...
+
+    async def set_voice_open(
+        self,
+        guild_id: int,
+        channel_id: int,
+        open_to_everyone: bool,
+        *,
+        viewer_role_ids: Iterable[int] = (),
+    ) -> None:
+        """Set a voice channel's @everyone overwrite as `create_voice_channel` would have."""
+        ...
+
     async def fetch_attachment(
         self, channel_id: int, message_id: int, attachment_id: int
     ) -> tuple[str, bytes] | None: ...
@@ -562,9 +581,51 @@ class DiscordGateway:
             voice = channel
 
             def edit() -> Awaitable[Any]:
-                return voice.edit(status=text[:500])
+                # None takes the status off.
+                return voice.edit(status=text[:500] or None)
 
             await (self._voice_pacer.run(voice.guild.id, edit) if paced else edit())
+
+    async def _voice_channel(self, channel_id: int) -> discord.VoiceChannel:
+        channel = await self._messageable(channel_id)
+        if not isinstance(channel, discord.VoiceChannel):
+            raise ChannelGone(f"{channel_id} isn't a voice channel.")
+        return channel
+
+    async def reset_voice_channel(
+        self, guild_id: int, channel_id: int, user_ids: Iterable[int] = ()
+    ) -> None:
+        channel = await self._voice_channel(channel_id)
+        bot_id = self.client.user.id  # type: ignore[union-attr]
+        members = {
+            target.id
+            for target in channel.overwrites
+            if not isinstance(target, discord.Role)
+            and not (isinstance(target, discord.Object) and target.type is discord.Role)
+        }
+        for user_id in (members | set(user_ids)) - {bot_id}:
+            await self.revoke_member(channel_id, user_id)
+        # discord.py doesn't cache the status, so it's cleared whether or not one is set.
+        await self.set_voice_status(channel_id, "")
+
+    async def set_voice_open(
+        self,
+        guild_id: int,
+        channel_id: int,
+        open_to_everyone: bool,
+        *,
+        viewer_role_ids: Iterable[int] = (),
+    ) -> None:
+        await self._voice_channel(channel_id)
+        # Closed, @everyone is hidden, unless it's the viewer role (a server with no PUGs role).
+        closed = VOICE_VIEWER if guild_id in set(viewer_role_ids) else HIDDEN
+        allow, deny = (VOICE_MEMBER if open_to_everyone else closed).pair()
+        try:
+            await self.client.http.edit_channel_permissions(
+                channel_id, guild_id, str(allow.value), str(deny.value), 0
+            )
+        except discord.NotFound as exc:
+            raise ChannelGone(str(channel_id)) from exc
 
     async def fetch_attachment(
         self, channel_id: int, message_id: int, attachment_id: int

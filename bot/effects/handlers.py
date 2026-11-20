@@ -50,6 +50,7 @@ from league.services import (
     runtime,
     scrims,
     subs,
+    voice_pool,
 )
 from league.services.common import add_effect, now
 from league.services.common import render_board as request_board
@@ -738,11 +739,14 @@ async def announce_lobby_code(env: Env) -> None:
     members = await db(_active_user_ids, match)
     await _notice(env, f"Lobby code: `{match.lobby_code}`", user_ids=members)
     resources = await db(effects.resources, env.match_id)
-    for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
+    captains = await db(boards.captain_names, match)
+    for team, kind in TEAM_VOICES:
         channel_id = resources.get(kind)
         if channel_id:
+            # The team stays in the status: a pooled channel's name doesn't say whose it is.
+            label = names.team_voice(env.match_id, captains.get(team, ""))
             await env.gateway.set_voice_status(
-                channel_id, f"Lobby code: {match.lobby_code}", paced=False
+                channel_id, f"{label} · Lobby code: {match.lobby_code}", paced=False
             )
 
 
@@ -789,51 +793,117 @@ def _voice_needed(match_id: int) -> bool:
     return Match.objects.filter(pk=match_id, participants__is_active=True).exists()
 
 
-@transaction.atomic
-def _record_created_voice(match_id: int, kind: str, channel_id: int) -> bool:
-    match = Match.objects.lock(match_id)
-    effects.record_resource(match_id, kind, channel_id)
-    if not _voice_needed(match_id):
-        # The result/void may have landed while Discord was creating the channel. Record it
-        # before cleanup, so even a restart can't lose track of this late response.
-        effects.queue_voice_cleanup(match)
-        return False
-    return True
+TEAM_VOICES = (("A", ResourceKind.TEAM_A_VOICE), ("B", ResourceKind.TEAM_B_VOICE))
+
+
+async def _grant_team(env: Env, channel_id: int, user_ids: Iterable[int]) -> None:
+    for user_id in user_ids:
+        await env.gateway.grant_member(channel_id, user_id)
+
+
+async def _take_pooled(env: Env, kind: str, members: list[int]) -> int | None:
+    """Borrow a free channel from the server's pool and let the team in. None if none is free.
+
+    A channel someone deleted by hand comes out of the pool, and the next free one is tried."""
+    while True:
+        free = await db(voice_pool.free_channels, env.community.pk)
+        # Somebody still sitting in one (a server with no Waiting Room to send them to): skip it.
+        occupied = frozenset(c for c in free if env.gateway.voice_member_ids(env.guild_id, c))
+        claim = await db(voice_pool.claim, env.match_id, kind, occupied)
+        if not claim.needed:
+            raise Skip("The players have left this match; voice setup is obsolete.")
+        channel_id = claim.channel_id
+        if channel_id is None:
+            return None
+        try:
+            if claim.was_open != claim.open_to_everyone:
+                await env.gateway.set_voice_open(
+                    env.guild_id,
+                    channel_id,
+                    claim.open_to_everyone,
+                    viewer_role_ids=_viewer_roles(env),
+                )
+                await db(voice_pool.note_open, channel_id, claim.open_to_everyone)
+            await _grant_team(env, channel_id, members)
+        except ChannelGone:
+            await db(voice_pool.drop_claim, env.match_id, kind, channel_id)
+            continue
+        return channel_id
+
+
+async def _create_team_voice_channel(
+    env: Env, kind: str, members: list[int], label: str
+) -> tuple[int, bool]:
+    """Make the team a channel: a new pooled one while the pool is short, else a one-off named
+    for the match, deleted after it. Returns (channel, whether it's pooled)."""
+    community = env.community
+    number = await db(voice_pool.next_number, community.pk)
+    open_to_everyone = await db(_open_voice, community.pk)
+    channel_id = await env.gateway.create_voice_channel(
+        env.guild_id,
+        community.match_category_id,
+        names.pooled_voice(number) if number is not None else label,
+        members,
+        await db(_match_staff_roles, community.pk),
+        open_to_everyone=open_to_everyone,
+        viewer_role_ids=_viewer_roles(env),
+    )
+    recorded = await db(
+        voice_pool.record_created, env.match_id, kind, channel_id, number, open_to_everyone
+    )
+    if not recorded:
+        raise Skip("The match ended while its voice channel was being created.")
+    return channel_id, await db(voice_pool.is_pooled, channel_id)
 
 
 @effect("create_team_voice")
 async def create_team_voice(env: Env) -> None:
+    """Each team gets a voice channel from the server's pool, or a new one if the pool is short.
+    A pooled channel keeps its name (Team Voice 3), so the match and team show in its status."""
     resources = await db(effects.resources, env.match_id)
-    community = env.community
     assignments: list[tuple[int, str]] = []
     captains = await db(boards.captain_names, env.required_match)
-    for team, kind in (("A", ResourceKind.TEAM_A_VOICE), ("B", ResourceKind.TEAM_B_VOICE)):
+    channels: dict[str, int] = {}
+    for team, kind in TEAM_VOICES:
         if not await db(_voice_needed, env.match_id):
             raise Skip("The players have left this match; voice setup is obsolete.")
         members = await db(_team_user_ids, env.required_match, team)
         assignments.extend((user_id, team) for user_id in members)
-        if kind in resources:
-            continue
-        channel_id = await env.gateway.create_voice_channel(
-            env.guild_id,
-            community.match_category_id,
-            names.team_voice(env.match_id, captains.get(team, "")),
-            members,
-            await db(_match_staff_roles, community.pk),
-            open_to_everyone=await db(_open_voice, community.pk),
-            viewer_role_ids=_viewer_roles(env),
-        )
-        if not await db(_record_created_voice, env.match_id, kind, channel_id):
-            raise Skip("The match ended while its voice channel was being created.")
+        label = names.team_voice(env.match_id, captains.get(team, ""))
+        channel_id = resources.get(kind)
+        pooled = channel_id is not None and await db(voice_pool.is_pooled, channel_id)
+        if channel_id is not None and pooled:
+            # A retry after a crash: the team may not all have been let in.
+            try:
+                await _grant_team(env, channel_id, members)
+            except ChannelGone:
+                await db(voice_pool.drop_claim, env.match_id, kind, channel_id)
+                channel_id = None
+        if channel_id is None:
+            taken = await _take_pooled(env, kind, members)
+            if taken is not None:
+                channel_id, pooled = taken, True
+            else:
+                channel_id, pooled = await _create_team_voice_channel(env, kind, members, label)
+        if pooled:
+            await env.gateway.set_voice_status(channel_id, label)
+        channels[team] = channel_id
     waiting = env.community.waiting_room_channel_id
     in_lobby = env.gateway.voice_member_ids(env.guild_id, waiting) if waiting else set()
     moves = [(user_id, team) for user_id, team in assignments if user_id in in_lobby]
     if moves:
         await db(_enqueue_team_moves, env.match_id, moves)
-    # Anyone elsewhere hears once, in one channel ping, rather than a DM and invite each.
+    # Anyone elsewhere hears once, in one channel ping, rather than a DM and invite each. The
+    # mentions say which channel is whose: a pooled channel's name doesn't.
     away = [user_id for user_id, _team in assignments if user_id not in in_lobby]
     if away:
-        await _notice(env, "teams are set. Join your team's voice channel.", user_ids=away)
+        where = ", ".join(
+            f"{boards.team_name(captains.get(team, 'Captain'))} <#{channels[team]}>"
+            for team, _kind in TEAM_VOICES
+        )
+        await _notice(
+            env, f"teams are set. Join your team's voice channel: {where}.", user_ids=away
+        )
 
 
 @effect("team_move_player")
@@ -1058,37 +1128,51 @@ async def post_correction(env: Env) -> None:
 # --- Cleanup ---------------------------------------------------------------------------------
 
 
-@effect("restart_voice")
-async def restart_voice(env: Env) -> None:
-    """A restart: teams are gone, so everyone goes back to the Waiting Room and the old match's
-    team channels are deleted. Runs in the successor's lane, before anyone new is gathered."""
-    old_id = int(env.effect.payload["old_id"])
-    waiting_room = env.community.waiting_room_channel_id
-    resources = await db(effects.resources, old_id)
-    for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
-        channel_id = resources.get(kind)
-        if channel_id is None:
-            continue
-        if waiting_room:
-            for user_id in env.gateway.voice_member_ids(env.guild_id, channel_id):
-                await env.gateway.move_member(env.guild_id, user_id, waiting_room)
-        await env.gateway.delete_channel(channel_id)
-        await db(effects.mark_resource_deleted, old_id, kind)
+def _team_ids_ever(match_id: int, team: str) -> list[int]:
+    """Everyone who was on the team, left or not: whoever may still have an overwrite."""
+    return list(
+        Match.objects.get(pk=match_id)
+        .participants.filter(team=team)
+        .values_list("player__discord_user_id", flat=True)
+    )
 
 
-@effect("cleanup_voice")
-async def cleanup_voice(env: Env) -> None:
-    resources = await db(effects.resources, env.match_id)
+async def _return_team_voice(env: Env, match_id: int) -> None:
+    """Empty the match's team channels into the Waiting Room and give them back to the pool,
+    with the team's overwrites and the voice status cleared. A one-off channel, or one the pool
+    no longer needs, is deleted; one deleted by hand just leaves the pool."""
+    resources = await db(effects.resources, match_id)
     waiting = env.community.waiting_room_channel_id
-    for kind in (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE):
+    for team, kind in TEAM_VOICES:
         channel_id = resources.get(kind)
         if channel_id is None:
             continue
         if waiting:
             for user_id in env.gateway.voice_member_ids(env.guild_id, channel_id):
                 await env.gateway.move_member(env.guild_id, user_id, waiting)
-        await env.gateway.delete_channel(channel_id)
-        await db(effects.mark_resource_deleted, env.match_id, kind)
+        try:
+            if await db(voice_pool.keep, env.community.pk, channel_id):
+                user_ids = await db(_team_ids_ever, match_id, team)
+                await env.gateway.reset_voice_channel(env.guild_id, channel_id, user_ids)
+            else:
+                await env.gateway.delete_channel(channel_id)
+                await db(voice_pool.forget, channel_id)
+        except ChannelGone:
+            await db(voice_pool.forget, channel_id)
+        await db(effects.mark_resource_deleted, match_id, kind)
+
+
+@effect("restart_voice")
+async def restart_voice(env: Env) -> None:
+    """A restart: teams are gone, so everyone goes back to the Waiting Room and the old match's
+    team channels go back to the pool, for the successor to take again once its teams are set.
+    Runs in the successor's lane, before anyone new is gathered."""
+    await _return_team_voice(env, int(env.effect.payload["old_id"]))
+
+
+@effect("cleanup_voice")
+async def cleanup_voice(env: Env) -> None:
+    await _return_team_voice(env, env.match_id)
 
 
 @effect("delete_text_channel")
