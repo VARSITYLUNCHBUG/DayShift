@@ -173,16 +173,10 @@ VOICE_MEMBER = discord.PermissionOverwrite(
     use_voice_activation=True,
 )
 HIDDEN = discord.PermissionOverwrite(view_channel=False, connect=False)
-# The PUGs role watches every match: it reads the text channel and sees who's in voice, but only
-# the match's own players and staff talk there. Member and staff overwrites outrank these denies.
-TEXT_VIEWER = discord.PermissionOverwrite(
-    view_channel=True,
-    read_message_history=True,
-    send_messages=False,
-    add_reactions=False,
-    create_public_threads=False,
-    create_private_threads=False,
-)
+# The PUGs role is welcome in every match's text channel: it reads and talks there like the
+# players. In team voice it only sees who's in, unless Open match voice is on, and member and
+# staff overwrites outrank that deny.
+TEXT_PUGS = TEXT_MEMBER
 VOICE_VIEWER = discord.PermissionOverwrite(view_channel=True, connect=False)
 # The API's overwrite type for a member (0 is a role).
 MEMBER_OVERWRITE: Literal[1] = 1
@@ -292,10 +286,10 @@ class DiscordGateway:
         *,
         viewer_role_ids: Iterable[int] = (),
     ) -> int:
-        """A match text channel: its players and staff talk, `viewer_role_ids` only read."""
+        """A match text channel: its players, staff and `viewer_role_ids` (the PUGs role) talk."""
         guild = self._guild(guild_id)
         overwrites = self._overwrites(
-            guild, member_ids, staff_role_ids, TEXT_MEMBER, SELF_TEXT, viewer_role_ids, TEXT_VIEWER
+            guild, member_ids, staff_role_ids, TEXT_MEMBER, SELF_TEXT, viewer_role_ids, TEXT_PUGS
         )
         channel = await guild.create_text_channel(
             name, category=self._category(guild, category_id), overwrites=overwrites

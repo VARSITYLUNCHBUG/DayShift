@@ -12,7 +12,7 @@ from typing import Any
 import discord
 import pytest
 
-from bot.effects.gateway import TEXT_VIEWER, VOICE_VIEWER, DiscordGateway
+from bot.effects.gateway import TEXT_PUGS, VOICE_VIEWER, DiscordGateway
 from bot.renderers import fonts, leaderboard_image, match_stats, style
 from bot.renderers.board import render_board
 from league.domain.engine import Status
@@ -199,17 +199,17 @@ def test_hero_text_uses_the_custom_icon_when_set() -> None:
 # --- Match channels open to the PUGs role ----------------------------------------------------
 
 
-def test_the_pugs_role_reads_but_does_not_talk() -> None:
+def test_the_pugs_role_talks_in_text_but_only_watches_voice() -> None:
     guild = discord.Object(id=1)
     gateway = DiscordGateway.__new__(DiscordGateway)
     gateway.client = type("C", (), {"user": discord.Object(id=2)})()  # type: ignore[assignment]
     fake_guild: Any = type("G", (), {"id": 1, "default_role": "everyone"})()
     overwrites = gateway._overwrites(
         fake_guild, [10], [20], discord.PermissionOverwrite(), discord.PermissionOverwrite(),
-        [30], TEXT_VIEWER,
+        [30], TEXT_PUGS,
     )  # fmt: skip
     viewer = next(v for k, v in overwrites.items() if getattr(k, "id", None) == 30)
-    assert viewer.view_channel is True and viewer.send_messages is False
+    assert viewer.view_channel is True and viewer.send_messages is True
     # No PUGs role: the guild's own ID is @everyone, which can then read.
     overwrites = gateway._overwrites(
         fake_guild, [], [], discord.PermissionOverwrite(), discord.PermissionOverwrite(),
