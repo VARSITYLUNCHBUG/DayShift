@@ -89,6 +89,8 @@ sequenceDiagram
    Team voice setup, member moves, swaps and voice cleanup use a separate ordered lane per match,
    so a delayed voice channel does not hold up its draft board. Cleanup cancels pending setup
    and moves; a channel returned after the players leave is recorded and cleaned up.
+   Team voice channels are pooled per server (`voice_channel_slots`) and reused rather than
+   created and deleted for every match ([Team voice pool](match-flow.md#team-voice-pool)).
    Server errors and rate limits are retried with backoff; an effect that keeps failing ends as
    `failed`, visible in the admin and logged as an error.
 
