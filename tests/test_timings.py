@@ -28,6 +28,22 @@ def _empty_timings() -> Iterator[None]:
     timings.summary()
 
 
+def test_only_a_call_that_ran_slowly_is_warned_about(caplog: pytest.LogCaptureFixture) -> None:
+    """Calls queued behind a slow one waited, but didn't run slowly: only the slow one is named."""
+    from league import asyncdb
+
+    def queued() -> None: ...
+
+    def slow() -> None: ...
+
+    with caplog.at_level("WARNING", logger="league.asyncdb"):
+        asyncdb._record(queued, wait=2.0, run=0.01)
+        asyncdb._record(slow, wait=0.0, run=asyncdb.SLOW_SECONDS + 0.1)
+    warned = [record.call for record in caplog.records if record.msg == "Slow database call"]  # type: ignore[attr-defined]
+    assert warned == [asyncdb._name(slow)]
+    assert timings.summary()["db.wait"]["count"] == 2
+
+
 # --- The summary -------------------------------------------------------------------------------
 
 

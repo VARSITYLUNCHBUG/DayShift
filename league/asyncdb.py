@@ -21,7 +21,8 @@ from league import timings
 
 logger = logging.getLogger(__name__)
 
-# A call that waited and ran longer than this together is logged on its own, with its name.
+# A call that ran longer than this is logged on its own, with its name. Its wait for the thread
+# doesn't count: that is the call ahead of it being slow, and that one is logged itself.
 SLOW_SECONDS = 0.5
 
 
@@ -63,7 +64,7 @@ def _record(fn: Callable[..., Any], wait: float, run: float) -> None:
     to it ran nothing, so it isn't recorded."""
     timings.record("db.wait", wait)
     timings.record("db.run", run)
-    if wait + run > SLOW_SECONDS:
+    if run > SLOW_SECONDS:
         logger.warning(
             "Slow database call",
             extra={

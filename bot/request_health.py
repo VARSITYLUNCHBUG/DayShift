@@ -75,7 +75,8 @@ class FailedRequests:
         if status == 429:
             logger.warning("Discord request rate limited", extra=details)
         elif details["remaining"] == "0":
-            logger.info("Discord rate limit bucket exhausted", extra=details)
+            # Routine for small buckets; the minute's usage summary carries the headers.
+            logger.debug("Discord rate limit bucket exhausted", extra=details)
         else:
             logger.debug("Discord request completed", extra=details)
 
