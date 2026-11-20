@@ -802,7 +802,8 @@ async def _grant_team(env: Env, channel_id: int, user_ids: Iterable[int]) -> Non
 
 
 async def _take_pooled(env: Env, kind: str, members: list[int]) -> int | None:
-    """Borrow a free channel from the server's pool and let the team in. None if none is free.
+    """Borrow a free channel from the server's pool, show it, and let the team in. None if none
+    is free.
 
     A channel someone deleted by hand comes out of the pool, and the next free one is tried."""
     while True:
@@ -816,14 +817,15 @@ async def _take_pooled(env: Env, kind: str, members: list[int]) -> int | None:
         if channel_id is None:
             return None
         try:
-            if claim.was_open != claim.open_to_everyone:
-                await env.gateway.set_voice_open(
-                    env.guild_id,
-                    channel_id,
-                    claim.open_to_everyone,
-                    viewer_role_ids=_viewer_roles(env),
-                )
-                await db(voice_pool.note_open, channel_id, claim.open_to_everyone)
+            # Free channels are hidden. Shown again with the server's settings as they are now,
+            # so a change to Open match voice reaches every channel on its next match.
+            await env.gateway.show_voice_channel(
+                env.guild_id,
+                channel_id,
+                claim.open_to_everyone,
+                viewer_role_ids=_viewer_roles(env),
+            )
+            await db(voice_pool.note_open, channel_id, claim.open_to_everyone)
             await _grant_team(env, channel_id, members)
         except ChannelGone:
             await db(voice_pool.drop_claim, env.match_id, kind, channel_id)
@@ -858,8 +860,8 @@ async def _create_team_voice_channel(
 
 @effect(voice_pool.FILL_KIND)
 async def fill_voice_pool(env: Env) -> None:
-    """Make the server's first pooled channels before any match needs them: empty, with only
-    staff and the PUGs role set, as a returned channel is. Paced like any voice creation."""
+    """Make the server's first pooled channels before any match needs them: empty and hidden,
+    as a returned channel is, so only staff see them. Paced like any voice creation."""
     community = env.community
     size = int(env.effect.payload.get("size", voice_pool.INITIAL_SIZE))
     while (number := await db(voice_pool.next_number, community.pk, size)) is not None:
@@ -872,6 +874,7 @@ async def fill_voice_pool(env: Env) -> None:
             await db(_match_staff_roles, community.pk),
             open_to_everyone=open_to_everyone,
             viewer_role_ids=_viewer_roles(env),
+            hidden=True,
         )
         await db(voice_pool.add_free, community.pk, number, channel_id, open_to_everyone)
 
@@ -1159,8 +1162,8 @@ def _team_ids_ever(match_id: int, team: str) -> list[int]:
 
 async def _return_team_voice(env: Env, match_id: int) -> None:
     """Empty the match's team channels into the Waiting Room and give them back to the pool,
-    with the team's overwrites and the voice status cleared. A one-off channel, or one the pool
-    no longer needs, is deleted; one deleted by hand just leaves the pool."""
+    hidden, with the team's overwrites and the voice status cleared. A one-off channel, or one
+    the pool no longer needs, is deleted; one deleted by hand just leaves the pool."""
     resources = await db(effects.resources, match_id)
     waiting = env.community.waiting_room_channel_id
     for team, kind in TEAM_VOICES:
@@ -1174,6 +1177,9 @@ async def _return_team_voice(env: Env, match_id: int) -> None:
             if await db(voice_pool.keep, env.community.pk, channel_id):
                 user_ids = await db(_team_ids_ever, match_id, team)
                 await env.gateway.reset_voice_channel(env.guild_id, channel_id, user_ids)
+                await env.gateway.hide_voice_channel(
+                    env.guild_id, channel_id, viewer_role_ids=_viewer_roles(env)
+                )
             else:
                 await env.gateway.delete_channel(channel_id)
                 await db(voice_pool.forget, channel_id)

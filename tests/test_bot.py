@@ -683,6 +683,7 @@ class FakeGateway:
     unpaced: list[tuple[str, int]] = field(default_factory=list)  # Voice calls skipping pacing.
     voice_created: list[str] = field(default_factory=list)  # Names, in the order made.
     resets: list[int] = field(default_factory=list)  # Pooled channels made ready for reuse.
+    hidden: set[int] = field(default_factory=set)  # Voice channels only staff can see.
 
     def _id(self) -> int:
         self.next_id += 1
@@ -713,9 +714,12 @@ class FakeGateway:
         *,
         open_to_everyone=False,
         viewer_role_ids=(),
+        hidden=False,
     ) -> int:
         channel_id = self._id()
         self.voice_created.append(name)
+        if hidden:
+            self.hidden.add(channel_id)
         self.viewers_seen[channel_id] = list(viewer_role_ids)
         self.open_voice[channel_id] = open_to_everyone
         self.channels[channel_id] = name
@@ -851,12 +855,18 @@ class FakeGateway:
         self.statuses[channel_id] = ""
         self.resets.append(channel_id)
 
-    async def set_voice_open(
+    async def show_voice_channel(
         self, guild_id, channel_id, open_to_everyone, *, viewer_role_ids=()
     ) -> None:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
+        self.hidden.discard(channel_id)
         self.open_voice[channel_id] = open_to_everyone
+
+    async def hide_voice_channel(self, guild_id, channel_id, *, viewer_role_ids=()) -> None:
+        if channel_id in self.deleted:
+            raise ChannelGone(str(channel_id))
+        self.hidden.add(channel_id)
 
     async def fetch_attachment(self, channel_id, message_id, attachment_id):
         return ("shot.png", b"\x89PNG\r\n\x1a\ndata")

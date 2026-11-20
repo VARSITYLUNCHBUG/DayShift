@@ -168,8 +168,8 @@ class VoiceChannelSlot(models.Model):
     making and deleting two hit it on 2026-11-20).
 
     A slot is busy while a live team voice `MatchResource` holds its channel ID; that resource is
-    the only record of who has it. `open_to_everyone` is how the channel's @everyone overwrite
-    was last set, so a change to the Open match voice setting reaches it on its next match."""
+    the only record of who has it. A free channel is hidden from everyone but staff, and shown
+    again when a match takes it. `open_to_everyone` is how it was last shown."""
 
     community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name="voice_slots")
     number = models.PositiveSmallIntegerField()

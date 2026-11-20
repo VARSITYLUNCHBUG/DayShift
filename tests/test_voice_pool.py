@@ -303,3 +303,20 @@ def test_the_first_fill_stops_at_what_the_server_can_use(wired: Community) -> No
     voice_pool.request_fill(wired)
     drain(gateway)
     assert len(gateway.voice_created) == 4
+
+
+def test_free_channels_are_hidden_and_shown_while_a_match_has_them(wired: Community) -> None:
+    gateway = FakeGateway()
+    voice_pool.request_fill(wired)
+    drain(gateway)
+    assert set(voice_pool.free_channels(wired.pk)) == gateway.hidden  # Made hidden.
+
+    match = to_champion_draft(new_match(wired, gateway, 1))
+    drain(gateway)
+    channels = team_channels(match)
+    assert not set(channels) & gateway.hidden  # Taken: shown to the players and PUGs role.
+    assert len(gateway.hidden) == 6
+
+    play_out(match, gateway)
+    assert set(channels) <= gateway.hidden  # Back in the pool: hidden again.
+    assert len(gateway.hidden) == 8

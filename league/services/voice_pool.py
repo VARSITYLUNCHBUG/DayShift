@@ -58,8 +58,7 @@ class Claim:
 
     needed: bool
     channel_id: int | None = None
-    # How the channel's @everyone overwrite is set now, and how the server wants it.
-    was_open: bool = False
+    # The server's Open match voice setting, which the channel is shown with.
     open_to_everyone: bool = False
 
 
@@ -79,7 +78,7 @@ def claim(match_id: int, kind: str, skip: frozenset[int] = frozenset()) -> Claim
         return Claim(needed=False)
     held = effects.resource_id(match_id, kind)
     if held is not None:
-        return Claim(True, held, wanted, wanted)  # A retry: it's already this match's.
+        return Claim(True, held, wanted)  # A retry: it's already this match's.
     lock_community(match.community_id)
     busy = _busy_ids() | skip
     slot = (
@@ -91,7 +90,7 @@ def claim(match_id: int, kind: str, skip: frozenset[int] = frozenset()) -> Claim
     if slot is None:
         return Claim(needed=True)
     effects.record_resource(match_id, kind, slot.discord_id)
-    return Claim(True, slot.discord_id, slot.open_to_everyone, wanted)
+    return Claim(True, slot.discord_id, wanted)
 
 
 def note_open(channel_id: int, open_to_everyone: bool) -> None:

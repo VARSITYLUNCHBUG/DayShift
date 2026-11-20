@@ -60,6 +60,7 @@ class Gateway(Protocol):
         *,
         open_to_everyone: bool = False,
         viewer_role_ids: Iterable[int] = (),
+        hidden: bool = False,
     ) -> int: ...
 
     def voice_member_ids(self, guild_id: int, channel_id: int | None) -> set[int]: ...
@@ -143,7 +144,7 @@ class Gateway(Protocol):
         case the cache missed an overwrite. ChannelGone if the channel no longer exists."""
         ...
 
-    async def set_voice_open(
+    async def show_voice_channel(
         self,
         guild_id: int,
         channel_id: int,
@@ -151,7 +152,15 @@ class Gateway(Protocol):
         *,
         viewer_role_ids: Iterable[int] = (),
     ) -> None:
-        """Set a voice channel's @everyone overwrite as `create_voice_channel` would have."""
+        """A pooled channel taken by a match: @everyone and `viewer_role_ids` get the overwrites
+        `create_voice_channel` would have given them. ChannelGone if it no longer exists."""
+        ...
+
+    async def hide_voice_channel(
+        self, guild_id: int, channel_id: int, *, viewer_role_ids: Iterable[int] = ()
+    ) -> None:
+        """A pooled channel back in the pool: hidden from @everyone and `viewer_role_ids`, so
+        only staff see the free ones. ChannelGone if it no longer exists."""
         ...
 
     async def fetch_attachment(
@@ -306,10 +315,12 @@ class DiscordGateway:
         *,
         open_to_everyone: bool = False,
         viewer_role_ids: Iterable[int] = (),
+        hidden: bool = False,
     ) -> int:
         """A match voice channel for its players and staff, which `viewer_role_ids` can see but
         not join. With `open_to_everyone` (the server's Open match voice setting) anyone in the
-        server can see and join it too."""
+        server can see and join it too. `hidden`: a pooled channel made ahead of need, which
+        only staff see until a match takes it."""
         guild = self._guild(guild_id)
         overwrites = self._overwrites(
             guild,
@@ -322,6 +333,12 @@ class DiscordGateway:
         )
         if open_to_everyone:
             overwrites[guild.default_role] = VOICE_MEMBER
+        if hidden:
+            for target in overwrites:
+                if target is guild.default_role or getattr(target, "id", None) in set(
+                    viewer_role_ids
+                ):
+                    overwrites[target] = HIDDEN
         channel = await self._voice_pacer.run(
             guild_id,
             lambda: guild.create_voice_channel(
@@ -602,7 +619,21 @@ class DiscordGateway:
         # discord.py doesn't cache the status, so it's cleared whether or not one is set.
         await self.set_voice_status(channel_id, "")
 
-    async def set_voice_open(
+    async def _set_role_overwrites(
+        self, channel_id: int, overwrites: dict[int, discord.PermissionOverwrite]
+    ) -> None:
+        """Role overwrites by ID through the API (the @everyone role's ID is the guild's)."""
+        await self._voice_channel(channel_id)
+        for role_id, perms in overwrites.items():
+            allow, deny = perms.pair()
+            try:
+                await self.client.http.edit_channel_permissions(
+                    channel_id, role_id, str(allow.value), str(deny.value), 0
+                )
+            except discord.NotFound as exc:
+                raise ChannelGone(str(channel_id)) from exc
+
+    async def show_voice_channel(
         self,
         guild_id: int,
         channel_id: int,
@@ -610,16 +641,19 @@ class DiscordGateway:
         *,
         viewer_role_ids: Iterable[int] = (),
     ) -> None:
-        await self._voice_channel(channel_id)
-        # Closed, @everyone is hidden, unless it's the viewer role (a server with no PUGs role).
-        closed = VOICE_VIEWER if guild_id in set(viewer_role_ids) else HIDDEN
-        allow, deny = (VOICE_MEMBER if open_to_everyone else closed).pair()
-        try:
-            await self.client.http.edit_channel_permissions(
-                channel_id, guild_id, str(allow.value), str(deny.value), 0
-            )
-        except discord.NotFound as exc:
-            raise ChannelGone(str(channel_id)) from exc
+        viewers = set(viewer_role_ids)
+        # @everyone is hidden, unless it's the viewer role (a server with no PUGs role).
+        overwrites = dict.fromkeys(viewers, VOICE_VIEWER)
+        overwrites[guild_id] = VOICE_VIEWER if guild_id in viewers else HIDDEN
+        if open_to_everyone:
+            overwrites[guild_id] = VOICE_MEMBER
+        await self._set_role_overwrites(channel_id, overwrites)
+
+    async def hide_voice_channel(
+        self, guild_id: int, channel_id: int, *, viewer_role_ids: Iterable[int] = ()
+    ) -> None:
+        overwrites = dict.fromkeys({guild_id, *viewer_role_ids}, HIDDEN)
+        await self._set_role_overwrites(channel_id, overwrites)
 
     async def fetch_attachment(
         self, channel_id: int, message_id: int, attachment_id: int
