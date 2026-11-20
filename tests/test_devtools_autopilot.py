@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from itertools import count
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
 from django.core.management import call_command
 
-from devtools import api, autopilot, sim_client
+from devtools import api, autopilot, lookup, sim_client
 from devtools.models import FrozenTimer
 from league.domain.engine import RANKED_COINFLIP_CHOICES, Status
 from league.domain.errors import DomainError
@@ -136,7 +137,21 @@ def test_the_script_decides_votes_draft_coinflip_champions_code_and_winner(poppe
     assert match.winner == "B"
 
 
-def test_a_teams_champion_preferences_are_picked_and_banned(popped: Match) -> None:
+def test_a_teams_champion_preferences_are_picked_and_banned(
+    popped: Match, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mirage = lookup.champion("mirage").pk
+
+    class Unlucky:
+        """A seed whose random ban lands on mirage whenever it can."""
+
+        def __init__(self, seed: str) -> None:
+            pass
+
+        def choice(self, seq: list[int]) -> int:
+            return mirage if mirage in seq else seq[0]
+
+    monkeypatch.setattr(autopilot, "random", SimpleNamespace(Random=Unlucky))
     ok("POST", "matches/latest/advance", {"until": "champion_draft", "via": "service"})
     match = Match.objects.get(pk=popped.pk)
     first = match.champion_first_pick
@@ -146,7 +161,13 @@ def test_a_teams_champion_preferences_are_picked_and_banned(popped: Match) -> No
         f"players/{match.captain_of(first).player_id}/picks",
         {"prefer": ["mirage"], "ban": ["lash"]},
     )
-    ok("PUT", f"players/{match.captain_of(second).player_id}/picks", {"ban": ["lash", "warden"]})
+    # Enough bans that the second team never bans at random before the first team's pick: a
+    # random ban of its own could take mirage, as an opponent may.
+    ok(
+        "PUT",
+        f"players/{match.captain_of(second).player_id}/picks",
+        {"ban": ["lash", "warden", "infernus", "seven"]},
+    )
     ok("POST", "matches/latest/advance", {"via": "service"})
     rows = list(
         DraftAction.objects.filter(match=match)
@@ -157,6 +178,8 @@ def test_a_teams_champion_preferences_are_picked_and_banned(popped: Match) -> No
     # The first ban is the first team's; the second team's first choice is gone, so its next.
     assert rows[0] == ("ban", first, "lash")
     assert rows[1] == ("ban", second, "warden")
+    # Out of bans, the first team never bans the champion it means to pick.
+    assert ("ban", first, "mirage") not in rows
     assert ("pick", first, "mirage") in rows
 
 
