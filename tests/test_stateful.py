@@ -46,6 +46,7 @@ from league.services import (
 from tests.conftest import Clock, make_player
 from tests.helpers import (
     check_in_captains,
+    confirm_teams,
     image,
     run_champion_draft,
     run_player_draft,
@@ -114,6 +115,10 @@ class MatchMachine(RuleBasedStateMachine):
     @rule(index=integers(0, 14))
     def check_in(self, index: int) -> None:
         self._try(lobby.check_in, self.match.pk, self.players[index])
+
+    @rule(index=integers(0, 14))
+    def teams_ready(self, index: int) -> None:
+        self._try(draft.confirm_teams, self.match.pk, self.players[index])
 
     @rule(give=integers(0, 11), take=integers(0, 11), accept=sampled_from([True, False]))
     def swap(self, give: int, take: int, accept: bool) -> None:
@@ -241,17 +246,28 @@ class MatchMachine(RuleBasedStateMachine):
         if match.status == Status.CAPTAIN_PHASE:
             self._try(vote_captains, match)
         elif match.status == Status.CAPTAIN_CHECKIN:
-            # On through the player draft and coinflip too: check-in is one more phase to walk.
+            # On through the player draft, coinflip and team check too: they're more phases to
+            # walk.
             self._try(
-                lambda: settle_coinflip_for(
-                    run_player_draft(check_in_captains(match)), "A" if agree else "B"
+                lambda: confirm_teams(
+                    settle_coinflip_for(
+                        run_player_draft(check_in_captains(match)), "A" if agree else "B"
+                    )
                 )
             )
         elif match.status == Status.PLAYER_DRAFT:
-            # Straight on through the coinflip. The coin_choice rule covers it on its own.
-            self._try(lambda: settle_coinflip_for(run_player_draft(match), "A" if agree else "B"))
+            # Straight on through the coinflip and the team check, so the walk to a result is no
+            # longer than it was before the check. The coin_choice and teams_ready rules cover
+            # those on their own.
+            self._try(
+                lambda: confirm_teams(
+                    settle_coinflip_for(run_player_draft(match), "A" if agree else "B")
+                )
+            )
         elif match.status == Status.COINFLIP:
-            self._try(settle_coinflip_for, match, "A" if agree else "B")
+            self._try(lambda: confirm_teams(settle_coinflip_for(match, "A" if agree else "B")))
+        elif match.status == Status.TEAM_CONFIRM:
+            self._try(confirm_teams, match)
         elif match.status == Status.CHAMPION_DRAFT:
             self._try(run_champion_draft, match)
             if agree:  # And the bot makes the lobby, as it usually does.
@@ -381,6 +397,7 @@ MUST_REACH = frozenset(
         Status.CAPTAIN_CHECKIN,
         Status.PLAYER_DRAFT,
         Status.COINFLIP,
+        Status.TEAM_CONFIRM,
         Status.CHAMPION_DRAFT,
         Status.LOBBY_CODE,
         Status.IN_PROGRESS,
