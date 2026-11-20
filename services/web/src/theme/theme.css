@@ -195,6 +195,16 @@
 
 /* --- 3. Tailwind theme keys ------------------------------------------------------------------ */
 
+/* South Africa's flag, in the footer (SiteFooter.tsx): its official colours, the same in either theme. */
+@theme {
+  --color-za-red: #e03c31;
+  --color-za-blue: #001489;
+  --color-za-green: #007749;
+  --color-za-gold: #ffb81c;
+  --color-za-black: #000;
+  --color-za-white: #fff;
+}
+
 @theme inline {
   --font-sans: "Figtree Variable", "Figtree", system-ui, sans-serif;
   --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;

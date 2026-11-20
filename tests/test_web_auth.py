@@ -903,6 +903,7 @@ def test_the_session_says_who_is_signed_in(fake: Fake) -> None:
         "player": None,
         "dev_login": False,
         "invite_url": None,
+        "kofi_url": None,
     }
 
     player = make_player(1)
@@ -925,6 +926,7 @@ def test_the_session_says_who_is_signed_in(fake: Fake) -> None:
         },
         "dev_login": False,
         "invite_url": None,
+        "kofi_url": None,
     }
 
 

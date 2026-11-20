@@ -1,6 +1,6 @@
 // The pages outside the match room, from Django's fixtures (completed.http-*.json and the live
 // snapshots) with fetch stubbed and the live connection faked.
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -56,14 +56,14 @@ function expectNoProfileLinks() {
 
 describe("sign in", () => {
   it("offers Discord and Steam, and the dev login only when the server says so", () => {
-    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: true, invite_url: null }, route: "/signin?next=/ladder" });
+    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: true, invite_url: null, kofi_url: null }, route: "/signin?next=/ladder" });
     expect(screen.getByRole("link", { name: /Sign in with Discord/ })).toHaveAttribute("href", "/auth/discord/?next=%2Fladder");
     expect(screen.getByRole("link", { name: /Sign in with Steam/ })).toHaveAttribute("href", "/auth/steam/?next=%2Fladder&intent=login");
     expect(screen.getByRole("link", { name: /Dev login/ })).toBeInTheDocument();
   });
 
   it("explains every refusal in plain words, with the invite for not-member", () => {
-    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: false, invite_url: "https://discord.gg/x" }, route: "/signin?error=not-member" });
+    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: false, invite_url: "https://discord.gg/x", kofi_url: null }, route: "/signin?error=not-member" });
     expect(screen.getByRole("heading", { level: 1, name: REFUSALS["not-member"].title })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open the server invite/ })).toHaveAttribute("href", "https://discord.gg/x");
     expect(screen.queryByText("not-member")).not.toBeInTheDocument();
@@ -71,14 +71,14 @@ describe("sign in", () => {
   });
 
   it("has words for a code it doesn't know, and only goes back to this site", () => {
-    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: false, invite_url: null }, route: "/signin?error=what" });
+    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: false, invite_url: null, kofi_url: null }, route: "/signin?error=what" });
     expect(screen.getByRole("heading", { level: 1, name: "Sign-in didn't work" })).toBeInTheDocument();
     expect(safeNext("//evil.example")).toBe("/");
     expect(safeNext("/matches/3")).toBe("/matches/3");
   });
 
   it("gives the hero to the call to action staff set: the tagline is the headline", async () => {
-    const signedOut = { signed_in: false, player: null, dev_login: false, invite_url: null } as const;
+    const signedOut = { signed_in: false, player: null, dev_login: false, invite_url: null, kofi_url: null } as const;
     const landing = {
       headline_html: "Season 3<br> is <strong>on</strong>.",
       lead_html: "<p>Sign-ups close Friday.</p>",
@@ -97,7 +97,7 @@ describe("sign in", () => {
   });
 
   it("loads a YouTube advert only when it's pressed", async () => {
-    const signedOut = { signed_in: false, player: null, dev_login: false, invite_url: null } as const;
+    const signedOut = { signed_in: false, player: null, dev_login: false, invite_url: null, kofi_url: null } as const;
     const landing = {
       headline_html: null,
       lead_html: null,
@@ -111,8 +111,21 @@ describe("sign in", () => {
     expect(screen.getByTitle("Season 3 trailer")).toHaveAttribute("src", "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&rel=0");
   });
 
+  it("signs every page off with its tag lines, and Ko-fi once the server has it", async () => {
+    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: false, invite_url: null, kofi_url: null }, route: "/signin" });
+    const footer = screen.getByRole("contentinfo");
+    expect(within(footer).getByText("Made with Love <3")).toBeInTheDocument();
+    expect(within(footer).getByRole("img", { name: "South Africa" })).toBeInTheDocument();
+    expect(within(footer).queryByRole("link", { name: /Ko-fi/ })).not.toBeInTheDocument();
+    cleanup();
+    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: false, invite_url: null, kofi_url: "https://ko-fi.com/dayshift" }, route: "/signin" });
+    const kofi = await within(screen.getByRole("contentinfo")).findByRole("link", { name: /Support us on Ko-fi/ });
+    expect(kofi).toHaveAttribute("href", "https://ko-fi.com/dayshift");
+    expect(kofi).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
   it("says plainly when the session ran out", () => {
-    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: false, invite_url: null }, route: "/signin?expired=1&next=/me" });
+    page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: false, invite_url: null, kofi_url: null }, route: "/signin?expired=1&next=/me" });
     expect(screen.getByRole("heading", { level: 1, name: "You've been signed out" })).toBeInTheDocument();
   });
 });

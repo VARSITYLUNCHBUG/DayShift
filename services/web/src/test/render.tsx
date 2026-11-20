@@ -22,6 +22,7 @@ export const SIGNED_IN: Session = {
   },
   dev_login: false,
   invite_url: null,
+  kofi_url: null,
 };
 
 interface Options {

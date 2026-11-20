@@ -7,7 +7,7 @@ import { SkipLink } from "../Navigation";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { PhoneTabs, PhoneTop, TopBar } from "./TopBar";
 import type { ShellUser } from "./TopBar";
-import { ArtCredit } from "./ArtCredit";
+import { SiteFooter } from "./SiteFooter";
 
 const InsideAppShell = createContext(false);
 
@@ -50,7 +50,7 @@ export function AppShell({ me, status, banner, children, width = "app" }: Props)
         {phone && status ? <div className="flex">{status}</div> : null}
         {children}
       </main>
-      <ArtCredit className={phone && me ? "pb-18" : undefined} />
+      <SiteFooter className={phone && me ? "pb-18" : undefined} />
       {phone && me ? <PhoneTabs /> : null}
     </div>
     </InsideAppShell>

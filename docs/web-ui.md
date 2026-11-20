@@ -119,6 +119,7 @@ The web UI is in the published image: nothing else to build or run.
   | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | The bot application's OAuth2 client, from the Developer Portal's OAuth2 page |
   | `WEB_GUILD_ID` | The server players must be in. Defaults to `DISCORD_GUILD_ID`. |
   | `DISCORD_INVITE_URL` | Optional: the `https://discord.gg/` invite for people who aren't in it yet |
+  | `KOFI_URL` | Optional: the Ko-fi page the footer links to. Without it there's no link. |
   | `WEB_DB_THREADS` | Optional: threads for the socket's database work (8) |
   | `WEB_DEV_LOGIN` | Never in production. It refuses to start without `DEBUG`. |
 

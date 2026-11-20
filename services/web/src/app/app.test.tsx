@@ -41,7 +41,7 @@ describe("Routes", () => {
     renderPage(<AppRoutes />, {
       route: "/ladder",
       live: false,
-      session: { signed_in: false, player: null, dev_login: false, invite_url: null },
+      session: { signed_in: false, player: null, dev_login: false, invite_url: null, kofi_url: null },
     });
     expect(await screen.findByRole("link", { name: /Sign in with Discord/ }, LAZY)).toBeInTheDocument();
   });

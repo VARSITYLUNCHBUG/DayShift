@@ -15,6 +15,8 @@ export interface Session {
   dev_login: boolean;
   /** The server's invite (DISCORD_INVITE_URL), when one is set. */
   invite_url: string | null;
+  /** The Ko-fi page (KOFI_URL) the footer links to, when one is set. */
+  kofi_url: string | null;
 }
 
 export const SESSION_KEY = ["session"] as const;

@@ -26,6 +26,8 @@ dayshift_log_level: INFO
 # sign-in sends people who aren't in the server to. Blank: no Discord sign-in / Discord's app.
 dayshift_discord_client_id: ""
 dayshift_discord_invite_url: ""
+# The Ko-fi page every page's footer links to (https://ko-fi.com/...). Blank: no link.
+dayshift_kofi_url: ""
 
 # Anything else for .env, as KEY: value.
 dayshift_env_extra: {}

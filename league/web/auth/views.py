@@ -270,6 +270,7 @@ def session_view(request: HttpRequest) -> JsonResponse:
             "player": player_json(player) if player is not None else None,
             "dev_login": dev_login_enabled(),
             "invite_url": settings.DISCORD_INVITE_URL or None,
+            "kofi_url": settings.KOFI_URL or None,
         }
     )
     response["Cache-Control"] = "no-store"

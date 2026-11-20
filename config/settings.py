@@ -241,6 +241,10 @@ DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
 DISCORD_INVITE_URL = os.environ.get("DISCORD_INVITE_URL", "").strip()
 if DISCORD_INVITE_URL and not DISCORD_INVITE_URL.startswith("https://"):
     raise RuntimeError("DISCORD_INVITE_URL must be an https:// link.")
+# The Ko-fi page in every page's footer. Without it, the footer leaves the link out.
+KOFI_URL = os.environ.get("KOFI_URL", "").strip()
+if KOFI_URL and not KOFI_URL.startswith("https://"):
+    raise RuntimeError("KOFI_URL must be an https:// link.")
 # Threads the web process runs database work on, for the websocket and its snapshots.
 WEB_DB_THREADS = int(os.environ.get("WEB_DB_THREADS") or 8)
 # Sign in as any player without Discord: local testing only.

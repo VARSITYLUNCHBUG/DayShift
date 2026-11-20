@@ -195,3 +195,10 @@ def test_the_policy_lets_the_advert_play() -> None:
     assert policy["media-src"] == ["'self'"]
     assert policy["frame-src"] == ["https://www.youtube-nocookie.com"]
 
+
+@pytest.mark.django_db
+def test_the_session_says_where_ko_fi_is(settings: Any) -> None:
+    settings.KOFI_URL = "https://ko-fi.com/dayshift"
+    assert Client().get("/api/session/").json()["kofi_url"] == "https://ko-fi.com/dayshift"
+    settings.KOFI_URL = ""
+    assert Client().get("/api/session/").json()["kofi_url"] is None

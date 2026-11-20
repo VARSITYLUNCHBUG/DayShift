@@ -56,6 +56,7 @@ function Data({ scene = "queued", children }: { scene?: Scene; children: ReactNo
       player: { id: HTTP_VIEWER.id, name: HTTP_VIEWER.name, avatar: null, steam: [{ name: "P3Plays", proven: false, verified: false }] },
       dev_login: true,
       invite_url: "https://discord.gg/example",
+      kofi_url: "https://ko-fi.com/example",
     };
     client.setQueryData(SESSION_KEY, session);
     const list = (status: "live" | "recent") => ({ pages: [status === "live" ? { matches: [], next_cursor: null } : http.matches()], pageParams: [null] });
