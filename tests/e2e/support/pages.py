@@ -21,6 +21,7 @@ STATUS_LABELS = {
     "captain_checkin": "Captain check-in",
     "player_draft": "Player draft",
     "coinflip": "Captain coinflip",
+    "team_confirm": "Captains confirm teams",
     "champion_draft": "Champion draft",
     "lobby_code": "Lobby code",
     "in_progress": "In progress",

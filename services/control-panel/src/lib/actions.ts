@@ -22,6 +22,7 @@ const LABELS: Record<Action, string> = {
   pick: "Pick",
   ban: "Ban",
   coinflip: "Choose a side (coinflip)",
+  teams_ready: "Confirm the teams",
   swap: "Offer a player swap",
   accept_swap: "Accept the swap",
   decline_swap: "Decline the swap",
@@ -85,6 +86,9 @@ export function validActions(match: Match): ActionChoice[] {
       break;
     case "coinflip":
       add("coinflip", turn);
+      break;
+    case "team_confirm":
+      add("teams_ready", turn.length ? turn : caps);
       break;
     case "champion_draft":
       add(wanted === "ban" ? "ban" : "pick", turn);
