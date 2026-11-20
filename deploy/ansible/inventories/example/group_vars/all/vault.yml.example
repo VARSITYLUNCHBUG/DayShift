@@ -17,5 +17,7 @@ vault_healthcheck_ping_url: ""
 # Optional API keys.
 vault_deadlock_api_key: ""
 vault_steam_web_api_key: ""
+# Optional: the player web UI's Discord OAuth app secret (Developer Portal, OAuth2).
+vault_discord_client_secret: ""
 # Only for a private image: a registry token that can read it.
 vault_registry_password: ""

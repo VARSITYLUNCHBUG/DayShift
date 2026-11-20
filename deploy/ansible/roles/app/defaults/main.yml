@@ -22,6 +22,11 @@ dayshift_discord_guild_id: ""
 dayshift_error_log_channel_id: ""
 dayshift_admin_cidrs: []
 dayshift_log_level: INFO
+# The player web UI's Discord OAuth app (its secret is in the vault), and the server invite
+# sign-in sends people who aren't in the server to. Blank: no Discord sign-in / Discord's app.
+dayshift_discord_client_id: ""
+dayshift_discord_invite_url: ""
+
 # Anything else for .env, as KEY: value.
 dayshift_env_extra: {}
 
@@ -37,4 +42,5 @@ dayshift_alert_webhook_url: "{{ vault_alert_webhook_url | default('') }}"
 dayshift_healthcheck_ping_url: "{{ vault_healthcheck_ping_url | default('') }}"
 dayshift_deadlock_api_key: "{{ vault_deadlock_api_key | default('') }}"
 dayshift_steam_web_api_key: "{{ vault_steam_web_api_key | default('') }}"
+dayshift_discord_client_secret: "{{ vault_discord_client_secret | default('') }}"
 dayshift_registry_password: "{{ vault_registry_password | default('') }}"
