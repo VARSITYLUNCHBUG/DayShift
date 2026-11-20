@@ -30,21 +30,21 @@ export default defineConfig(({ command }) => ({
         chunkFileNames: (chunk) => `assets/${chunk.name.split("~")[0]}-[hash].js`,
         // Libraries change less often than the app, so they get files of their own that stay
         // cached across deploys: React and the router, React Aria with HeroUI, then the rest.
-        // The last two are entries-aware: split by which pages use them, so the first load
-        // carries only what the shell needs and each page brings its own share.
+        // Only the last is entries-aware (split by which pages use it). React Aria and HeroUI
+        // stay one chunk: split by page, their parts import each other, and a part that runs
+        // first can call a CommonJS shim the other hasn't evaluated yet (a blank page in
+        // production). The shims React uses go with React for the same reason.
         codeSplitting: {
           groups: [
             {
               name: "react",
-              test: /node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/,
+              test: /node_modules[\\/](react|react-dom|scheduler|react-router|use-sync-external-store)[\\/]/,
               priority: 3,
             },
             {
               name: "ui",
               test: /node_modules[\\/](react-aria|react-aria-components|react-stately|@react-aria|@react-stately|@react-types|@internationalized|@heroui|@radix-ui|tailwind-variants|tailwind-merge)[\\/]/,
               priority: 2,
-              entriesAware: true,
-              entriesAwareMergeThreshold: 20_000,
             },
             { name: "vendor", test: /node_modules/, priority: 1, entriesAware: true, entriesAwareMergeThreshold: 20_000 },
           ],
