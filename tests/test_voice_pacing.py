@@ -11,12 +11,11 @@ import pytest
 from django.db import connections
 
 from bot.db import db
-from bot.effects.handlers import _record_created_voice
 from bot.voice_pacing import VoicePacer
 from league.models import Community, OutboxEffect
 from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
-from league.services import common, community, effects, lobby
+from league.services import common, community, effects, lobby, voice_pool
 from tests.test_bot import FakeGateway, popped_match
 
 
@@ -140,7 +139,7 @@ def test_a_voice_retry_cannot_block_a_board_and_cleanup_cancels_it(wired: Commun
 def test_a_channel_created_as_the_match_ends_is_recorded_for_cleanup(wired: Community) -> None:
     match = popped_match(wired, FakeGateway())
     match.participants.update(is_active=False)
-    assert not _record_created_voice(match.pk, ResourceKind.TEAM_A_VOICE, 12345)
+    assert not voice_pool.record_created(match.pk, ResourceKind.TEAM_A_VOICE, 12345, 1, False)
     assert effects.resource_id(match.pk, ResourceKind.TEAM_A_VOICE) == 12345
     assert OutboxEffect.objects.filter(match=match, kind="cleanup_voice").exists()
 
