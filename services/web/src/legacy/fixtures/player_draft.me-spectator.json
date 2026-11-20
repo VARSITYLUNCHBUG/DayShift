@@ -1,0 +1,35 @@
+{
+  "player": {
+    "id": "13",
+    "name": "P13",
+    "avatar_url": null,
+    "steam": {
+      "linked": false,
+      "proven": false,
+      "verified": false,
+      "name": ""
+    }
+  },
+  "queue": {
+    "in_queue": true,
+    "position": 1,
+    "joined_at": "2026-01-05T19:00:00.000Z",
+    "place": {
+      "position": 1,
+      "total": 1,
+      "held_until": null
+    }
+  },
+  "cooldown": null,
+  "match": null,
+  "scrim": null,
+  "offers": [],
+  "last_offer": null,
+  "strikes": 0,
+  "flags": {
+    "auto_captain": false,
+    "auto_lobby": false,
+    "api_results": true,
+    "score_ocr": "off"
+  }
+}

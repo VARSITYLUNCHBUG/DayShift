@@ -1,0 +1,37 @@
+{
+  "player": {
+    "id": "3",
+    "name": "P3",
+    "avatar_url": null,
+    "steam": {
+      "linked": false,
+      "proven": false,
+      "verified": false,
+      "name": ""
+    }
+  },
+  "queue": {
+    "in_queue": false,
+    "position": null,
+    "joined_at": null,
+    "place": null
+  },
+  "cooldown": null,
+  "match": {
+    "id": "1",
+    "status": "lobby_code",
+    "kind": "ranked",
+    "team": "A",
+    "is_captain": false
+  },
+  "scrim": null,
+  "offers": [],
+  "last_offer": null,
+  "strikes": 0,
+  "flags": {
+    "auto_captain": false,
+    "auto_lobby": false,
+    "api_results": true,
+    "score_ocr": "off"
+  }
+}

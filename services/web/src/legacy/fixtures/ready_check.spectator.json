@@ -1,0 +1,217 @@
+{
+  "id": "1",
+  "status": "ready_check",
+  "kind": "ranked",
+  "mode_name": "3-ban draft",
+  "deadline_at": "2026-01-05T19:03:00.000Z",
+  "closes_at": null,
+  "started_at": null,
+  "players": [
+    {
+      "id": "1",
+      "name": "P1",
+      "avatar_url": "/avatar/1/a1b2c3d4e5f60718293a4b5c6d7e8f90.png?size=64",
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "10",
+      "name": "P10",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": false,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "11",
+      "name": "P11",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": false,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "12",
+      "name": "P12",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": false,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "2",
+      "name": "P2",
+      "avatar_url": "/avatar/2/0f1e2d3c4b5a6978.png?size=64",
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "3",
+      "name": "P3",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "4",
+      "name": "P4",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "5",
+      "name": "P5",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "6",
+      "name": "P6",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "7",
+      "name": "P7",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": true,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "8",
+      "name": "P8",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": false,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "9",
+      "name": "P9",
+      "avatar_url": null,
+      "rating": 0,
+      "team": null,
+      "is_captain": false,
+      "is_ready": false,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    }
+  ],
+  "captains": {
+    "A": null,
+    "B": null
+  },
+  "team_names": {
+    "A": null,
+    "B": null
+  },
+  "sides": {
+    "A": null,
+    "B": null
+  },
+  "draft": [],
+  "turn": null,
+  "step_index": 0,
+  "player_draft_order": [],
+  "champion_steps": [],
+  "champion_step": null,
+  "champions": [],
+  "coinflip": null,
+  "host": null,
+  "lobby_code": null,
+  "result": {
+    "winner": null,
+    "reported_winner": null,
+    "reported_by_id": null,
+    "reported_by_name": null,
+    "deltas": {},
+    "responses": [],
+    "void_reason": null
+  },
+  "subs": [],
+  "subs_done": [],
+  "on_hold": false,
+  "hold_until": null,
+  "early_leave": {
+    "open": false,
+    "minutes": 5,
+    "pending": null
+  },
+  "lobby": {
+    "auto_lobby": false,
+    "api_lobby": false,
+    "api_started": false,
+    "api_leaves_at": null
+  },
+  "win_chance_a": null,
+  "captain_min_games": 0,
+  "votes_per_player": 2,
+  "draft_name": "Blazing Lion",
+  "gif_url": "https://media.tenor.com/Mir1PQM5jfwAAAAM/deadlock-hop-on-deadlock.gif",
+  "restarted_from": null,
+  "scoreboard": null,
+  "viewer": {
+    "is_player": false,
+    "team": null,
+    "is_captain": false,
+    "is_acting": false,
+    "has_voted": false,
+    "votes": [],
+    "can_request_sub": false
+  }
+}

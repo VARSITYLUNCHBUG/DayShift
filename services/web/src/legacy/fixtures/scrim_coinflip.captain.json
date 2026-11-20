@@ -1,0 +1,107 @@
+{
+  "id": "1",
+  "status": "coinflip",
+  "kind": "scrim",
+  "mode_name": "3-ban draft",
+  "deadline_at": "2026-01-05T19:15:00.000Z",
+  "closes_at": null,
+  "started_at": null,
+  "players": [
+    {
+      "id": "1",
+      "name": "P1",
+      "avatar_url": "/avatar/1/a1b2c3d4e5f60718293a4b5c6d7e8f90.png?size=64",
+      "rating": 0,
+      "team": "A",
+      "is_captain": true,
+      "is_ready": false,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    },
+    {
+      "id": "2",
+      "name": "P2",
+      "avatar_url": "/avatar/2/0f1e2d3c4b5a6978.png?size=64",
+      "rating": 0,
+      "team": "B",
+      "is_captain": true,
+      "is_ready": false,
+      "has_voted": false,
+      "captain_ok": true,
+      "captain_note": ""
+    }
+  ],
+  "captains": {
+    "A": "P1",
+    "B": "P2"
+  },
+  "team_names": {
+    "A": "P1's Team",
+    "B": "P2's Team"
+  },
+  "sides": {
+    "A": null,
+    "B": null
+  },
+  "draft": [],
+  "turn": null,
+  "step_index": 10,
+  "player_draft_order": [],
+  "champion_steps": [],
+  "champion_step": null,
+  "champions": [],
+  "coinflip": {
+    "winner": "A",
+    "winner_choice": "last_pick",
+    "loser_choice": null,
+    "options": [
+      "hidden_king",
+      "archmother"
+    ],
+    "chooser_team": "B",
+    "chooser_id": "2"
+  },
+  "host": null,
+  "lobby_code": null,
+  "result": {
+    "winner": null,
+    "reported_winner": null,
+    "reported_by_id": null,
+    "reported_by_name": null,
+    "deltas": {},
+    "responses": [],
+    "void_reason": null
+  },
+  "subs": [],
+  "subs_done": [],
+  "on_hold": false,
+  "hold_until": null,
+  "early_leave": {
+    "open": false,
+    "minutes": 5,
+    "pending": null
+  },
+  "lobby": {
+    "auto_lobby": false,
+    "api_lobby": false,
+    "api_started": false,
+    "api_leaves_at": null
+  },
+  "win_chance_a": null,
+  "captain_min_games": 0,
+  "votes_per_player": 2,
+  "draft_name": "Blazing Lion",
+  "gif_url": "https://media.tenor.com/Mir1PQM5jfwAAAAM/deadlock-hop-on-deadlock.gif",
+  "restarted_from": null,
+  "scoreboard": null,
+  "viewer": {
+    "is_player": true,
+    "team": "B",
+    "is_captain": true,
+    "is_acting": true,
+    "has_voted": false,
+    "votes": [],
+    "can_request_sub": false
+  }
+}

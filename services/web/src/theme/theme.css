@@ -1,0 +1,693 @@
+/* DayShift on HeroUI v3. The app's one stylesheet and the only file allowed raw colours
+ * (stylelint and ESLint enforce it). Values come from design/dayshift/wireframe/ds.py.
+ *
+ * 1. DayShift tokens (--ds-*): the palette, dark by default, light under [data-theme="light"].
+ * 2. HeroUI's semantic variables mapped onto them (see @heroui/styles themes/default/variables.css
+ *    for the full list): background = ink, accent = cream (a primary button is cream on ink),
+ *    border = strong line (control edges), separator = line, focus = bubblegum.
+ * 3. Tailwind theme keys for what HeroUI doesn't have: teams, radii, shadows, type, motion.
+ * 4. Base: body type, the focus ring, reduced motion.
+ * 5. Component overrides on HeroUI's BEM classes (.button, .modal__dialog, .toast, ...).
+ *
+ * Bubblegum (--ds-brand) is DayShift itself: the mark, the active nav tab, focus rings. It is never
+ * an action and never a team. Amber is always The Hidden King, blue always The Archmother. */
+@import "./heroui.css";
+
+/* Snapshot fixtures are data, not markup: keep Tailwind from scanning them for class names. */
+@source not "../fixtures";
+@source not "../legacy/fixtures";
+
+/* Components read tokens, so they need no `dark:` variants: the theme is the html element's
+ * data-theme (dark in index.html; public/theme.js and useTheme switch it). */
+
+/* --- 1. DayShift tokens --------------------------------------------------------------------- */
+
+:root,
+.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --ds-ink: #111019;
+  --ds-surface: #1a1824;
+  --ds-raised: #232031;
+  --ds-raised-2: #2b2738;
+  --ds-line: #322e44;
+  --ds-line-strong: #6e6789;
+  --ds-text: #f3efe6;
+  --ds-muted: #a8a2b5;
+  --ds-faint: #948ea3;
+  --ds-on-cream: #111019;
+  --ds-brand: #ff8dc3;
+  --ds-brand-ink: #2a0a19;
+  --ds-red: #ff6b6b;
+  --ds-red-soft: #2e1520;
+  --ds-red-ink: #2a0808;
+  --ds-ok: #7fd1a8;
+  --ds-ok-ink: #111019;
+
+  /* The Hidden King (amber) and The Archmother (blue): fill, soft ground, line, light text on
+   * soft, ink on the fill. */
+  --team-hk: #e3a23b;
+  --team-hk-soft: #2a2216;
+  --team-hk-line: #6a5124;
+  --team-hk-light: #f2cf8e;
+  --team-hk-ink: #1a1206;
+  --team-am: #5e92e8;
+  --team-am-soft: #18203a;
+  --team-am-line: #2c4673;
+  --team-am-light: #bcd2f7;
+  --team-am-ink: #0b1222;
+
+  /* Hard drop shadows, straight down, never blurred (F04). */
+  --ds-shadow-sticker: 0 2px 0 rgb(0 0 0 / 25%);
+  --ds-shadow-lift: 0 8px 0 rgb(0 0 0 / 30%);
+  --ds-shadow-toast: 0 10px 0 rgb(0 0 0 / 25%);
+  --ds-shadow-sheet: 0 12px 0 rgb(0 0 0 / 30%);
+  --ds-shadow-dialog: 0 16px 0 rgb(0 0 0 / 35%);
+  --ds-backdrop: rgb(17 16 25 / 72%);
+}
+
+.light,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --ds-ink: #f6f2ea;
+  --ds-surface: #fff;
+  --ds-raised: #ece6da;
+  --ds-raised-2: #e4dccd;
+  --ds-line: #ddd5c7;
+  --ds-line-strong: #8a8297;
+  --ds-text: #16141f;
+  --ds-muted: #625c6e;
+  --ds-faint: #6b6577;
+  --ds-on-cream: #f6f2ea;
+  --ds-brand: #b33a75;
+  --ds-brand-ink: #fff;
+  --ds-red: #b8323f;
+  --ds-red-soft: #fbe6e6;
+  --ds-red-ink: #fff;
+  --ds-ok: #1f7a4d;
+  --ds-ok-ink: #fff;
+
+  /* On paper the team colours darken so they read as text (5:1) and carry white ink. */
+  --team-hk: #8a5a10;
+  --team-hk-soft: #f7e9cc;
+  --team-hk-line: #c9a15a;
+  --team-hk-light: #5e3c08;
+  --team-hk-ink: #fff;
+  --team-am: #2f62b8;
+  --team-am-soft: #dfe9fa;
+  --team-am-line: #8fb0e6;
+  --team-am-light: #1e3f7a;
+  --team-am-ink: #fff;
+
+  --ds-shadow-sticker: 0 2px 0 rgb(22 20 31 / 18%);
+  --ds-shadow-lift: 0 8px 0 rgb(22 20 31 / 18%);
+  --ds-shadow-toast: 0 10px 0 rgb(22 20 31 / 15%);
+  --ds-shadow-sheet: 0 12px 0 rgb(22 20 31 / 18%);
+  --ds-shadow-dialog: 0 16px 0 rgb(22 20 31 / 22%);
+  --ds-backdrop: rgb(22 20 31 / 55%);
+}
+
+/* --- 2. HeroUI semantic variables ------------------------------------------------------------ */
+
+:root,
+.dark,
+[data-theme="dark"],
+.light,
+[data-theme="light"] {
+  --background: var(--ds-ink);
+  --foreground: var(--ds-text);
+  --surface: var(--ds-surface);
+  --surface-foreground: var(--ds-text);
+  --surface-secondary: var(--ds-raised);
+  --surface-secondary-foreground: var(--ds-text);
+  --surface-tertiary: var(--ds-raised-2);
+  --surface-tertiary-foreground: var(--ds-text);
+  --surface-hover: var(--ds-raised);
+  --overlay: var(--ds-raised);
+  --overlay-foreground: var(--ds-text);
+  --muted: var(--ds-muted);
+  --default: var(--ds-raised);
+  --default-foreground: var(--ds-text);
+  --default-hover: var(--ds-raised-2);
+  --accent: var(--ds-text);
+  --accent-foreground: var(--ds-on-cream);
+  --accent-hover: color-mix(in oklab, var(--ds-text) 88%, var(--ds-ink));
+  --accent-soft: var(--ds-raised);
+  --accent-soft-foreground: var(--ds-text);
+  --accent-soft-hover: var(--ds-raised-2);
+  --success: var(--ds-ok);
+  --success-foreground: var(--ds-ok-ink);
+  --success-soft: var(--ds-raised);
+  --success-soft-foreground: var(--ds-ok);
+
+  /* DayShift has no warning hue (amber is a team). Warnings are neutral, like ds.banner("warn"). */
+  --warning: var(--ds-text);
+  --warning-foreground: var(--ds-on-cream);
+  --warning-soft: var(--ds-raised-2);
+  --warning-soft-foreground: var(--ds-text);
+  --danger: var(--ds-red);
+  --danger-foreground: var(--ds-red-ink);
+  --danger-hover: color-mix(in oklab, var(--ds-red) 88%, var(--ds-ink));
+  --danger-soft: var(--ds-red-soft);
+  --danger-soft-foreground: var(--ds-red);
+  --danger-soft-hover: color-mix(in oklab, var(--ds-red-soft) 80%, var(--ds-red));
+  --segment: var(--ds-text);
+  --segment-foreground: var(--ds-on-cream);
+
+  /* Control edges are the strong line (3:1); the plain line is decorative only. */
+  --border: var(--ds-line-strong);
+  --separator: var(--ds-line);
+  --focus: var(--ds-brand);
+  --link: var(--ds-text);
+  --backdrop: var(--ds-backdrop);
+
+  --field-background: var(--ds-ink);
+  --field-foreground: var(--ds-text);
+  --field-placeholder: var(--ds-faint);
+  --field-border: var(--ds-line-strong);
+  --field-border-hover: var(--ds-text);
+  --field-border-focus: var(--ds-text);
+  --field-hover: var(--ds-ink);
+  --field-focus: var(--ds-ink);
+  --field-border-width: 2px;
+  --field-radius: 999px;
+  --ring-offset-width: 2px;
+  --radius: 0.5rem;
+  --disabled-opacity: 1;
+  --skeleton-animation: none;
+
+  --surface-shadow: none;
+  --overlay-shadow: var(--ds-shadow-toast);
+  --field-shadow: none;
+}
+
+/* Brand colours for the sign-in buttons; the same in both themes. */
+:root {
+  --discord: #5865f2;
+  --discord-hover: #4752c4;
+  --discord-foreground: #fff;
+  --steam: #1b2838;
+  --steam-hover: #2a3f5a;
+  --steam-foreground: #fff;
+}
+
+/* --- 3. Tailwind theme keys ------------------------------------------------------------------ */
+
+@theme inline {
+  --font-sans: "Figtree Variable", "Figtree", system-ui, sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;
+
+  /* Plain DayShift names, for the parts HeroUI's names don't say well. */
+  --color-ink: var(--ds-ink);
+  --color-raised: var(--ds-raised);
+  --color-raised-2: var(--ds-raised-2);
+  --color-line: var(--ds-line);
+  --color-line-strong: var(--ds-line-strong);
+  --color-faint: var(--ds-faint);
+  --color-on-cream: var(--ds-on-cream);
+  --color-brand: var(--ds-brand);
+  --color-brand-ink: var(--ds-brand-ink);
+  --color-ok: var(--ds-ok);
+  --color-team-hk: var(--team-hk);
+  --color-team-hk-soft: var(--team-hk-soft);
+  --color-team-hk-line: var(--team-hk-line);
+  --color-team-hk-light: var(--team-hk-light);
+  --color-team-hk-ink: var(--team-hk-ink);
+  --color-team-hk-hover: color-mix(in oklab, var(--team-hk) 88%, var(--team-hk-ink));
+  --color-team-am: var(--team-am);
+  --color-team-am-soft: var(--team-am-soft);
+  --color-team-am-line: var(--team-am-line);
+  --color-team-am-light: var(--team-am-light);
+  --color-team-am-ink: var(--team-am-ink);
+  --color-team-am-hover: color-mix(in oklab, var(--team-am) 88%, var(--team-am-ink));
+  --color-discord: var(--discord);
+  --color-discord-hover: var(--discord-hover);
+  --color-discord-foreground: var(--discord-foreground);
+  --color-steam: var(--steam);
+  --color-steam-hover: var(--steam-hover);
+  --color-steam-foreground: var(--steam-foreground);
+
+  /* Radii (F04): pills for anything pressed (rounded-full), 24 dialogs, 20 panels, 16 cards,
+   * 14 rows, 10 small parts. */
+  --radius-dialog: 24px;
+  --radius-panel: 20px;
+  --radius-card: 16px;
+  --radius-row: 14px;
+  --radius-small: 10px;
+
+  --shadow-sticker: var(--ds-shadow-sticker);
+  --shadow-lift: var(--ds-shadow-lift);
+  --shadow-toast: var(--ds-shadow-toast);
+  --shadow-sheet: var(--ds-shadow-sheet);
+  --shadow-dialog: var(--ds-shadow-dialog);
+
+  /* Display scale: Bricolage 800, -0.03em, line height 0.95 (F03). */
+  --text-poster: 88px;
+  --text-poster--line-height: 0.95;
+  --text-clock: 64px;
+  --text-clock--line-height: 0.9;
+  --text-clock-sheet: 40px;
+  --text-clock-sheet--line-height: 0.9;
+  --text-clock-phone: 22px;
+  --text-clock-phone--line-height: 1;
+  --text-board: 56px;
+  --text-board--line-height: 0.95;
+  --text-title: 44px;
+  --text-title--line-height: 0.95;
+  --text-coin: 34px;
+  --text-coin--line-height: 0.95;
+  --text-sheet: 28px;
+  --text-sheet--line-height: 0.95;
+  --text-team: 32px;
+  --text-team--line-height: 1;
+  --text-score: 40px;
+  --text-score--line-height: 1;
+  --text-stat: 28px;
+  --text-stat--line-height: 1;
+  --text-section: 26px;
+  --text-section--line-height: 0.95;
+  --text-card: 20px;
+  --text-card--line-height: 1.1;
+
+  /* Body scale: Figtree (F03). */
+  --text-lead-lg: 19px;
+  --text-lead-lg--line-height: 1.55;
+  --text-lead: 17px;
+  --text-lead--line-height: 1.55;
+  --text-body: 15px;
+  --text-body--line-height: 1.45;
+  --text-label: 14px;
+  --text-label--line-height: 1.4;
+  --text-caption: 13px;
+  --text-caption--line-height: 1.4;
+  --text-micro: 12px;
+  --text-micro--line-height: 1.3;
+  --text-field: 16px;
+  --text-field--line-height: 1.5;
+
+  --tracking-display: -0.03em;
+  --tracking-code: 0.08em;
+
+  /* Layout widths (F04). */
+  --container-app: 1360px;
+  --container-room: 1440px;
+  --container-lead: 680px;
+  --container-dialog: 520px;
+  --container-sheet: 440px;
+  --container-toast: 420px;
+
+  /* Motion (F06): state 150 ms, enter 200 ms, exit 150 ms. */
+  --ease-state: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Utilities that need more than one value. */
+@utility type-display {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: var(--tracking-display);
+}
+
+@utility transition-state {
+  transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: var(--ease-state);
+}
+
+@utility animate-enter {
+  animation: ds-enter 200ms var(--ease-state);
+}
+
+/* The phone tab bar: clear of the home indicator; the current tab has a bubblegum bar on top. */
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@utility shadow-tab-active {
+  box-shadow: inset 0 3px 0 var(--ds-brand);
+}
+
+@utility skew-lean {
+  transform: skewX(-14deg);
+}
+
+@utility tilt-sticker {
+  transform: rotate(-4deg);
+}
+
+@utility tilt-card {
+  transform: rotate(-1.5deg);
+}
+
+@keyframes ds-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* --- 4. Base --------------------------------------------------------------------------------- */
+
+@layer base {
+  html {
+    background-color: var(--ds-ink);
+    text-size-adjust: 100%;
+  }
+
+  body {
+    @apply min-h-dvh bg-background font-sans text-body font-medium text-foreground antialiased;
+
+    /* Every number is tabular (F03). */
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply type-display text-balance;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  ::selection {
+    background-color: var(--ds-brand);
+    color: var(--ds-brand-ink);
+  }
+}
+
+/* The focus ring (F07): 3px bubblegum, 2px offset, on keyboard focus only, on everything. It is
+ * an outline (not HeroUI's box-shadow ring) so it survives overflow-hidden cards and the hard drop
+ * shadows. Unlayered on purpose: it must beat the components layer's `outline-none`. */
+:focus-visible,
+[data-focus-visible="true"] {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+/* Reduced motion (F06): no slides or scales; colour changes stay. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- 5. HeroUI component overrides ----------------------------------------------------------- */
+
+@layer components {
+  /* Buttons (ds btn / ghost / danger / quiet): pills, 48 tall (44 small, 60 big), Figtree 800.
+   * Pressing nudges 1px down instead of scaling. */
+  .button {
+    @apply h-12 min-h-11 rounded-full px-5.5 text-body font-extrabold md:h-12;
+
+    gap: 8px;
+    transition:
+      background-color 150ms var(--ease-state),
+      border-color 150ms var(--ease-state),
+      color 150ms var(--ease-state),
+      transform 150ms var(--ease-state);
+
+    &:active,
+    &[data-pressed="true"] {
+      transform: translateY(1px);
+    }
+
+    &:disabled,
+    &[aria-disabled="true"] {
+      --button-bg: var(--ds-raised);
+      --button-bg-hover: var(--ds-raised);
+      --button-fg: var(--ds-faint);
+
+      border-color: transparent;
+      cursor: not-allowed;
+    }
+
+    & svg:not([data-slot="spinner"] svg, [data-slot="link-icon"] svg) {
+      @apply size-5;
+    }
+  }
+
+  .button--sm {
+    @apply h-11 px-4 md:h-11;
+
+    &:active,
+    &[data-pressed="true"] {
+      transform: translateY(1px);
+    }
+  }
+
+  .button--lg {
+    @apply h-15 px-7 text-lg md:h-15;
+
+    &:active,
+    &[data-pressed="true"] {
+      transform: translateY(1px);
+    }
+  }
+
+  .button--icon-only,
+  .button--icon-only.button--sm,
+  .button--icon-only.button--lg {
+    @apply size-11 min-w-11 p-0 md:size-11;
+  }
+
+  /* Secondary: a raised pill (the chat Send button). */
+  .button--secondary {
+    --button-bg: var(--ds-raised);
+    --button-bg-hover: var(--ds-raised-2);
+    --button-bg-pressed: var(--ds-raised-2);
+    --button-fg: var(--ds-text);
+  }
+
+  .button--tertiary {
+    --button-bg: transparent;
+    --button-bg-hover: var(--ds-raised);
+    --button-bg-pressed: var(--ds-raised);
+    --button-fg: var(--ds-text);
+  }
+
+  /* ds.ghost: outlined, 2px strong line; the line goes cream on hover. */
+  .button--outline {
+    border: 2px solid var(--ds-line-strong);
+
+    --button-bg: transparent;
+    --button-bg-hover: transparent;
+    --button-bg-pressed: var(--ds-raised);
+    --button-fg: var(--ds-text);
+
+    @media (hover: hover) {
+      &:hover,
+      &[data-hovered="true"] {
+        border-color: var(--ds-text);
+      }
+    }
+
+    &:disabled,
+    &[aria-disabled="true"] {
+      --button-bg: transparent;
+      --button-bg-hover: transparent;
+      --button-fg: var(--ds-faint);
+
+      border-color: var(--ds-line-strong);
+    }
+  }
+
+  /* ds.quiet: text only, 44 tall. */
+  .button--ghost {
+    @apply h-11 px-3.5 md:h-11;
+
+    --button-bg: transparent;
+    --button-bg-hover: var(--ds-raised);
+    --button-bg-pressed: var(--ds-raised);
+    --button-fg: var(--ds-text);
+  }
+
+  /* ds.danger: outlined red by default; solid only to confirm the destructive step. */
+  .button--danger-soft {
+    border: 2px solid var(--ds-red);
+
+    --button-bg: transparent;
+    --button-bg-hover: var(--ds-red-soft);
+    --button-bg-pressed: var(--ds-red-soft);
+    --button-fg: var(--ds-red);
+  }
+
+  /* A team's turn: the acting team's fill with its ink (btn("Lock in Ivy", AM)). */
+  .button--team-hk {
+    --button-bg: var(--team-hk);
+    --button-bg-hover: var(--color-team-hk-hover);
+    --button-bg-pressed: var(--color-team-hk-hover);
+    --button-fg: var(--team-hk-ink);
+  }
+
+  .button--team-am {
+    --button-bg: var(--team-am);
+    --button-bg-hover: var(--color-team-am-hover);
+    --button-bg-pressed: var(--color-team-am-hover);
+    --button-fg: var(--team-am-ink);
+  }
+
+  /* Links stay cream; underline on hover. */
+  .link {
+    @apply font-bold text-foreground underline-offset-4;
+  }
+
+  /* Cards and surfaces sit flat on the ink: 1px line, no shadow. */
+  .card {
+    @apply rounded-card border border-line bg-surface;
+
+    box-shadow: none;
+  }
+
+  .chip {
+    @apply rounded-full;
+  }
+
+  /* Fields: 48 tall pills on the ground, 2px strong line, 16px text so phones don't zoom. */
+  .input,
+  .search-field__input,
+  .input-group {
+    @apply min-h-12 text-field sm:text-field;
+  }
+
+  .input {
+    @apply px-4.5;
+  }
+
+  .textarea {
+    @apply rounded-card text-field sm:text-field;
+
+    border: 2px solid var(--ds-line-strong);
+    background-color: var(--ds-ink);
+  }
+
+  .label {
+    @apply text-label font-bold text-foreground;
+  }
+
+  .description {
+    @apply text-caption text-muted;
+  }
+
+  .field-error {
+    @apply text-caption font-bold text-danger;
+  }
+
+  /* Overlays: dialogs are 24px cards on the surface with a strong line and the deepest drop. */
+  .modal__backdrop--opaque,
+  .alert-dialog__backdrop {
+    background-color: var(--ds-backdrop);
+  }
+
+  .modal__dialog,
+  .alert-dialog__dialog {
+    @apply gap-4 rounded-dialog bg-surface p-7;
+
+    border: 2px solid var(--ds-line-strong);
+    box-shadow: var(--ds-shadow-dialog);
+  }
+
+  .modal__heading,
+  .alert-dialog__heading {
+    @apply type-display text-coin text-foreground;
+  }
+
+  .popover,
+  .dropdown__popover,
+  .select__popover,
+  .combo-box__popover {
+    @apply rounded-card bg-raised;
+
+    border: 1px solid var(--ds-line-strong);
+    box-shadow: var(--ds-shadow-toast);
+  }
+
+  .menu-item,
+  .list-box-item {
+    @apply min-h-11 rounded-row text-body font-bold;
+  }
+
+  .tooltip {
+    @apply rounded-small bg-raised text-caption font-bold text-foreground;
+
+    border: 1px solid var(--ds-line-strong);
+  }
+
+  /* Toasts (ds.toast): raised, strong line, 16 radius, hard drop. */
+  .toast {
+    @apply rounded-card bg-raised px-4 py-3.5;
+
+    border: 1px solid var(--ds-line-strong);
+    box-shadow: var(--ds-shadow-toast);
+  }
+
+  .toast__title {
+    @apply text-body font-extrabold text-foreground;
+  }
+
+  .toast__description {
+    @apply text-label font-medium text-muted;
+  }
+
+  .toast__close-button {
+    @apply size-11;
+  }
+
+  /* Skeletons are still shapes: no shimmer, no pulse (F06). */
+  .skeleton {
+    @apply bg-raised;
+
+    &::before,
+    &::after {
+      animation: none !important;
+      display: none;
+    }
+  }
+
+  /* Switch: a 48 x 28 track, cream when on. */
+  .switch {
+    @apply min-h-11;
+  }
+
+  .checkbox,
+  .radio {
+    @apply min-h-11;
+  }
+
+  /* Segmented control (ds.segmented): pills in a surface track; the chosen one is cream on ink. */
+  .segmented {
+    @apply inline-flex gap-1 rounded-full border border-line bg-surface p-1;
+  }
+
+  .segmented__item,
+  .segmented .toggle-button {
+    @apply h-11 rounded-full px-4.5 text-label font-extrabold md:h-11;
+
+    --toggle-button-bg: transparent;
+    --toggle-button-bg-hover: var(--ds-raised);
+    --toggle-button-bg-pressed: var(--ds-raised);
+    --toggle-button-fg: var(--ds-text);
+    --toggle-button-bg-selected: var(--ds-text);
+    --toggle-button-bg-selected-hover: var(--ds-text);
+    --toggle-button-bg-selected-pressed: var(--ds-text);
+    --toggle-button-fg-selected: var(--ds-on-cream);
+  }
+
+  .separator {
+    background-color: var(--ds-line);
+  }
+
+  .spinner {
+    color: currentcolor;
+  }
+}

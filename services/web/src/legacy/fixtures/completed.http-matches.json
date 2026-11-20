@@ -1,0 +1,28 @@
+{
+  "matches": [
+    {
+      "id": "1",
+      "status": "completed",
+      "kind": "ranked",
+      "mode_name": "3-ban draft",
+      "draft_name": "Blazing Lion",
+      "captains": {
+        "A": "P2",
+        "B": "P1"
+      },
+      "team_names": {
+        "A": "P2's Team",
+        "B": "P1's Team"
+      },
+      "sides": {
+        "A": "hk",
+        "B": "am"
+      },
+      "winner": "B",
+      "started_at": "2026-01-05T19:00:00.000Z",
+      "ended_at": "2026-01-05T19:30:00.000Z",
+      "your_team": "A"
+    }
+  ],
+  "next_cursor": null
+}

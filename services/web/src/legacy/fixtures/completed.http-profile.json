@@ -1,0 +1,57 @@
+{
+  "player": {
+    "id": "3",
+    "name": "P3",
+    "avatar_url": null
+  },
+  "is_you": true,
+  "season": "Season 1",
+  "season_id": "1",
+  "rating": 0,
+  "games": 1,
+  "wins": 0,
+  "losses": 1,
+  "rank": null,
+  "tier": "Bronze",
+  "tier_level": 0,
+  "tiers": [
+    "Bronze",
+    "Silver",
+    "Gold",
+    "Platinum",
+    "Diamond"
+  ],
+  "placement": {
+    "played": 1,
+    "total": 10
+  },
+  "strikes": {
+    "count": 0,
+    "games_to_next": null,
+    "next_decay_at": null
+  },
+  "captain": {
+    "eligible": true,
+    "reason": ""
+  },
+  "mvps": 0,
+  "keys": 0,
+  "scoreboards": 0,
+  "avg_kills": null,
+  "avg_deaths": null,
+  "avg_assists": null,
+  "avg_damage": null,
+  "steam": {
+    "linked": false,
+    "verified": false
+  },
+  "recent": [
+    {
+      "match_id": "1",
+      "result": "loss",
+      "hero": null,
+      "delta": 0,
+      "rating_after": 0
+    }
+  ]
+}

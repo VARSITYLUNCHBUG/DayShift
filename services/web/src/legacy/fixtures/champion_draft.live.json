@@ -1,0 +1,20 @@
+{
+  "matches": [
+    {
+      "id": "1",
+      "status": "champion_draft",
+      "kind": "ranked",
+      "mode_name": "3-ban draft",
+      "draft_name": "Blazing Lion",
+      "captains": {
+        "A": "P2",
+        "B": "P1"
+      },
+      "sides": {
+        "A": "hk",
+        "B": "am"
+      },
+      "started_at": null
+    }
+  ]
+}

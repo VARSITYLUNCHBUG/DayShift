@@ -1,0 +1,122 @@
+{
+  "hk": {
+    "bans": [
+      {
+        "id": "64",
+        "name": "Drifter",
+        "slug": "drifter",
+        "icon_url": "/static/hero-art/drifter.webp"
+      },
+      {
+        "id": "18",
+        "name": "Mo & Krill",
+        "slug": "mo-and-krill",
+        "icon_url": "/static/hero-art/mo-and-krill.webp"
+      },
+      {
+        "id": "79",
+        "name": "Rem",
+        "slug": "rem",
+        "icon_url": "/static/hero-art/rem.webp"
+      }
+    ],
+    "picks": [
+      {
+        "id": "12",
+        "name": "Kelvin",
+        "slug": "kelvin",
+        "icon_url": "/static/hero-art/kelvin.webp"
+      },
+      {
+        "id": "60",
+        "name": "Sinclair",
+        "slug": "sinclair",
+        "icon_url": "/static/hero-art/sinclair.webp"
+      },
+      {
+        "id": "11",
+        "name": "Dynamo",
+        "slug": "dynamo",
+        "icon_url": "/static/hero-art/dynamo.webp"
+      },
+      {
+        "id": "1",
+        "name": "Infernus",
+        "slug": "infernus",
+        "icon_url": "/static/hero-art/infernus.webp"
+      },
+      {
+        "id": "13",
+        "name": "Haze",
+        "slug": "haze",
+        "icon_url": "/static/hero-art/haze.webp"
+      },
+      {
+        "id": "20",
+        "name": "Ivy",
+        "slug": "ivy",
+        "icon_url": "/static/hero-art/ivy.webp"
+      }
+    ]
+  },
+  "am": {
+    "bans": [
+      {
+        "id": "72",
+        "name": "Billy",
+        "slug": "billy",
+        "icon_url": "/static/hero-art/billy.webp"
+      },
+      {
+        "id": "15",
+        "name": "Bebop",
+        "slug": "bebop",
+        "icon_url": "/static/hero-art/bebop.webp"
+      },
+      {
+        "id": "78",
+        "name": "Deadman Danny",
+        "slug": "deadman-danny",
+        "icon_url": "/static/hero-art/deadman-danny.webp"
+      }
+    ],
+    "picks": [
+      {
+        "id": "80",
+        "name": "Silver",
+        "slug": "silver",
+        "icon_url": "/static/hero-art/silver.webp"
+      },
+      {
+        "id": "87",
+        "name": "Nurse Harrow",
+        "slug": "nurse-harrow",
+        "icon_url": "/static/hero-art/nurse-harrow.webp"
+      },
+      {
+        "id": "6",
+        "name": "Abrams",
+        "slug": "abrams",
+        "icon_url": "/static/hero-art/abrams.webp"
+      },
+      {
+        "id": "14",
+        "name": "Holliday",
+        "slug": "holliday",
+        "icon_url": "/static/hero-art/holliday.webp"
+      },
+      {
+        "id": "81",
+        "name": "Celeste",
+        "slug": "celeste",
+        "icon_url": "/static/hero-art/celeste.webp"
+      },
+      {
+        "id": "25",
+        "name": "Warden",
+        "slug": "warden",
+        "icon_url": "/static/hero-art/warden.webp"
+      }
+    ]
+  }
+}
