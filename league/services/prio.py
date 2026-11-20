@@ -5,7 +5,7 @@ in it doesn't mean someone wants to play, so voice has nothing to do with the li
 
 - Joining the queue puts you on the back of the list.
 - Leaving the queue holds your place for 3 minutes. Join again in time and you get your place
-  back, on the list and in the queue.
+  back, on the list and in the queue. Or let it go, and it's gone at once.
 - Being put in a match (as it pops, as a ready-check replacement, or subbing in) takes you off,
   as do staff removing you from the queue and a queue clear. After the match you queue again,
   so you go on the back.
@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 
 from django.db import transaction
 
+from league.domain.errors import InvalidAction
 from league.models import MatchParticipant, Player, PrioEntry
 from league.services import live
 from league.services.common import now
@@ -108,6 +109,19 @@ def drop_players(community_id: int, user_ids: Collection[int]) -> None:
 def drop_all(community_id: int) -> None:
     """The queue was cleared."""
     PrioEntry.objects.filter(community_id=community_id).delete()
+    live.publish(live.queue_topic(community_id))
+
+
+@transaction.atomic
+def let_go(community_id: int, player: Player) -> None:
+    """They gave up the place held for them. Joining again later puts them on the back."""
+    deleted, _ = PrioEntry.objects.filter(
+        community_id=community_id,
+        discord_user_id=player.discord_user_id,
+        grace_until__gt=now(),
+    ).delete()
+    if not deleted:
+        raise InvalidAction("You have no place held, so there's nothing to let go.")
     live.publish(live.queue_topic(community_id))
 
 

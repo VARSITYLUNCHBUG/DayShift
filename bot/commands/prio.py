@@ -14,8 +14,8 @@ from discord import Interaction, app_commands
 from bot.db import db
 from bot.handlers.common import community_of
 from bot.handlers.permissions import require_area
-from bot.renderers.prio import place_text
-from bot.routing import guarded, reply
+from bot.renderers.prio import held_view, place_text
+from bot.routing import guarded, reply, reply_view
 from league.models.permissions import Area
 from league.services import prio
 
@@ -26,7 +26,10 @@ async def prio_command(interaction: Interaction[Any]) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         community = await community_of(interaction)
         place = await db(prio.place_of, community.pk, interaction.user.id)
-        await reply(interaction, place_text(place, community.queue_channel_id))
+        if place is not None and place.held_until is not None:
+            await reply_view(interaction, held_view(place))
+        else:
+            await reply(interaction, place_text(place, community.queue_channel_id))
 
     await guarded(interaction, run)
 

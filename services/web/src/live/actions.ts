@@ -7,6 +7,7 @@ type Empty = Record<string, never>;
 export interface ActionArgs {
   "queue.join": Empty;
   "queue.leave": Empty;
+  "queue.let_go": Empty;
   "lobby.ready": { match_id: string };
   "lobby.vote": { match_id: string; candidate_ids: string[] };
   "draft.pick_player": { match_id: string; step_index: number; player_id: string };

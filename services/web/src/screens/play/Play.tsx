@@ -107,6 +107,33 @@ function Leave() {
   );
 }
 
+/** A06's "Let it go": give up the held place now rather than wait for the clock. */
+function LetGo() {
+  const action = usePageAction();
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="flex flex-col gap-3">
+      <Button
+        kind="ghost"
+        size="lg"
+        className="max-md:min-w-0"
+        isPending={action.pending === "queue.let_go"}
+        pendingLabel="Letting it go…"
+        onPress={() => {
+          setError(null);
+          action.run("queue.let_go", {}).then(
+            () => notify.info("You let your place go", "Join again any time, at the back of the priority list."),
+            (reason: unknown) => setError(errorText(reason)),
+          );
+        }}
+      >
+        Let it go
+      </Button>
+      {error ? <InlineAlert title="Your place is still held">{error}</InlineAlert> : null}
+    </div>
+  );
+}
+
 /** A big clock beside its sentence and action (A06, A07). */
 function ClockCard({ deadline, under, children, tone = "line" }: { deadline: string; under: string; children: ReactNode; tone?: "line" | "danger" }) {
   return (
@@ -274,7 +301,10 @@ export function PlayPage() {
               You&apos;re still <b>{ordinal(state.position)}</b>. Rejoin before the clock runs out and you keep it. After that you go back in at your
               normal priority.
             </p>
-            {phone ? null : <Join label={`Rejoin and keep ${ordinal(state.position)}`} />}
+            <div className="flex flex-wrap items-start gap-3">
+              {phone ? null : <Join label={`Rejoin and keep ${ordinal(state.position)}`} />}
+              <LetGo />
+            </div>
           </ClockCard>
           <QueueFill count={q.count} size={q.size} />
           <p className="text-label text-muted">

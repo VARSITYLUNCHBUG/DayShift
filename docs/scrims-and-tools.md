@@ -42,8 +42,10 @@ voice channel, so being in it says nothing about wanting to play. Openings in a 
 | The match ends | Queue again: you go on the back |
 
 The list isn't posted in any channel. `/prio` tells you, and only you, your place, how long you've
-waited and, after leaving the queue, how long your place is held. `/removeprio` takes someone off
-(Community area). A match in another server doesn't count.
+waited and, after leaving the queue, how long your place is held. A held place comes with **Let
+it go**, here and on the web's Play page, to give it up at once: joining again later puts you on
+the back. `/removeprio` takes someone off (Community area).
+A match in another server doesn't count.
 
 ## Pings
 

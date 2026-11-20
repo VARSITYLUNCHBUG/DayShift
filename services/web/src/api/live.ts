@@ -39,6 +39,7 @@ export function useMatchSnap(id: string | null): Live<MatchSnap> {
 export interface PageActionArgs {
   "queue.join": Record<string, never>;
   "queue.leave": Record<string, never>;
+  "queue.let_go": Record<string, never>;
   "lobby.ready": { match_id: string };
   "subs.answer_offer": { offer_id: string; accept: boolean };
 }

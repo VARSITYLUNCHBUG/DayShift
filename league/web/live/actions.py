@@ -33,6 +33,7 @@ from league.services import (
     live,
     lobby,
     ocr,
+    prio,
     queue,
     results,
     scrims,
@@ -280,6 +281,12 @@ def _queue_join(who: Actor, args: NoArgs) -> Done:
 @_action("queue.leave", NoArgs)
 def _queue_leave(who: Actor, args: NoArgs) -> Done:
     queue.leave(who.community_id, who.player)
+    return Done((live.queue_topic(who.community_id),))
+
+
+@_action("queue.let_go", NoArgs)
+def _queue_let_go(who: Actor, args: NoArgs) -> Done:
+    prio.let_go(who.community_id, who.player)
     return Done((live.queue_topic(who.community_id),))
 
 

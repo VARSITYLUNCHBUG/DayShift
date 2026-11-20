@@ -10,6 +10,7 @@ import pytest
 
 from bot.commands import prio as prio_commands
 from bot.renderers.prio import place_text
+from league.domain.errors import InvalidAction
 from league.models import Community, Match, OutboxEffect, Player, PrioEntry, QueueEntry, SubOffer
 from league.services import deadlines, lobby, prio, queue, subs
 from tests.conftest import Clock, make_player
@@ -235,3 +236,48 @@ def test_sitting_in_the_waiting_room_puts_nobody_on(wired: Community) -> None:  
     gateway.voice.setdefault(WAITING_ROOM, set()).update({1, 2, 3})
     drain(gateway)
     assert _names(wired) == []
+
+
+@pytest.mark.django_db
+def test_letting_a_held_place_go_puts_you_on_the_back(room: Community, clock: Clock) -> None:
+    ann, bob = make_player(1), make_player(2)
+    _queue(room, [ann, bob])
+    queue.leave(room.pk, ann)
+    prio.let_go(room.pk, ann)
+    assert prio.place_of(room.pk, ann.discord_user_id) is None
+    clock.advance(10)
+    queue.join(room.pk, ann)  # Still inside the old hold, but it's gone: the back of the list.
+    assert _names(room) == [bob.display_name, ann.display_name]
+
+
+@pytest.mark.django_db
+def test_only_a_held_place_can_be_let_go(room: Community, clock: Clock) -> None:
+    ann = make_player(1)
+    with pytest.raises(InvalidAction):
+        prio.let_go(room.pk, ann)  # Not in the queue at all.
+    queue.join(room.pk, ann)
+    with pytest.raises(InvalidAction):
+        prio.let_go(room.pk, ann)  # In the queue: that's Leave.
+    queue.leave(room.pk, ann)
+    clock.advance(prio.GRACE_SECONDS + 1)
+    with pytest.raises(InvalidAction):
+        prio.let_go(room.pk, ann)  # The hold has run out already.
+
+
+@pytest.mark.django_db
+def test_prio_offers_let_it_go_for_a_held_place(wired: Community) -> None:  # noqa: F811
+    from bot.handlers.queue import let_go  # noqa: F401  (registers the button's handler)
+    from tests.test_handlers import click, fake_interaction, replies, run_command
+
+    ann = make_player(1)
+    queue.join(wired.pk, ann)
+    queue.leave(wired.pk, ann)
+    interaction = fake_interaction(ann)
+    run_command(prio_commands.prio_command, interaction)
+    view = interaction.followup.send.call_args.kwargs["view"]
+    buttons = [item for item in view.walk_children() if getattr(item, "custom_id", None)]
+    assert [button.item.label for button in buttons] == ["Let it go"]
+    pressed = fake_interaction(ann)
+    click(pressed, "let_go")
+    assert "let your place go" in replies(pressed)[0]
+    assert prio.place_of(wired.pk, ann.discord_user_id) is None

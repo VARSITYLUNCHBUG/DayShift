@@ -28,6 +28,7 @@ from league.models import (
     Match,
     Player,
     PlayerSwap,
+    PrioEntry,
     QueueEntry,
     SubOffer,
     SubRequest,
@@ -84,6 +85,7 @@ pytestmark = pytest.mark.django_db
 CONTRACT = {
     "queue.join",
     "queue.leave",
+    "queue.let_go",
     "lobby.ready",
     "lobby.vote",
     "lobby.checkin",
@@ -161,6 +163,14 @@ def _queue_leave(league: Community, popped: Match, players: list[Player]) -> Cas
     player = make_player(40)
     queue.join(league.pk, player)
     return Case(player, {}, lambda r: assert_(not QueueEntry.objects.filter(player=player)))
+
+
+def _queue_let_go(league: Community, popped: Match, players: list[Player]) -> Case:
+    player = make_player(40)
+    queue.join(league.pk, player)
+    queue.leave(league.pk, player)
+    held = PrioEntry.objects.filter(discord_user_id=player.discord_user_id)
+    return Case(player, {}, lambda r: assert_(not held.exists()))
 
 
 def _ready(league: Community, popped: Match, players: list[Player]) -> Case:
@@ -477,6 +487,7 @@ def assert_(condition: object) -> None:
 CASES: dict[str, Callable[[Community, Match, list[Player]], Case]] = {
     "queue.join": _queue_join,
     "queue.leave": _queue_leave,
+    "queue.let_go": _queue_let_go,
     "lobby.ready": _ready,
     "lobby.vote": _vote,
     "lobby.checkin": _checkin,

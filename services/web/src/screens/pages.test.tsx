@@ -112,6 +112,15 @@ describe("play", () => {
     expect(screen.getByRole("button", { name: "Join the queue" })).toBeDisabled();
   });
 
+  it("lets a held place go", async () => {
+    const me = live.meQueued();
+    me.queue = { in_queue: false, position: null, joined_at: null, place: { position: 3, total: 9, held_until: "2026-01-05T19:39:00.000Z" } };
+    const { server } = page(<PlayPage />, { me });
+    expect(await screen.findByRole("button", { name: "Rejoin and keep 3rd" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Let it go" }));
+    await waitFor(() => expect(server.lastAct()).toMatchObject({ name: "queue.let_go" }));
+  });
+
   it("shows how long each rung of the cooldown's ladder waits, and which was yours", async () => {
     const me = live.meCooldown();
     if (me.cooldown) Object.assign(me.cooldown, { until: "2026-01-05T19:50:00.000Z", ladder: [5, 15, 60, 1440], rung: 1 });
