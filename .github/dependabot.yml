@@ -71,6 +71,11 @@ updates:
       day: monday
     cooldown:
       default-days: 7
+    # pyproject.toml holds the app to Python 3.13 and uv may not download another, so a new
+    # Python minor is a deliberate move with the lock and CI, not an image bump.
+    ignore:
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
     groups:
       docker:
         patterns: ["*"]
