@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import logging
 import time
 from collections.abc import Awaitable, Iterable
 from typing import Any, Literal, Protocol
@@ -13,6 +14,8 @@ import discord
 from django.conf import settings
 
 from bot.voice_pacing import VoicePacer
+
+logger = logging.getLogger(__name__)
 
 # Discord errors that mean this person can't get a DM, so the caller mentions them in the match
 # channel instead: DMs closed (50007), or no such recipient, such as a deleted account (50033).
@@ -215,6 +218,18 @@ def _member(user_id: int) -> discord.Object:
     return discord.Object(id=user_id, type=discord.Member)
 
 
+def _role(guild: discord.Guild, role_id: int) -> discord.Role | None:
+    """The server's role, from the cache. It has to be a real Role: creating a channel, discord.py
+    sends every other overwrite target as a member's (2.7.1, Guild._create_channel), so a role
+    passed as an Object gave nobody anything. None for a role that's been deleted."""
+    if role_id == guild.id:
+        return guild.default_role
+    role = guild.get_role(role_id)
+    if role is None:
+        logger.warning("Match channel role is missing", extra={"role": role_id})
+    return role
+
+
 # A closed DM doesn't become reachable on the next effect. Retry after a short cooldown,
 # rather than spend another refused request on every notice during the same match burst.
 DM_UNAVAILABLE_SECONDS = 60.0
@@ -270,14 +285,13 @@ class DiscordGateway:
             for role_id in viewer_role_ids:
                 # The @everyone role's ID is the guild's, so a server with no PUGs role opens
                 # to all.
-                target = (
-                    guild.default_role
-                    if role_id == guild.id
-                    else discord.Object(role_id, type=discord.Role)
-                )
-                overwrites[target] = viewer_perms
+                viewer = _role(guild, role_id)
+                if viewer is not None:
+                    overwrites[viewer] = viewer_perms
         for role_id in staff_role_ids:
-            overwrites[discord.Object(id=role_id, type=discord.Role)] = member_perms
+            staff = _role(guild, role_id)
+            if staff is not None:
+                overwrites[staff] = member_perms
         for user_id in member_ids:
             overwrites[_member(user_id)] = member_perms
         return overwrites

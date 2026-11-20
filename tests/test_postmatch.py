@@ -199,24 +199,69 @@ def test_hero_text_uses_the_custom_icon_when_set() -> None:
 # --- Match channels open to the PUGs role ----------------------------------------------------
 
 
-def test_the_pugs_role_talks_in_text_but_only_watches_voice() -> None:
-    guild = discord.Object(id=1)
+def _fake_guild(*role_ids: int) -> Any:
+    """A guild with these roles cached, and @everyone (whose ID is the guild's)."""
+
+    class Guild:
+        id = 1
+
+        def __init__(self) -> None:
+            self.roles = {rid: _role(self, rid, f"role {rid}") for rid in role_ids}
+            self.default_role = _role(self, 1, "@everyone")
+
+        def get_role(self, role_id: int) -> discord.Role | None:
+            return self.roles.get(role_id)
+
+    return Guild()
+
+
+def _role(guild: Any, role_id: int, name: str) -> discord.Role:
+    data = {"id": role_id, "name": name, "permissions": "0", "position": 1, "color": 0,
+            "hoist": False, "managed": False, "mentionable": False}  # fmt: skip
+    return discord.Role(guild=guild, state=None, data=data)  # type: ignore[arg-type]
+
+
+def _gateway() -> DiscordGateway:
     gateway = DiscordGateway.__new__(DiscordGateway)
     gateway.client = type("C", (), {"user": discord.Object(id=2)})()  # type: ignore[assignment]
-    fake_guild: Any = type("G", (), {"id": 1, "default_role": "everyone"})()
-    overwrites = gateway._overwrites(
-        fake_guild, [10], [20], discord.PermissionOverwrite(), discord.PermissionOverwrite(),
+    return gateway
+
+
+def test_the_pugs_role_talks_in_text_but_only_watches_voice() -> None:
+    guild = _fake_guild(20, 30)
+    overwrites = _gateway()._overwrites(
+        guild, [10], [20], discord.PermissionOverwrite(), discord.PermissionOverwrite(),
         [30], TEXT_PUGS,
     )  # fmt: skip
-    viewer = next(v for k, v in overwrites.items() if getattr(k, "id", None) == 30)
+    viewer = overwrites[guild.get_role(30)]
     assert viewer.view_channel is True and viewer.send_messages is True
     # No PUGs role: the guild's own ID is @everyone, which can then read.
-    overwrites = gateway._overwrites(
-        fake_guild, [], [], discord.PermissionOverwrite(), discord.PermissionOverwrite(),
+    overwrites = _gateway()._overwrites(
+        guild, [], [], discord.PermissionOverwrite(), discord.PermissionOverwrite(),
         [guild.id], VOICE_VIEWER,
     )  # fmt: skip
-    assert overwrites["everyone"].view_channel is True
-    assert overwrites["everyone"].connect is False
+    assert overwrites[guild.default_role].view_channel is True
+    assert overwrites[guild.default_role].connect is False
+
+
+def test_role_overwrites_reach_discord_as_roles() -> None:
+    """Creating a channel, discord.py sends any target that isn't a Role as a member's overwrite.
+    Staff and PUGs roles passed as Objects gave a non-existent member access, and the roles
+    nothing (seen in the simulator, 2026-11-20)."""
+    guild = _fake_guild(20, 30)
+    overwrites = _gateway()._overwrites(
+        guild, [10], [20], discord.PermissionOverwrite(), discord.PermissionOverwrite(),
+        [30], TEXT_PUGS,
+    )  # fmt: skip
+    roles = {target.id for target in overwrites if isinstance(target, discord.Role)}
+    assert roles == {1, 20, 30}  # @everyone, staff and the PUGs role.
+    members = {target.id for target in overwrites if not isinstance(target, discord.Role)}
+    assert members == {2, 10}  # The bot and the player.
+    # A role deleted since it was set up is left out rather than sent as a member.
+    overwrites = _gateway()._overwrites(
+        guild, [], [99], discord.PermissionOverwrite(), discord.PermissionOverwrite()
+    )
+    assert 99 not in {target.id for target in overwrites}
 
 
 # --- Names in any script ---------------------------------------------------------------------
