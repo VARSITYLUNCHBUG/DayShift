@@ -1,7 +1,7 @@
 # Dev-only control panel: build the SPA with Node, serve it (and proxy the dev APIs) with an
 # unprivileged nginx on port 8091. Runs with a read-only root filesystem and a tmpfs on /tmp.
 
-FROM node:26.13.0-trixie-slim AS build
+FROM node:26.13.1-trixie-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
