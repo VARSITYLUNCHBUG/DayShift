@@ -16,6 +16,7 @@ __pycache__/
 
 # Build and runtime output
 staticfiles/
+media/
 .bot-heartbeat
 postmatch_screens/
 scoreocr_out/

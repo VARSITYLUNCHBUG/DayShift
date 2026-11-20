@@ -3,6 +3,7 @@ from league.models.api import ApiMatchCheck
 from league.models.champions import Champion
 from league.models.community import Community, RuntimeSettings
 from league.models.interim import InterimPointsChange, InterimRating
+from league.models.landing import LandingItem, LandingKind
 from league.models.matches import (
     CaptainVote,
     DraftAction,
@@ -45,6 +46,8 @@ __all__ = [
     "HeroWish",
     "InterimPointsChange",
     "InterimRating",
+    "LandingItem",
+    "LandingKind",
     "Match",
     "MatchAward",
     "MatchParticipant",

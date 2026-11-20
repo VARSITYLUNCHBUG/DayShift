@@ -271,6 +271,74 @@
         }
       ]
     },
+    "Advert": {
+      "additionalProperties": false,
+      "description": "The landing page's message of the day or advert. Exactly the field its `kind` needs is\nset: `html` (cleaned on the server: insert it as it is), `src` (a file on this site) or\n`youtube_id` (embed it from youtube-nocookie.com).",
+      "properties": {
+        "kind": {
+          "enum": [
+            "image",
+            "html",
+            "video",
+            "youtube"
+          ],
+          "type": "string"
+        },
+        "alt": {
+          "type": "string"
+        },
+        "link_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "html": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "src": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "youtube_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "alt",
+        "link_url",
+        "html",
+        "src",
+        "youtube_id"
+      ],
+      "title": "Advert",
+      "type": "object"
+    },
     "AnswerArgs": {
       "additionalProperties": false,
       "properties": {
@@ -1467,6 +1535,9 @@
         },
         "random_draft": {
           "$ref": "#/$defs/RandomDraft"
+        },
+        "landing": {
+          "$ref": "#/$defs/Landing"
         }
       },
       "required": [
@@ -1481,7 +1552,8 @@
         "me",
         "steam_unlinked",
         "player_search",
-        "random_draft"
+        "random_draft",
+        "landing"
       ],
       "title": "HttpApi",
       "type": "object"
@@ -1623,6 +1695,49 @@
         "is_you"
       ],
       "title": "LadderRow",
+      "type": "object"
+    },
+    "Landing": {
+      "additionalProperties": false,
+      "description": "The sign-in page's call to action, as staff set it in the admin. When any of it is set it\ntakes the whole of the page's hero, beside the sign-in card; with none, the page has its own\nwords. Anyone may read it, signed in or not.",
+      "properties": {
+        "headline_html": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lead_html": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "advert": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Advert"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "headline_html",
+        "lead_html",
+        "advert"
+      ],
+      "title": "Landing",
       "type": "object"
     },
     "LeagueAward": {

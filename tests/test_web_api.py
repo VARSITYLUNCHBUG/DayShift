@@ -765,5 +765,6 @@ def test_every_body_is_in_the_exported_schema() -> None:
         "steam_unlinked",
         "player_search",
         "random_draft",
+        "landing",
     }
     assert "Postgame" in document["$defs"] and "MyProfile" in document["$defs"]

@@ -68,6 +68,8 @@ services:
       # Certificates and the ACME account, kept across restarts.
       - caddy-data:/data
       - caddy-config:/config
+      # The app's uploads, served at /media/ without going through web.
+      - media:/srv/media:ro
     tmpfs:
       - /tmp
     ports:
@@ -157,6 +159,9 @@ services:
       DB_CONN_MAX_AGE: "0"
       # Only the edge and the app's own services can reach web, so proxy headers are believed.
       FORWARDED_ALLOW_IPS: "*"
+    # Staff uploads (the landing page's advert), which the edge serves.
+    volumes:
+      - media:/app/media
     networks: [backend, edge]
     depends_on:
       migrate:
@@ -212,3 +217,4 @@ volumes:
   pgdata:
   caddy-data:
   caddy-config:
+  media:

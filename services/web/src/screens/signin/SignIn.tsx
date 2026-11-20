@@ -10,8 +10,14 @@ import { Panel } from "../../components/Layout";
 import { AppShell } from "../../components/shell/AppShell";
 import { EmptyState, Skeleton } from "../../components/States";
 import { Sticker } from "../../components/Sticker";
+import { AdvertCard, Headline, Tagline, useLanding } from "./Landing";
+import type { Landing } from "../../api/types";
+import { useIsPhone } from "../../lib/useMediaQuery";
 import type { Refusal } from "./refusals";
 import { refusalFor, safeNext } from "./refusals";
+
+const DEFAULT_HEADLINE = ["Twelve in.", "Two captains."] as const;
+const DEFAULT_LEAD = "The league's Deadlock 6v6 inhouse. Queue here or in Discord: it's the same queue, the same draft and the same ladder.";
 
 const HOW = [
   { title: "Queue", line: "Join with one press. When 12 are in, everyone gets Ready Up." },
@@ -28,6 +34,56 @@ function Disclosure({ title, children }: { title: string; children: ReactNode })
       </summary>
       <p className="pb-3 text-label text-muted">{children}</p>
     </details>
+  );
+}
+
+/** The page's own hero, when staff have set no call to action. */
+function DefaultHero() {
+  return (
+    <section aria-labelledby="hero-heading" className="flex min-w-0 flex-999 basis-160 flex-col gap-6">
+      <Sticker tone="brand" className="self-start">
+        League night, every night
+      </Sticker>
+      <h1 id="hero-heading" className="type-display text-poster max-md:text-board">
+        {DEFAULT_HEADLINE[0]}
+        <br />
+        {DEFAULT_HEADLINE[1]}
+      </h1>
+      <p className="max-w-lead text-lead-lg text-muted">{DEFAULT_LEAD}</p>
+      <span aria-hidden="true" className="flex gap-2">
+        <span className="h-2 w-16 rounded-full bg-team-hk" />
+        <span className="h-2 w-16 rounded-full bg-team-am" />
+      </span>
+      <ul className="grid max-w-190 grid-cols-1 gap-3 sm:grid-cols-3">
+        {HOW.map((item) => (
+          <li key={item.title} className="flex flex-col gap-1 rounded-card border border-line p-4">
+            <b className="text-body font-extrabold">{item.title}</b>
+            <span className="text-label text-muted">{item.line}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** The call to action staff set in the admin, in the whole of the hero's place: the tagline as
+ * the headline and its lead, then the advert. An advert alone keeps the page's own words. */
+function LandingHero({ landing, withAdvert }: { landing: Landing; withAdvert: boolean }) {
+  const tagline = landing.headline_html !== null;
+  return (
+    <section aria-labelledby="hero-heading" className="flex min-w-0 flex-999 basis-160 flex-col gap-6">
+      {landing.headline_html ? (
+        <Headline id="hero-heading" html={landing.headline_html} />
+      ) : (
+        <h1 id="hero-heading" className="type-display text-poster max-md:text-board">
+          {DEFAULT_HEADLINE[0]}
+          <br />
+          {DEFAULT_HEADLINE[1]}
+        </h1>
+      )}
+      {landing.lead_html ? <Tagline html={landing.lead_html} /> : tagline ? null : <p className="max-w-lead text-lead-lg text-muted">{DEFAULT_LEAD}</p>}
+      {withAdvert && landing.advert ? <AdvertCard advert={landing.advert} /> : null}
+    </section>
   );
 }
 
@@ -134,6 +190,8 @@ function RefusalCard({ refusal, next, invite }: { refusal: Refusal; next: string
 export function SignInPage() {
   const [params] = useSearchParams();
   const session = useSession();
+  const landing = useLanding();
+  const phone = useIsPhone();
   const next = safeNext(params.get("next"));
   const refusal = refusalFor(params.get("error"));
   const expired = params.get("expired") === "1";
@@ -182,34 +240,16 @@ export function SignInPage() {
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-x-14 gap-y-10">
-          <section aria-labelledby="hero-heading" className="flex min-w-0 flex-999 basis-160 flex-col gap-6">
-            <Sticker tone="brand" className="self-start">
-              League night, every night
-            </Sticker>
-            <h1 id="hero-heading" className="type-display text-poster max-md:text-board">
-              Twelve in.
-              <br />
-              Two captains.
-            </h1>
-            <p className="max-w-lead text-lead-lg text-muted">
-              The league&apos;s Deadlock 6v6 inhouse. Queue here or in Discord: it&apos;s the same queue, the same draft and the same ladder.
-            </p>
-            <span aria-hidden="true" className="flex gap-2">
-              <span className="h-2 w-16 rounded-full bg-team-hk" />
-              <span className="h-2 w-16 rounded-full bg-team-am" />
-            </span>
-            <ul className="grid max-w-190 grid-cols-1 gap-3 sm:grid-cols-3">
-              {HOW.map((item) => (
-                <li key={item.title} className="flex flex-col gap-1 rounded-card border border-line p-4">
-                  <b className="text-body font-extrabold">{item.title}</b>
-                  <span className="text-label text-muted">{item.line}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+          {landing && (landing.headline_html || landing.advert) ? (
+            <LandingHero landing={landing} withAdvert={!phone} />
+          ) : (
+            <DefaultHero />
+          )}
           <div className="min-w-0 flex-1 basis-100">
             <SignInCard next={next} devLogin={devLogin} invite={invite} />
           </div>
+          {/* On a phone the advert comes after the sign-in card, so signing in is never a scroll away. */}
+          {phone && landing?.advert ? <AdvertCard advert={landing.advert} /> : null}
         </div>
       )}
     </AppShell>

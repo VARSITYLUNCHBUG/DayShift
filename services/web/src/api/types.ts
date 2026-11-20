@@ -1,6 +1,7 @@
 // The HTTP API's bodies (league/web/api/schema.py), from the generated protocol. Pages import
 // them from here so they never depend on the old protocol's names.
 export type {
+  Advert,
   ApiError,
   Award,
   Beat,
@@ -12,6 +13,7 @@ export type {
   Fight,
   HeroGames,
   Ladder,
+  Landing,
   LadderRow,
   LeagueAward,
   MatchDetail,

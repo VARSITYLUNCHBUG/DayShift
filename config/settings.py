@@ -123,6 +123,10 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Files staff upload in the admin: the landing page's advert images and videos. A volume in
+# compose; the edge serves /media/ straight from it, and DEBUG has Django serve it.
+MEDIA_URL = "/media/"
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", BASE_DIR / "media"))
 # web serves the static files itself, through WhiteNoise. collectstatic (in the image build)
 # writes each file under a content hash, which WhiteNoise lets browsers cache for good, and a .gz
 # copy it serves as is. Pages link the hashed names from its manifest; with DEBUG on, the plain
@@ -147,6 +151,9 @@ CONTENT_SECURITY_POLICY: dict[str, list[str]] = {
     "style-src-attr": ["'unsafe-inline'"],
     # blob: is the share card's preview, drawn in the page before it's downloaded.
     "img-src": ["'self'", "data:", "blob:"],
+    # The landing page's advert: an uploaded video, or a YouTube video in its privacy mode.
+    "media-src": ["'self'"],
+    "frame-src": ["https://www.youtube-nocookie.com"],
     "font-src": ["'self'"],
     "connect-src": ["'self'"],
     "object-src": ["'none'"],

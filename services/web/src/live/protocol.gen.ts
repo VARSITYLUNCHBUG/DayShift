@@ -1170,6 +1170,7 @@ export interface HttpApi {
   steam_unlinked: SteamUnlinked;
   player_search: PlayerSearch;
   random_draft: RandomDraft;
+  landing: Landing;
 }
 /**
  * Any refusal that isn't a sentence. `not-set-up`: the web's server has no league or no
@@ -1809,4 +1810,33 @@ export interface RandomDraft {
 export interface DraftSide {
   bans: ChampionRef[];
   picks: ChampionRef[];
+}
+/**
+ * The sign-in page's call to action, as staff set it in the admin. When any of it is set it
+ * takes the whole of the page's hero, beside the sign-in card; with none, the page has its own
+ * words. Anyone may read it, signed in or not.
+ *
+ * This interface was referenced by `LiveProtocol`'s JSON-Schema
+ * via the `definition` "Landing".
+ */
+export interface Landing {
+  headline_html: string | null;
+  lead_html: string | null;
+  advert: Advert | null;
+}
+/**
+ * The landing page's message of the day or advert. Exactly the field its `kind` needs is
+ * set: `html` (cleaned on the server: insert it as it is), `src` (a file on this site) or
+ * `youtube_id` (embed it from youtube-nocookie.com).
+ *
+ * This interface was referenced by `LiveProtocol`'s JSON-Schema
+ * via the `definition` "Advert".
+ */
+export interface Advert {
+  kind: "image" | "html" | "video" | "youtube";
+  alt: string;
+  link_url: string | null;
+  html: string | null;
+  src: string | null;
+  youtube_id: string | null;
 }

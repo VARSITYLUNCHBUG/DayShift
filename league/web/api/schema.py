@@ -365,6 +365,31 @@ class RandomDraft(_Http):
     am: DraftSide
 
 
+class Advert(_Http):
+    """The landing page's message of the day or advert. Exactly the field its `kind` needs is
+    set: `html` (cleaned on the server: insert it as it is), `src` (a file on this site) or
+    `youtube_id` (embed it from youtube-nocookie.com)."""
+
+    kind: Literal["image", "html", "video", "youtube"]
+    alt: str  # What the image or video shows. Empty for HTML.
+    link_url: str | None  # Where pressing it goes.
+    html: str | None
+    src: str | None
+    youtube_id: str | None
+
+
+class Landing(_Http):
+    """The sign-in page's call to action, as staff set it in the admin. When any of it is set it
+    takes the whole of the page's hero, beside the sign-in card; with none, the page has its own
+    words. Anyone may read it, signed in or not."""
+
+    # The tagline: its headline takes the place of the page's own, in its biggest type. Cleaned
+    # HTML: the headline inline (emphasis, code, links, line breaks), the lead in paragraphs.
+    headline_html: str | None
+    lead_html: str | None
+    advert: Advert | None
+
+
 class HttpApi(_Http):
     """Each endpoint's response body, for the generated types. Never sent itself.
     `/api/session/` is `league.web.auth.views.session_view`'s own, and the share card is a PNG."""
@@ -381,3 +406,4 @@ class HttpApi(_Http):
     steam_unlinked: SteamUnlinked
     player_search: PlayerSearch
     random_draft: RandomDraft
+    landing: Landing

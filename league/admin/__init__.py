@@ -39,6 +39,7 @@ from league.models import (
     DraftModeVersion,
     EarlyLeave,
     InterimRating,
+    LandingItem,
     Match,
     MatchAward,
     MatchParticipant,
@@ -916,3 +917,28 @@ class ChannelPingAdmin(ReadOnlyAdmin):
 
     list_display = ("name", "community", "channel_id", "timer_minutes", "last_ping_at")
     list_filter = ("community",)
+
+
+@admin.register(LandingItem)
+class LandingItemAdmin(admin.ModelAdmin):
+    """The sign-in page's call to action: a tagline, and a message of the day or advert. The page
+    shows the first live one of each, lowest Order first; with none, it shows its own words."""
+
+    list_display = ("name", "kind", "is_active", "order", "starts_at", "ends_at", "updated_at")
+    list_editable = ("is_active", "order")
+    list_filter = ("kind", "is_active")
+    search_fields = ("name", "text")
+    fieldsets = (
+        (None, {"fields": ("kind", "name", "is_active", "order")}),
+        ("When", {"fields": ("starts_at", "ends_at")}),
+        (
+            "What it shows",
+            {
+                "fields": ("text", "image", "video", "youtube_url", "alt_text", "link_url"),
+                "description": (
+                    "A tagline uses Text. An image advert uses Image, a video one Video or "
+                    "YouTube link, and both need Alt text. An HTML advert uses Text."
+                ),
+            },
+        ),
+    )

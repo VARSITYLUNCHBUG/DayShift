@@ -77,6 +77,40 @@ describe("sign in", () => {
     expect(safeNext("/matches/3")).toBe("/matches/3");
   });
 
+  it("gives the hero to the call to action staff set: the tagline is the headline", async () => {
+    const signedOut = { signed_in: false, player: null, dev_login: false, invite_url: null } as const;
+    const landing = {
+      headline_html: "Season 3<br> is <strong>on</strong>.",
+      lead_html: "<p>Sign-ups close Friday.</p>",
+      advert: { kind: "image", alt: "Season 3 poster", link_url: "https://example.com/s3", html: null, src: "/media/landing/a.png", youtube_id: null },
+    };
+    page(<SignInPage />, { session: signedOut, route: "/signin", answers: { ...httpAnswers(), "/api/landing/": landing } });
+    expect(await screen.findByRole("heading", { level: 1, name: "Season 3 is on." })).toBeInTheDocument();
+    expect(screen.getByText("Sign-ups close Friday.")).toBeInTheDocument();
+    // The page's own hero is gone: its headline, lead and how-it-works.
+    expect(screen.queryByText(/Twelve in/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/The league's Deadlock 6v6 inhouse/)).not.toBeInTheDocument();
+    expect(screen.queryByText("League night, every night")).not.toBeInTheDocument();
+    const advert = screen.getByRole("region", { name: "Message of the day" });
+    expect(within(advert).getByRole("img", { name: "Season 3 poster" })).toHaveAttribute("src", "/media/landing/a.png");
+    expect(within(advert).getByRole("link")).toHaveAttribute("href", "https://example.com/s3");
+  });
+
+  it("loads a YouTube advert only when it's pressed", async () => {
+    const signedOut = { signed_in: false, player: null, dev_login: false, invite_url: null } as const;
+    const landing = {
+      headline_html: null,
+      lead_html: null,
+      advert: { kind: "youtube", alt: "Season 3 trailer", link_url: null, html: null, src: null, youtube_id: "dQw4w9WgXcQ" },
+    };
+    const { container } = page(<SignInPage />, { session: signedOut, route: "/signin", answers: { ...httpAnswers(), "/api/landing/": landing } });
+    const play = await screen.findByRole("button", { name: /Season 3 trailer/ });
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(screen.getByText(/The league's Deadlock 6v6 inhouse/)).toBeInTheDocument();
+    await userEvent.click(play);
+    expect(screen.getByTitle("Season 3 trailer")).toHaveAttribute("src", "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&rel=0");
+  });
+
   it("says plainly when the session ran out", () => {
     page(<SignInPage />, { session: { signed_in: false, player: null, dev_login: false, invite_url: null }, route: "/signin?expired=1&next=/me" });
     expect(screen.getByRole("heading", { level: 1, name: "You've been signed out" })).toBeInTheDocument();

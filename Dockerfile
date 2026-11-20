@@ -87,9 +87,11 @@ COPY scoreocr/ scoreocr/
 COPY --from=web /web/dist services/web/dist
 # Static files and bytecode are built here, because the running containers can't write. web
 # serves the static files (WhiteNoise): collectstatic hashes and compresses each one, the web
-# UI's included.
+# UI's included. media/ is the one folder the app writes, for staff uploads: the media volume
+# (compose.yaml) mounts over it and takes its owner when it's first made.
 RUN DEBUG=true python manage.py collectstatic --noinput \
-    && python -m compileall -q -j 0 bot config league scoreocr manage.py
+    && python -m compileall -q -j 0 bot config league scoreocr manage.py \
+    && mkdir -p media && chown app:app media
 
 USER app
 

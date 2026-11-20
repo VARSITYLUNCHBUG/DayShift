@@ -22,4 +22,6 @@ urlpatterns: list[URLPattern] = [
     path("me/steam/<int:account_pk>/unlink/", views.steam_unlink, name="steam-unlink"),
     path("players/search/", views.player_search, name="player-search"),
     path("tools/random-draft/", views.random_draft, name="random-draft"),
+    # Public: the sign-in page shows it.
+    path("landing/", views.landing, name="landing"),
 ]

@@ -6,7 +6,7 @@ import { defineConfig } from "vite";
 // Django (uvicorn) runs on 8000 in development. Everything that isn't the web app itself goes
 // there; the session cookie is shared because cookies ignore the port.
 const DJANGO = "http://127.0.0.1:8000";
-const PROXIED = ["/api", "/auth", "/avatar", "/static/hero-art", "/static/postgame", "/admin", "/_control"];
+const PROXIED = ["/api", "/auth", "/avatar", "/media", "/static/hero-art", "/static/postgame", "/admin", "/_control"];
 
 export default defineConfig(({ command }) => ({
   // Django serves the build through WhiteNoise from STATIC_URL + "web/".

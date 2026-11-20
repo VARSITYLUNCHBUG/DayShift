@@ -135,3 +135,9 @@ The web UI is in the published image: nothing else to build or run.
 - **Item names** on the postgame's builds come from a copy of deadlock-api's shop catalogue.
   The bot refreshes it after a match check once it's a day old; `manage.py sync_items` fetches it
   now. An item the copy doesn't know yet shows as "Item 1234".
+- **The landing page's call to action** is set in the admin, under **Landing items**: a tagline
+  (Markdown) and a message of the day or advert (an image, some HTML, or a video file or YouTube
+  link). The sign-in page shows the first live one of each, lowest Order first, and its own words
+  when there's none. Both are cleaned to an allow-list of tags before they're shown.
+- **Uploads** go to the `media` volume, which the edge serves at `/media/` itself. Back it up
+  with the database: an advert whose file is gone shows a broken image.

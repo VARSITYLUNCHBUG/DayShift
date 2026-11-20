@@ -6,7 +6,7 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import { getJson, HttpError, postJson } from "./http";
 import { SESSION_KEY } from "./session";
-import type { Ladder, MatchDetail, MatchList, MyProfile, PostgameBody, RandomDraft, SeasonList, SteamUnlinked } from "./types";
+import type { Ladder, Landing, MatchDetail, MatchList, MyProfile, PostgameBody, RandomDraft, SeasonList, SteamUnlinked } from "./types";
 
 /** The path with these query parameters, leaving out the null ones. */
 export function withQuery(path: string, params: Record<string, string | null | undefined>): string {
@@ -97,6 +97,15 @@ export const queries = {
       queryFn: () => getJson<MyProfile>(withQuery("/api/me/", { season })),
       retry: retryUnlessMissing,
       staleTime: 30_000,
+    }),
+
+  /** The sign-in page's tagline and advert, as staff set them. Public, and the same for everyone. */
+  landing: () =>
+    queryOptions({
+      queryKey: ["landing"],
+      queryFn: () => getJson<Landing>("/api/landing/"),
+      retry: 1,
+      staleTime: MINUTE,
     }),
 };
 

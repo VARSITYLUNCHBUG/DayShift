@@ -1,5 +1,6 @@
-"""The HTTP API's endpoints. Every one needs a signed-in player; POSTs need Django's CSRF token
-(the `X-CSRFToken` header), which the CSRF middleware checks before any of this runs.
+"""The HTTP API's endpoints. Every one but `landing` needs a signed-in player; POSTs need
+Django's CSRF token (the `X-CSRFToken` header), which the CSRF middleware checks before any of
+this runs.
 
 A player's profile is private: `/api/me/...` only ever reads the signed-in player, and there is
 no endpoint for anyone else's.
@@ -16,6 +17,7 @@ from django.views.decorators.http import require_GET, require_POST
 from pydantic import BaseModel
 
 from league.models import Player, Season, SteamAccount
+from league.services import landing as landing_service
 from league.services import share_card, steam
 from league.web.api import reads
 from league.web.api import schema as a
@@ -208,3 +210,26 @@ def player_search(request: HttpRequest, viewer: Player, where: Scope) -> HttpRes
 @signed_in
 def random_draft(request: HttpRequest, viewer: Player, where: Scope) -> HttpResponse:
     return send(reads.random_draft(where), cache="no-store")
+
+
+@require_GET
+def landing(request: HttpRequest) -> HttpResponse:
+    """The sign-in page's tagline and advert. Public: it's shown before anyone signs in. The
+    same for everyone, so shared caches may keep it a minute."""
+    now = landing_service.current()
+    advert = now.advert
+    body = a.Landing(
+        headline_html=now.tagline.headline_html if now.tagline else None,
+        lead_html=now.tagline.lead_html if now.tagline else None,
+        advert=None
+        if advert is None
+        else a.Advert(
+            kind=advert.kind,
+            alt=advert.alt,
+            link_url=advert.link_url,
+            html=advert.html,
+            src=advert.src,
+            youtube_id=advert.youtube_id,
+        ),
+    )
+    return send(body, cache="public, max-age=60")

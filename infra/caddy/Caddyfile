@@ -40,6 +40,15 @@
 	}
 	respond @admin_refused 403
 
+	# Staff uploads (the landing page's advert), straight from the media volume. Their names are
+	# random and never reused, so they keep for a year. Served as files, never as pages.
+	handle /media/* {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		header Content-Security-Policy "default-src 'none'; sandbox"
+		file_server
+	}
+
 	reverse_proxy web:8000
 
 	log
