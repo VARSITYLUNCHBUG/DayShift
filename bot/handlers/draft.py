@@ -7,7 +7,7 @@ import discord
 from discord import Interaction
 
 from bot.db import db
-from bot.handlers.common import actor
+from bot.handlers.common import actor, checked_actor
 from bot.routing import Context, guarded, handles, reply
 from league.domain import copy
 from league.integrations import deadlock_api
@@ -111,9 +111,8 @@ class LobbyCodeModal(discord.ui.Modal, title="Enter the lobby code"):
 
 @handles("code_open")
 async def code_open(ctx: Context) -> None:
-    # A modal must be the first response, so this can't defer: the check has to stay quick.
-    player = await actor(ctx.interaction)
-    await db(draft.check_lobby_host, ctx.match_id, player)
+    # A modal must be the first response, so this can't defer: one quick trip for the check.
+    player = await checked_actor(ctx.interaction, draft.check_lobby_host, ctx.match_id)
     await ctx.interaction.response.send_modal(LobbyCodeModal(ctx.match_id, player))
 
 

@@ -8,7 +8,7 @@ import discord
 from discord import Interaction, SelectOption
 
 from bot.db import db
-from bot.handlers.common import actor
+from bot.handlers.common import actor, checked_actor
 from bot.handlers.permissions import community_of_match, has_area, require_area_for_match
 from bot.routing import Context, RouteSelect, guarded, handles, reply
 from league.domain.errors import InvalidAction, NotAllowed
@@ -42,14 +42,17 @@ def _roster_options(match_id: int) -> list[tuple[int, str, str]]:
     return [(row.player_id, row.player.display_name, row.team) for row in rows]
 
 
-def parse_deadlock_match_id(raw: str) -> int | None:
+MATCH_ID_HELP = "It's on the scoreboard after the game, and in the match history."
+
+
+def parse_deadlock_match_id(raw: str) -> int:
+    """A captain's Deadlock match ID. Required: it's how the result is checked and the stats
+    fetched."""
     cleaned = raw.strip()
     if not cleaned:
-        return None
-    if not cleaned.isdigit() or len(cleaned) > 18:
-        raise InvalidAction(
-            "The Deadlock match ID should be numbers only. Leave it blank if unsure."
-        )
+        raise InvalidAction(f"Enter the Deadlock match ID. {MATCH_ID_HELP}")
+    if not cleaned.isdigit() or len(cleaned) > 18 or int(cleaned) <= 0:
+        raise InvalidAction(f"The Deadlock match ID is numbers only. {MATCH_ID_HELP}")
     return int(cleaned)
 
 
@@ -80,6 +83,7 @@ async def archive_screenshot(
         archive_channel_id=channel_id,
         archive_message_id=message.id,
         attachment_id=message.attachments[0].id,
+        extension=extension,
     )
 
 
@@ -88,18 +92,22 @@ async def process_report(
     match_id: int,
     player: Player,
     winner: str,
-    attachment: discord.Attachment,
+    attachment: discord.Attachment | None,
     deadlock_match_id: str,
     picked: dict[int, str] | None = None,
 ) -> None:
-    """Shared by the modal and /submit. The interaction must already be deferred."""
+    """Shared by the modal and /submit. The interaction must already be deferred. The match ID
+    is required; the screenshot, MVP and key players are optional."""
     parsed_id = parse_deadlock_match_id(deadlock_match_id)
-    image = await archive_screenshot(interaction, match_id, player, attachment)
+    image = (
+        await archive_screenshot(interaction, match_id, player, attachment) if attachment else None
+    )
     status = await db(
         results.submit_report, match_id, player, winner, image, parsed_id, picked or None
     )
     messages = {
-        "awaiting_confirmation": "Thanks: the other captain can now confirm or dispute.",
+        "awaiting_confirmation": "Thanks: the other captain can now confirm or dispute. "
+        "Everyone is free to queue again.",
         "completed": "Thanks: both captains agree, and the result is posted.",
         "disputed": "You and the other captain disagree, so staff will decide.",
     }
@@ -107,7 +115,8 @@ async def process_report(
 
 
 class ReportModal(discord.ui.Modal):
-    """Asks who won only if the button didn't already say, as "Add my screenshot" doesn't."""
+    """Asks who won only if the button didn't already say, as "Add my report" doesn't. The
+    Deadlock match ID is required; the screenshot, MVP and key players are optional."""
 
     def __init__(
         self,
@@ -133,14 +142,18 @@ class ReportModal(discord.ui.Modal):
                 placeholder="Who won?",
             )
             self.add_item(discord.ui.Label(text="Winning team", component=self.winner_select))
-        self.screenshot: discord.ui.FileUpload[Any] = discord.ui.FileUpload(
-            required=True, min_values=1, max_values=1
-        )
         self.deadlock_id: discord.ui.TextInput[Any] = discord.ui.TextInput(
-            required=False, max_length=18, placeholder="Optional"
+            required=True, min_length=1, max_length=18, placeholder="From the scoreboard"
         )
-        self.add_item(discord.ui.Label(text="Scoreboard screenshot", component=self.screenshot))
+        self.screenshot: discord.ui.FileUpload[Any] = discord.ui.FileUpload(
+            required=False, min_values=0, max_values=1
+        )
         self.add_item(discord.ui.Label(text="Deadlock match ID", component=self.deadlock_id))
+        self.add_item(
+            discord.ui.Label(
+                text="Scoreboard screenshot", description="Optional", component=self.screenshot
+            )
+        )
         # Optional: a scoreboard read replaces these when it is confident.
         self.mvp: discord.ui.Select[Any] | None = None
         self.keys: discord.ui.Select[Any] | None = None
@@ -176,7 +189,7 @@ class ReportModal(discord.ui.Modal):
                 self.match_id,
                 self.player,
                 self.winner or (self.winner_select.values[0] if self.winner_select else ""),
-                self.screenshot.values[0],
+                self.screenshot.values[0] if self.screenshot.values else None,
                 str(self.deadlock_id.value or ""),
                 self.picked(),
             )
@@ -184,13 +197,21 @@ class ReportModal(discord.ui.Modal):
         await guarded(interaction, submit)
 
 
+def _report_form(
+    match_id: int, user_id: int, display_name: str
+) -> tuple[Player, dict[str, str], list[tuple[int, str, str]]]:
+    """Everything the report form needs, in one trip to the database thread."""
+    player = Player.objects.from_discord(user_id, display_name)
+    results.check_can_report(match_id, player)
+    return player, _captain_names(match_id), _roster_options(match_id)
+
+
 @handles("report_open")
 async def report_open(ctx: Context) -> None:
-    # A modal must be the first response, so this can't defer: the checks have to stay quick.
-    player = await actor(ctx.interaction)
-    await db(results.check_can_report, ctx.match_id, player)
-    captains = await db(_captain_names, ctx.match_id)
-    players = await db(_roster_options, ctx.match_id)
+    # A modal must be the first response, so this can't defer, and Discord gives it 3 seconds.
+    # Each trip to the shared database thread can queue behind other work, so make just one.
+    user = ctx.interaction.user
+    player, captains, players = await db(_report_form, ctx.match_id, user.id, user.display_name)
     winner = ctx.arg if ctx.arg in captains else None
     await ctx.interaction.response.send_modal(
         ReportModal(ctx.match_id, player, captains, winner, players)
@@ -224,8 +245,7 @@ class DisputeModal(discord.ui.Modal, title="Dispute the result"):
 
 @handles("dispute_open")
 async def dispute_open(ctx: Context) -> None:
-    player = await actor(ctx.interaction)
-    await db(results.check_can_report, ctx.match_id, player)
+    player = await checked_actor(ctx.interaction, results.check_can_report, ctx.match_id)
     await ctx.interaction.response.send_modal(DisputeModal(ctx.match_id, player))
 
 

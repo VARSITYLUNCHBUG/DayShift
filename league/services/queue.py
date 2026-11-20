@@ -95,7 +95,18 @@ def status(community: Community, player: Player) -> QueueStatus:
 def try_pop(community: Community) -> Match | None:
     """Start a lobby if the queue is full and capacity allows. Requires the community lock."""
     mode = parse_mode(community.active_mode.body)
-    live = Match.objects.filter(community=community, kind=MatchKind.RANKED, status__in=LIVE).count()
+    # Only matches that still hold players: one whose result is reported waits on its captains,
+    # but its game is over and its players are free.
+    live = (
+        Match.objects.filter(
+            community=community,
+            kind=MatchKind.RANKED,
+            status__in=LIVE,
+            participants__is_active=True,
+        )
+        .distinct()
+        .count()
+    )
     if live >= runtime.of(community).max_concurrent_matches:
         return None
     entries = list(
