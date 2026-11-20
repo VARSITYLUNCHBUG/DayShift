@@ -26,7 +26,7 @@ flowchart TB
 
 | Step | What happens | Clock and fallback |
 |---|---|---|
-| Queue | Join and Leave buttons, FIFO. Voice isn't required | Blocked by a cooldown or a live match |
+| Queue | Join and Leave buttons, FIFO. Voice isn't required | Blocked by a cooldown or a live match. 90 min without checking in: out, with no penalty ([idle players](#idle-players)) |
 | Pop at 12 | Creates a private text channel, `match-12`. The Waiting Room is the lobby's voice channel | Queue waits at `max_concurrent_matches` |
 | Gather | In the Waiting Room: nothing to do. Anywhere else: DM with a Waiting Room invite and Ready button. DMs closed: mention in the match channel | |
 | Ready | Ready button on the board and in the "Ready Up" DM. The board is posted right after the lobby ping, before the invites go out, and shows who has readied. The ping is never edited (an edit notifies nobody); it goes when the check moves on, or once nobody is left to call | 180 s. A miss frees the spot, offered down the priority list (the queue, longest wait first). Unfilled in 2 min: cancel, and everyone left goes back to the front of the queue |
@@ -50,6 +50,24 @@ but not join them unless Open match voice is on.
 This is the flow the server used with Bebot and NeatQueue, and it is the only one: every match
 runs it. The timers and the ban and pick order live in the draft mode. These values are starting
 judgements, not published standards.
+
+## Idle players
+
+Someone who queues and walks away would sit there until the queue pops, miss the ready check and
+get its cooldown. So a place in the queue lasts 90 minutes from joining:
+
+1. **85 minutes in**, a **Still queueing?** DM asks them to press **Keep me in**. That starts the
+   90 minutes again and doesn't move them in the queue. **Leave queue** works like Leave.
+2. **No answer in 5 minutes**: they're taken out, with no strike and no cooldown, and a DM says
+   so. Like any leave, their place is held for 3 minutes: joining again in that time puts them
+   back where they were.
+
+Nobody is taken out until the DM has been out for its full 5 minutes, so a bot restart can't
+remove people unasked. Closed DMs skip the messages, not the timeout. A cancelled lobby puts its
+players back in the queue with a fresh 90 minutes. Change the times, or turn this off, with
+**Queue idle minutes** and **Queue warn minutes** in the
+[runtime settings](admin.md#runtime-settings). A change applies at once, to everyone already
+waiting.
 
 ## Draft modes
 

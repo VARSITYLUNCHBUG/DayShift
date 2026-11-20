@@ -36,6 +36,8 @@ rebuilds the points and the leaderboard.
 | Open match voice | Off | On: anyone in the server can see and join a match's voice channels. Off: only its players and match staff |
 | Match channel close minutes | 3 | How long a finished match's text channel stays before it's deleted |
 | Max concurrent matches | 12 | Ranked matches at once; the queue waits beyond this |
+| Queue idle minutes | 90 | How long a player can sit in the queue without checking in before they're taken out, with no penalty ([idle players](match-flow.md#idle-players)). 0 turns it off |
+| Queue warn minutes | 5 | How long before that the "Still queueing?" DM goes out. 0: no DM. Must be less than the idle minutes |
 | Score OCR | Off | Reading report screenshots: off, stats only, or on ([Score OCR](integrations.md#score-ocr)) |
 | Lobby region | Automatic | Where deadlock-api creates each custom lobby |
 | API results | On | Check reported results against Deadlock's match history ([result checks](integrations.md#result-checks)) |
