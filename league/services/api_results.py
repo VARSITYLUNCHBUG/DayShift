@@ -33,7 +33,7 @@ from league.models.api import CheckStatus
 from league.models.matches import MatchResource, ResourceKind
 from league.models.permissions import Area
 from league.models.scoreboards import AwardSource
-from league.services import alerts, runtime, steam
+from league.services import alerts, postgame, runtime, steam
 from league.services.common import add_effect, now
 
 logger = logging.getLogger(__name__)
@@ -266,6 +266,10 @@ def record_metadata(
         created_at=now(),
     )
     request_stats(match, check)
+    # The web's postgame screens, from the same data. Not for a wrong match ID, and a failure
+    # here never stops the check.
+    if not (linked and not present):
+        postgame.save_quietly(match, data)
     if status == CheckStatus.OK:
         steam.mark_verified(seen_right)
         awards = _awards(api_players, linked)
