@@ -3,7 +3,14 @@
     "id": "3",
     "name": "P3",
     "avatar_url": null,
-    "steam": []
+    "steam": [
+      {
+        "account_id": "432234182",
+        "name": "P3Plays",
+        "proven": false,
+        "verified": false
+      }
+    ]
   },
   "queue": {
     "in_queue": false,

@@ -667,8 +667,8 @@
   "result": {
     "winner": "B",
     "reported_winner": "B",
-    "reported_by_id": "2",
-    "reported_by_name": "P2",
+    "reported_by_id": "1",
+    "reported_by_name": "P1",
     "deltas": {
       "1": 54,
       "2": 0,
@@ -685,14 +685,14 @@
     },
     "responses": [
       {
-        "player_id": "2",
-        "name": "P2",
+        "player_id": "1",
+        "name": "P1",
         "verdict": "report",
         "winner": "B"
       },
       {
-        "player_id": "1",
-        "name": "P1",
+        "player_id": "2",
+        "name": "P2",
         "verdict": "confirm",
         "winner": "B"
       }

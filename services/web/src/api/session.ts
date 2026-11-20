@@ -9,7 +9,8 @@ export interface Session {
     id: string;
     name: string;
     avatar: string | null;
-    steam: { linked: boolean; proven: boolean; verified: boolean; name: string };
+    /** Their own Steam links, oldest first. Never a Steam ID. */
+    steam: { name: string; proven: boolean; verified: boolean }[];
   } | null;
   dev_login: boolean;
   /** The server's invite (DISCORD_INVITE_URL), when one is set. */

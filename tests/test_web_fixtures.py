@@ -10,10 +10,15 @@ Without the variable the files must match exactly. Time is frozen and the random
 a run is repeatable; database IDs, which depend on what ran before, are renumbered by creation
 order within each kind (players, matches, sub requests, offers, scoreboard reads). Hero IDs are
 Deadlock's own and stay as they are.
+
+The finished match also writes what the HTTP API answers about it (`completed.http-*.json`), as
+its player sees them. Its players are linked to a real deadlock-api match's Steam accounts
+(tests/fixtures/deadlock/), so it has a postgame too.
 """
 
 from __future__ import annotations
 
+import gzip
 import itertools
 import json
 import os
@@ -38,6 +43,7 @@ from league.models import (
     PlayerSwap,
     ScoreboardRead,
     Season,
+    SteamAccount,
     SubOffer,
     SubRequest,
 )
@@ -47,20 +53,22 @@ from league.services import (
     draft,
     early_leave,
     lobby,
+    postgame,
     prio,
     queue,
     results,
     scrims,
+    steam,
     subs,
     swaps,
     wishes,
 )
+from league.web.api import reads
 from league.web.live import snapshots
 from tests.conftest import Clock, make_player
 from tests.helpers import (
     acting_captain,
     fail_api_lobby,
-    finish,
     fresh,
     image,
     ready_all,
@@ -99,7 +107,13 @@ MATCH_KEYS = {"match_id", "restarted_from"}
 SWAP_KEYS = {"swap_id"}
 READ_KEYS = {"read_id"}
 SEASON_KEYS = {"season_id"}
+# The real deadlock-api match the finished scene's postgame is built from.
+DEADLOCK = (
+    settings.BASE_DIR / "tests" / "fixtures" / "deadlock" / "match_140328807_metadata.json.gz"
+)
+DEADLOCK_ID = 140328807
 ID_UNDER = {
+    "steam": "steam",
     "player": "player",
     "players": "player",
     "host": "player",
@@ -408,10 +422,31 @@ def disputed(league: Community, players: list[Player], clock: Clock) -> Scene:
     return _scene(match, match.captain_of("B").player, _onlooker(league))
 
 
+def _deadlock_metadata() -> dict[str, Any]:
+    data: dict[str, Any] = json.loads(gzip.decompress(DEADLOCK.read_bytes()))
+    return data
+
+
 def completed(league: Community, players: list[Player], clock: Clock) -> Scene:
+    """Reported with its Deadlock match ID and confirmed. The players are linked to that match's
+    Steam accounts, so the result check's postgame places all twelve."""
     match = to_in_progress(_popped(league, players))
     clock.advance(1800)
-    return _scene(finish(match, "B"), None, _onlooker(league))
+    metadata = _deadlock_metadata()
+    accounts: dict[int, list[int]] = {0: [], 1: []}
+    for line in metadata["match_info"]["players"]:
+        accounts[line["team"]].append(line["account_id"])
+    hk = match.hidden_king_team
+    am = "B" if hk == "A" else "A"
+    for team, ids in ((hk, accounts[0]), (am, accounts[1])):
+        rows = match.participants.filter(team=team).order_by("id").select_related("player")
+        for row, account in zip(rows, ids, strict=True):
+            steam.link(row.player, account, f"{row.player.display_name}Plays")
+    # deadlock-api's match was the Archmother's.
+    results.submit_report(match.pk, match.captain_of(am).player, am, image(1), DEADLOCK_ID)
+    results.confirm(match.pk, match.captain_of(hk).player)
+    postgame.save(fresh(match), metadata)
+    return _scene(fresh(match), None, _onlooker(league))
 
 
 def ready_check_refill(league: Community, players: list[Player], clock: Clock) -> Scene:
@@ -552,6 +587,7 @@ def _numbering() -> dict[str, dict[str, str]]:
         "swap": PlayerSwap.objects,
         "season": Season.objects,
         "chat": ChatMessage.objects,
+        "steam": SteamAccount.objects,
     }
     return {
         kind: {
@@ -579,6 +615,9 @@ def _normalise(value: Any, numbers: dict[str, dict[str, str]], key: str = "") ->
                 kind = "season"
             if kind and isinstance(item, str):
                 out[name] = numbers[kind][item]
+            elif kind == "player" and isinstance(item, int) and not isinstance(item, bool):
+                # The postgame names league players by their integer ID.
+                out[name] = int(numbers["player"][str(item)])
             elif name == "avatar_url" and isinstance(item, str):
                 out[name] = AVATAR_PLAYER.sub(
                     lambda found: f"/avatar/{numbers['player'][found[1]]}/", item
@@ -634,6 +673,8 @@ def test_fixture(
         views[f"me-{role}"] = me
     views["queue"] = snapshots.build_queue(league.pk)
     views["live"] = snapshots.build_live(league.pk)
+    if name == "completed":
+        views.update(_http_views(played))
 
     spectator_view = views["spectator"].model_dump(mode="json")
     assert spectator_view["lobby_code"] is None and not spectator_view["viewer"]["is_player"]
@@ -667,6 +708,28 @@ def test_fixture(
             (FIXTURES / stale).unlink()
     else:
         assert on_disk == written, "Stale fixtures: rerun with UPDATE_WS_FIXTURES=1."
+
+
+def _http_views(played: Scene) -> dict[str, BaseModel]:
+    """The HTTP API's answers about the finished match, as its player sees them."""
+    viewer = played.player
+    assert viewer is not None
+    where = reads.Scope(played.match.community, Season.objects.open_for(played.match.community))
+    detail = reads.match_detail(where, played.match.pk)
+    after = reads.match_postgame(where, viewer, played.match.pk)
+    watching = reads.match_postgame(where, played.spectator, played.match.pk)
+    assert detail is not None and detail.has_postgame
+    assert after is not None and after.status == "ready" and after.you is not None
+    assert watching is not None and watching.status == "ready" and watching.you is None
+    return {
+        "http-match": detail,
+        "http-postgame": after,
+        "http-matches": reads.match_list(where, viewer, "recent", None),
+        "http-ladder": reads.ladder(where, viewer, where.season, 0),
+        "http-seasons": reads.seasons(where),
+        "http-me": reads.my_profile(where, viewer, where.season),
+        "http-random-draft": reads.random_draft(where),
+    }
 
 
 def _check(filename: str, data: Any) -> None:

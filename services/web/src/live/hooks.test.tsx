@@ -2,7 +2,9 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 
-import { FIXTURE_NOW, fixture } from "../legacy/dev/fixtures";
+import queueFixture from "../fixtures/ready_check.queue.json";
+import { FIXTURE_NOW } from "../match/fixtures";
+import type { QueueSnap } from "./types";
 import { ActionRefused, ConnectionLost } from "./actions";
 import { FakeServer } from "./FakeServer";
 import { useAction, useCountdown, useTopic } from "./hooks";
@@ -16,7 +18,7 @@ function setup(server: FakeServer) {
 
 describe("useTopic", () => {
   it("goes from loading to live, stale while disconnected, and gone", async () => {
-    const queue = fixture.queue("ready_check");
+    const queue = structuredClone(queueFixture) as QueueSnap;
     const server = new FakeServer();
     const { wrapper } = setup(server);
     const { result } = renderHook(() => useTopic("queue"), { wrapper });

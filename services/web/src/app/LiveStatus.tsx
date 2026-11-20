@@ -1,26 +1,45 @@
-// The top bar's status chip: what you're in right now. Reads the old `me` topic until the new
-// protocol (player:<id>) lands; FE-PAGES rewires it.
+// The top bar's status chip (A05 to A07): what you're in right now, linking back there.
+import { useMe, useQueue } from "../api/live";
 import { StatusChip } from "../components/Navigation";
-import { STATUS_LABEL } from "../legacy/match/status";
-import { useTopic } from "../live/hooks";
+import { useCountdown, useServerNow } from "../live/hooks";
+import { clockTime } from "../lib/format";
+import { matchNo, ordinal, STATUS_LABEL } from "../screens/shared/format";
+
+function HeldChip({ until }: { until: string }) {
+  const left = useCountdown(until);
+  return (
+    <StatusChip to="/" live>
+      Place held · {left?.label}
+    </StatusChip>
+  );
+}
 
 export function LiveStatus() {
-  const { data: me } = useTopic("me");
+  const me = useMe().data;
+  const queue = useQueue().data;
+  const now = useServerNow(5_000);
   if (!me) return null;
   const match = me.match ?? me.scrim;
   if (match) {
     return (
       <StatusChip to={`/matches/${match.id}`} live>
-        No. {match.id} · {STATUS_LABEL[match.status]}
+        {matchNo(match.id)} · {STATUS_LABEL[match.status]}
       </StatusChip>
     );
+  }
+  if (me.cooldown && Date.parse(me.cooldown.until) > now) {
+    return <StatusChip to="/">Can&apos;t queue until {clockTime(me.cooldown.until)}</StatusChip>;
   }
   if (me.queue.in_queue) {
+    const place = me.queue.place?.position ?? me.queue.position;
     return (
       <StatusChip to="/" live>
-        In the queue
+        In the queue{place ? ` · ${ordinal(place)}` : ""}
+        {queue ? ` · ${queue.count}/${queue.size}` : ""}
       </StatusChip>
     );
   }
+  const held = me.queue.place?.held_until;
+  if (held && Date.parse(held) > now) return <HeldChip until={held} />;
   return null;
 }

@@ -24,10 +24,11 @@ export function SignedIn() {
 
   // The socket closed 4401: the session is gone. Mark it so without asking again, so /signin
   // shows its buttons instead of bouncing back here.
+  const here = `${location.pathname}${location.search}`;
   const signedOut = useCallback(() => {
     client.setQueryData<Session>(SESSION_KEY, (old) => (old ? { ...old, signed_in: false, player: null } : old));
-    void navigate("/signin", { replace: true });
-  }, [client, navigate]);
+    void navigate(`/signin?${new URLSearchParams({ next: here, expired: "1" }).toString()}`, { replace: true });
+  }, [client, navigate, here]);
 
   if (session.isPending) {
     return (

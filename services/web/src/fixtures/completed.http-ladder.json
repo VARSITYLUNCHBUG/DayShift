@@ -1,0 +1,146 @@
+{
+  "season": "Season 1",
+  "season_id": "1",
+  "rating_label": "Rating",
+  "tiers": [
+    "Bronze",
+    "Silver",
+    "Gold",
+    "Platinum",
+    "Diamond"
+  ],
+  "total": 12,
+  "rows": [
+    {
+      "rank": 1,
+      "name": "P1",
+      "avatar_url": "/avatar/1/a1b2c3d4e5f60718293a4b5c6d7e8f90.png?size=64",
+      "rating": 54,
+      "tier": "Bronze",
+      "wins": 1,
+      "losses": 0,
+      "is_you": false
+    },
+    {
+      "rank": 2,
+      "name": "P12",
+      "avatar_url": null,
+      "rating": 54,
+      "tier": "Bronze",
+      "wins": 1,
+      "losses": 0,
+      "is_you": false
+    },
+    {
+      "rank": 3,
+      "name": "P4",
+      "avatar_url": null,
+      "rating": 54,
+      "tier": "Bronze",
+      "wins": 1,
+      "losses": 0,
+      "is_you": false
+    },
+    {
+      "rank": 4,
+      "name": "P5",
+      "avatar_url": null,
+      "rating": 54,
+      "tier": "Bronze",
+      "wins": 1,
+      "losses": 0,
+      "is_you": false
+    },
+    {
+      "rank": 5,
+      "name": "P8",
+      "avatar_url": null,
+      "rating": 54,
+      "tier": "Bronze",
+      "wins": 1,
+      "losses": 0,
+      "is_you": false
+    },
+    {
+      "rank": 6,
+      "name": "P9",
+      "avatar_url": null,
+      "rating": 54,
+      "tier": "Bronze",
+      "wins": 1,
+      "losses": 0,
+      "is_you": false
+    },
+    {
+      "rank": 7,
+      "name": "P10",
+      "avatar_url": null,
+      "rating": 0,
+      "tier": "Bronze",
+      "wins": 0,
+      "losses": 1,
+      "is_you": false
+    },
+    {
+      "rank": 8,
+      "name": "P11",
+      "avatar_url": null,
+      "rating": 0,
+      "tier": "Bronze",
+      "wins": 0,
+      "losses": 1,
+      "is_you": false
+    },
+    {
+      "rank": 9,
+      "name": "P2",
+      "avatar_url": "/avatar/2/0f1e2d3c4b5a6978.png?size=64",
+      "rating": 0,
+      "tier": "Bronze",
+      "wins": 0,
+      "losses": 1,
+      "is_you": false
+    },
+    {
+      "rank": 10,
+      "name": "P3",
+      "avatar_url": null,
+      "rating": 0,
+      "tier": "Bronze",
+      "wins": 0,
+      "losses": 1,
+      "is_you": true
+    },
+    {
+      "rank": 11,
+      "name": "P6",
+      "avatar_url": null,
+      "rating": 0,
+      "tier": "Bronze",
+      "wins": 0,
+      "losses": 1,
+      "is_you": false
+    },
+    {
+      "rank": 12,
+      "name": "P7",
+      "avatar_url": null,
+      "rating": 0,
+      "tier": "Bronze",
+      "wins": 0,
+      "losses": 1,
+      "is_you": false
+    }
+  ],
+  "me": {
+    "rank": 10,
+    "name": "P3",
+    "avatar_url": null,
+    "rating": 0,
+    "tier": "Bronze",
+    "wins": 0,
+    "losses": 1,
+    "is_you": true
+  },
+  "next_offset": null
+}

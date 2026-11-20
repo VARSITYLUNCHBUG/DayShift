@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import me from "../legacy/fixtures/ready_check.me-player.json";
-import match from "../legacy/fixtures/ready_check.player.json";
-import queue from "../legacy/fixtures/ready_check.queue.json";
+import me from "../fixtures/ready_check.me-player.json";
+import match from "../fixtures/ready_check.player.json";
+import queue from "../fixtures/ready_check.queue.json";
 import { ActionRefused, ConnectionLost } from "./actions";
 import { FakeServer } from "./FakeServer";
 import { BACKOFF_BASE_MS, PING_EVERY_MS, SILENCE_LIMIT_MS } from "./LiveSocket";

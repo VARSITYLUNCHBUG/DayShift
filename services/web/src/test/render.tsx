@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import type { Session } from "../api/session";
 import { HeroRouter } from "../app/HeroRouter";
 import { SESSION_KEY } from "../api/session";
-import { FIXTURE_NOW } from "../legacy/dev/fixtures";
+import { FIXTURE_NOW } from "../match/fixtures";
 import type { AckScript } from "../live/FakeServer";
 import { FakeServer } from "../live/FakeServer";
 import { LiveProvider } from "../live/LiveProvider";
@@ -18,7 +18,7 @@ export const SIGNED_IN: Session = {
     id: "1",
     name: "P1",
     avatar: null,
-    steam: { linked: false, proven: false, verified: false, name: "" },
+    steam: [],
   },
   dev_login: false,
   invite_url: null,

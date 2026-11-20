@@ -2,7 +2,7 @@
 // sockets and either answers by itself (`auto`) or waits for the test to drive it.
 import type { LiveSocketOptions, SocketLike } from "./LiveSocket";
 import { LiveSocket } from "./LiveSocket";
-import type { ClientMessage, ServerMessage } from "./protocol.legacy";
+import type { ClientMessage, ServerMessage } from "./protocol.gen";
 import type { AnySnap, Topic } from "./types";
 
 export interface AckScript {

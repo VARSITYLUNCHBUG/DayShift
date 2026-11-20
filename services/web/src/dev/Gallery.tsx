@@ -1,5 +1,5 @@
 // /dev/screens (development builds only): the DayShift components in dark and light, the two
-// shells, and the old screens rendered from Django's fixtures.
+// shells, and the pages and the match room rendered from Django's fixtures.
 import { lazy, Suspense, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, Route, Routes } from "react-router";
@@ -36,7 +36,8 @@ import { notify } from "../components/toast";
 import { Who } from "../components/Who";
 import { AM_PLAYERS, DRAFT_STEPS, heroArt, heroChoices, HK_PLAYERS, MATCH_NO, ME, NIGHT, SOUL_LEAD, inSeconds } from "./sample";
 
-const LegacyGallery = lazy(() => import("../legacy/dev/ScreenGallery"));
+const PagesGallery = lazy(() => import("./PagesGallery"));
+const MatchGallery = lazy(() => import("./MatchGallery"));
 
 function Spec({ label, children, note }: { label: string; children: ReactNode; note?: string }) {
   return (
@@ -415,8 +416,11 @@ function Index() {
           <ButtonLink to="/dev/screens/room" kind="ghost" size="sm">
             Room shell
           </ButtonLink>
-          <ButtonLink to="/dev/screens/legacy" kind="ghost" size="sm">
-            Old screens
+          <ButtonLink to="/dev/screens/match" kind="ghost" size="sm">
+            Match room
+          </ButtonLink>
+          <ButtonLink to="/dev/screens/pages" kind="ghost" size="sm">
+            Pages
           </ButtonLink>
           <Segmented
             label="Theme"
@@ -517,10 +521,18 @@ export default function Gallery() {
       <Route path="app" element={<AppPreview />} />
       <Route path="room" element={<RoomPreview />} />
       <Route
-        path="legacy/*"
+        path="match/*"
         element={
           <Suspense>
-            <LegacyGallery />
+            <MatchGallery />
+          </Suspense>
+        }
+      />
+      <Route
+        path="pages/*"
+        element={
+          <Suspense>
+            <PagesGallery />
           </Suspense>
         }
       />

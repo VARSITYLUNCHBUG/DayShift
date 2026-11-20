@@ -2,7 +2,7 @@
 // actions and the server clock. React reaches it through LiveProvider and the hooks in hooks.ts.
 import { ActionRefused, ConnectionLost } from "./actions";
 import type { ActionArgs, ActionName } from "./actions";
-import type { ClientMessage } from "./protocol.legacy";
+import type { ClientMessage } from "./protocol.gen";
 import { MAX_TOPICS } from "./types";
 import type { AckMessage, AnySnap, Topic } from "./types";
 

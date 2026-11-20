@@ -3,7 +3,14 @@
     "id": "2",
     "name": "P2",
     "avatar_url": "/avatar/2/0f1e2d3c4b5a6978.png?size=64",
-    "steam": []
+    "steam": [
+      {
+        "account_id": "1118386191",
+        "name": "P2Plays",
+        "proven": false,
+        "verified": false
+      }
+    ]
   },
   "queue": {
     "in_queue": false,

@@ -46,12 +46,9 @@ export function ThemeSwitch() {
 
 function MeLink({ me }: { me: ShellUser }) {
   return (
-    <Link
-      to="/me"
-      aria-label={`Me: ${me.name}`}
-      className="flex min-h-11 items-center gap-2.5 rounded-full pr-1 text-body font-bold"
-    >
+    <Link to="/me" className="flex min-h-11 items-center gap-2.5 rounded-full pr-1 text-body font-bold">
       <Avatar name={me.name} src={me.avatar} size="md" />
+      <span className="sr-only">Me:</span>{" "}
       <span className="max-w-40 truncate max-lg:sr-only">{me.name}</span>
     </Link>
   );

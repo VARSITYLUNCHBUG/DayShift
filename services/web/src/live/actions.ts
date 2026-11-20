@@ -1,6 +1,6 @@
 // The websocket's actions, by name, with their arguments (protocol contract, "Actions").
 // Every id is a string on the wire. The actor is always the signed-in player.
-import type { CoinflipChoice } from "./protocol.legacy";
+import type { CoinflipChoice } from "./protocol.gen";
 
 type Empty = Record<string, never>;
 

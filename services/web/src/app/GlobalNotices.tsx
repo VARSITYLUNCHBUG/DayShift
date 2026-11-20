@@ -1,14 +1,14 @@
-// The pop-ups and toasts that can show over any signed-in page. Still the old screens' versions;
-// FE-ROOM and FE-PAGES rebuild them on Dialog and NoticeSheet with the new protocol.
-import { ReadyUpDialog } from "../legacy/screens/ReadyUpDialog";
-import { OfferDialog } from "../legacy/screens/subs/OfferDialog";
-import { MeToasts } from "../legacy/screens/useMeToasts";
+// The pop-ups and toasts that can show over any signed-in page: Ready Up (a must-answer dialog),
+// spot offers (a notice sheet) and the player's own toasts. One notice at a time: Ready Up wins.
+import { MeToasts } from "./notices/MeToasts";
+import { ReadyUp } from "./notices/ReadyUp";
+import { SpotOffer } from "./notices/SpotOffer";
 
 export default function GlobalNotices() {
   return (
     <>
-      <ReadyUpDialog />
-      <OfferDialog />
+      <ReadyUp />
+      <SpotOffer />
       <MeToasts />
     </>
   );

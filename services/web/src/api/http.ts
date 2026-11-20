@@ -11,18 +11,38 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The API's refusal code (`{"error": "not-found"}`), when it sent one. */
+    readonly code: string | null = null,
   ) {
     super(message);
     this.name = "HttpError";
   }
 }
 
+/** The refusal code or sentence in an API error body (`{"error": ...}` or `{"refusal": ...}`). */
+function refusalOf(answer: unknown): { code: string | null; sentence: string | null } {
+  if (!answer || typeof answer !== "object") return { code: null, sentence: null };
+  const refusal = "refusal" in answer && typeof answer.refusal === "string" ? answer.refusal : null;
+  const error = "error" in answer && typeof answer.error === "string" ? answer.error : null;
+  // Sentences are for the player; short codes ("signed-out") are not.
+  const sentence = refusal ?? (error?.includes(" ") ? error : null);
+  return { code: error && !error.includes(" ") ? error : null, sentence };
+}
+
 export async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) throw new HttpError(response.status, `${path} answered ${response.status}`);
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+  } catch {
+    throw new HttpError(0, "Couldn't reach the server. Check your connection and try again.");
+  }
+  if (!response.ok) {
+    const { code, sentence } = refusalOf(await response.json().catch(() => null));
+    throw new HttpError(response.status, sentence ?? FAILED_TEXT[response.status] ?? SERVER_TEXT, code);
+  }
   return (await response.json()) as T;
 }
 
@@ -41,13 +61,13 @@ export async function post(path: string, body?: BodyInit): Promise<Response> {
 const FAILED_TEXT: Record<number, string> = {
   401: "You're signed out. Sign in again to carry on.",
   403: "That didn't work. Refresh and try again.",
-  404: "That match isn't here any more.",
+  404: "That isn't here any more.",
   413: "That file is too large: the limit is 20 MB.",
 };
 const SERVER_TEXT = "Something went wrong on our side. Please try again.";
 
 /** POSTs a form (multipart, so it can carry files) and reads the JSON answer. A refusal throws
- * an HttpError whose message is the server's own plain sentence (`{"error": "..."}`) when it
+ * an HttpError whose message is the server's own plain sentence (`{"refusal": "..."}`) when it
  * sent one: those are written for the player. */
 export async function postForm<T>(path: string, form: FormData): Promise<T> {
   return postJson<T>(path, form);
@@ -68,8 +88,6 @@ export async function postJson<T>(path: string, body?: BodyInit): Promise<T> {
   }
   const answer: unknown = await response.json().catch(() => null);
   if (response.ok) return answer as T;
-  const error = answer && typeof answer === "object" && "error" in answer ? answer.error : null;
-  // Sentences are for the player; short codes ("signed-out") are not.
-  const sentence = typeof error === "string" && error.includes(" ") ? error : null;
-  throw new HttpError(response.status, sentence ?? FAILED_TEXT[response.status] ?? SERVER_TEXT);
+  const { code, sentence } = refusalOf(answer);
+  throw new HttpError(response.status, sentence ?? FAILED_TEXT[response.status] ?? SERVER_TEXT, code);
 }

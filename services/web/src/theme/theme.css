@@ -244,6 +244,10 @@
   --shadow-dialog: var(--ds-shadow-dialog);
 
   /* Display scale: Bricolage 800, -0.03em, line height 0.95 (F03). */
+
+  /* The Play page's queue count (A04): the one number bigger than a poster. */
+  --text-mega: 176px;
+  --text-mega--line-height: 0.8;
   --text-poster: 88px;
   --text-poster--line-height: 0.95;
   --text-clock: 64px;
@@ -558,6 +562,15 @@
   .search-field__input,
   .input-group {
     @apply min-h-12 text-field sm:text-field;
+
+    /* `text-field` is also HeroUI's field colour (the ground), so say the text colour last: without
+     * it a search field's text is ink on ink in the dark theme. */
+    color: var(--field-foreground);
+  }
+
+  .search-field__input::placeholder,
+  .input::placeholder {
+    color: var(--field-placeholder);
   }
 
   .input {
@@ -567,6 +580,7 @@
   .textarea {
     @apply rounded-card text-field sm:text-field;
 
+    color: var(--field-foreground);
     border: 2px solid var(--ds-line-strong);
     background-color: var(--ds-ink);
   }

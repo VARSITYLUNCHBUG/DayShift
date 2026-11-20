@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { ThemeSwitch } from "../components/shell/TopBar";
-import { fixture } from "../legacy/dev/fixtures";
+import { meFixture } from "../match/fixtures";
+import { httpAnswers, PAGES_NOW } from "../screens/fixtures";
+import { serveHttp } from "../test/http";
 import { renderPage } from "../test/render";
 import { ThemeProvider } from "../theme/ThemeContext";
 import { AppRoutes } from "./routes";
@@ -13,23 +15,24 @@ const LAZY = { timeout: 10_000 };
 
 describe("Routes", () => {
   it("draws a missing page inside the app shell, with the way back", async () => {
-    const me = fixture.me("completed", "player");
+    const me = meFixture("completed", "player");
     renderPage(<AppRoutes />, { route: "/nowhere", snaps: { me }, playerId: me.player.id });
-    expect(await screen.findByText("There's nothing here", {}, LAZY)).toBeInTheDocument();
+    expect(await screen.findByText("We can't find that page", {}, LAZY)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to Play" })).toHaveAttribute("href", "/");
     expect(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: "Play" })).toBeInTheDocument();
   });
 
   it("keeps profiles private: there's no page for someone else's", async () => {
-    const me = fixture.me("completed", "player");
+    const me = meFixture("completed", "player");
     renderPage(<AppRoutes />, { route: "/players/7", snaps: { me }, playerId: me.player.id });
-    expect(await screen.findByText("There's nothing here", {}, LAZY)).toBeInTheDocument();
+    expect(await screen.findByText("We can't find that page", {}, LAZY)).toBeInTheDocument();
   });
 
   it("gives the postgame tabs their own pages in the room shell", async () => {
-    const me = fixture.me("completed", "player");
-    renderPage(<AppRoutes />, { route: "/matches/413/timeline", snaps: { me }, playerId: me.player.id });
-    expect(await screen.findByText("The timeline isn't in yet", {}, LAZY)).toBeInTheDocument();
+    const me = meFixture("completed", "player");
+    serveHttp(httpAnswers());
+    renderPage(<AppRoutes />, { route: "/matches/1/timeline", snaps: { me }, playerId: me.player.id, serverTime: PAGES_NOW });
+    expect(await screen.findByRole("heading", { name: "Every moment" }, LAZY)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Timeline" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("main")).toHaveAttribute("id", "stage");
   });

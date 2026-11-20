@@ -4,8 +4,14 @@ import { cn } from "../lib/cn";
 import { Mark } from "./Brand";
 import { Icon } from "./Icon";
 
+/** The title's heading level: 2 inside a page, 1 when the state is the page (404, errors). */
+export type StateHeadingLevel = 1 | 2 | 3;
+
+const HEADING = { 1: "h1", 2: "h2", 3: "h3" } as const;
+
 interface EmptyProps {
   title: ReactNode;
+  headingLevel?: StateHeadingLevel;
   children?: ReactNode;
   action?: ReactNode;
   /** Art in place of the faded mark. */
@@ -15,11 +21,12 @@ interface EmptyProps {
 
 /** Nothing here yet: what will appear and when. "No matches tonight yet. The first one starts
  * when 12 are in the queue." */
-export function EmptyState({ title, children, action, art, className }: EmptyProps) {
+export function EmptyState({ title, children, action, art, className, headingLevel = 2 }: EmptyProps) {
+  const Heading = HEADING[headingLevel];
   return (
     <div className={cn("flex flex-col items-center gap-3 rounded-panel border border-dashed border-line-strong px-6 py-12 text-center", className)}>
       {art ?? <Mark size={40} className="opacity-50" />}
-      <b className="font-display text-card">{title}</b>
+      <Heading className="font-display text-card">{title}</Heading>
       {children ? <span className="max-w-105 text-body text-muted">{children}</span> : null}
       {action}
     </div>
@@ -28,6 +35,7 @@ export function EmptyState({ title, children, action, art, className }: EmptyPro
 
 interface ErrorProps {
   title: ReactNode;
+  headingLevel?: StateHeadingLevel;
   children?: ReactNode;
   action?: ReactNode;
   /** A quiet reference for support ("Match No. 413"), never an error code on its own. */
@@ -36,7 +44,8 @@ interface ErrorProps {
 }
 
 /** Something failed: what, what's kept and what to do. Never "Something went wrong" alone. */
-export function ErrorState({ title, children, action, code, className }: ErrorProps) {
+export function ErrorState({ title, children, action, code, className, headingLevel = 2 }: ErrorProps) {
+  const Heading = HEADING[headingLevel];
   return (
     <div
       role="alert"
@@ -45,7 +54,7 @@ export function ErrorState({ title, children, action, code, className }: ErrorPr
       <span className="text-danger">
         <Icon name="alert" size={32} />
       </span>
-      <b className="font-display text-card">{title}</b>
+      <Heading className="font-display text-card">{title}</Heading>
       {children ? <span className="max-w-110 text-body text-muted">{children}</span> : null}
       {code ? <span className="text-caption font-bold text-faint">{code}</span> : null}
       {action}

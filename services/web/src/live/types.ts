@@ -1,6 +1,6 @@
 // Friendly names over the generated protocol types, and the topic → snapshot mapping that
-// useTopic is typed by. They come from protocol.legacy.ts (the old protocol) until FE-ROOM moves the
-// screens to protocol.gen.ts, generated from the new schema; this file is not generated.
+// useTopic is typed by, over protocol.gen.ts (generated from Django's schema by `npm run gen`).
+// This file is not generated.
 import type {
   Ack,
   LiveSnap,
@@ -9,9 +9,9 @@ import type {
   MeSnap,
   QueueSnap,
   ServerMessage,
-} from "./protocol.legacy";
+} from "./protocol.gen";
 
-export type * from "./protocol.legacy";
+export type * from "./protocol.gen";
 
 export type MatchTopic = `match:${string}`;
 export type Topic = "me" | "queue" | "live" | MatchTopic;

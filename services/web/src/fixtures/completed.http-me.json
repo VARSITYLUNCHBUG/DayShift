@@ -1,0 +1,97 @@
+{
+  "player": {
+    "id": "3",
+    "name": "P3",
+    "avatar_url": null
+  },
+  "season": "Season 1",
+  "season_id": "1",
+  "rating_label": "Rating",
+  "rating": 0,
+  "tier": "Bronze",
+  "tiers": [
+    "Bronze",
+    "Silver",
+    "Gold",
+    "Platinum",
+    "Diamond"
+  ],
+  "rank": 10,
+  "ranked": 12,
+  "games": 1,
+  "wins": 0,
+  "losses": 1,
+  "placement": {
+    "played": 1,
+    "total": 10
+  },
+  "strikes": {
+    "count": 0,
+    "progress": 0,
+    "games_per_strike": 3,
+    "games_to_next": null,
+    "next_decay_at": null,
+    "log": []
+  },
+  "captain": {
+    "eligible": true,
+    "reason": ""
+  },
+  "history": [
+    {
+      "at": "2026-01-05T19:30:00.000Z",
+      "match_id": "1",
+      "delta": 0,
+      "rating_after": 0
+    }
+  ],
+  "recent": [
+    {
+      "match_id": "1",
+      "draft_name": "Blazing Lion",
+      "status": "completed",
+      "ended_at": "2026-01-05T19:30:00.000Z",
+      "team": "A",
+      "side": "hk",
+      "result": "loss",
+      "hero": {
+        "id": "4",
+        "name": "Lady Geist",
+        "slug": "lady-geist",
+        "icon_url": "/static/hero-art/lady-geist.webp"
+      },
+      "delta": 0,
+      "rating_after": 0,
+      "award": null,
+      "has_postgame": true
+    }
+  ],
+  "heroes": [
+    {
+      "hero": {
+        "id": "4",
+        "name": "Lady Geist",
+        "slug": "lady-geist",
+        "icon_url": "/static/hero-art/lady-geist.webp"
+      },
+      "games": 1
+    }
+  ],
+  "awards": {
+    "mvps": 0,
+    "keys": 0
+  },
+  "accounts": {
+    "discord_name": "P3",
+    "avatar_url": null,
+    "steam": [
+      {
+        "id": "2",
+        "name": "P3Plays",
+        "proven": false,
+        "verified": false,
+        "linked_at": "2026-01-05T19:30:00.000Z"
+      }
+    ]
+  }
+}
