@@ -26,6 +26,7 @@ _LEDGER = "an append-only ledger row the rating code writes, never loaded"
 _OUTBOX = "a queue of Discord work, written by the code as it runs"
 _RUNTIME = "short-lived state of a live queue or match"
 _DEVTOOLS = "dev control state the control API writes while you drive a match"
+_CATALOGUE = "a copy of deadlock-api's catalogue, fetched by sync_items and the bot"
 
 # Models whose rows don't belong in a fixture, and why. Keep it short: a model that is
 # configuration, or that a dev stack needs from its first click, belongs in fixtures/dev instead.
@@ -52,6 +53,7 @@ EXEMPT: dict[str, str] = {
     "league.herowish": _PLAYED,
     "league.chatmessage": _PLAYED,
     "league.matchpostgame": _PLAYED,
+    "league.deadlockitem": _CATALOGUE,
     "league.resultsubmission": _PLAYED,
     "league.matchresult": _PLAYED,
     "league.matchaward": _PLAYED,

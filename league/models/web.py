@@ -77,3 +77,21 @@ class MatchPostgame(models.Model):
 
     def __str__(self) -> str:
         return f"Postgame for match {self.match_id}"
+
+
+class DeadlockItem(models.Model):
+    """deadlock-api's shop items, by item ID: the names for the postgame's builds, added when a
+    postgame is served (league/services/items.py). Refreshed by `manage.py sync_items`, and by
+    the bot after a match check once its copy is a day old."""
+
+    id = models.BigIntegerField(primary_key=True)  # deadlock-api's item ID.
+    name = models.CharField(max_length=100)
+    slot = models.CharField(max_length=16, blank=True)  # "weapon", "vitality" or "spirit".
+    tier = models.PositiveSmallIntegerField(null=True, blank=True)
+    synced_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "deadlock_items"
+
+    def __str__(self) -> str:
+        return self.name

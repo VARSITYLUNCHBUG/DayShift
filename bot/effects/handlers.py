@@ -42,6 +42,7 @@ from league.services import (
     boards,
     draft,
     effects,
+    items,
     ocr,
     permissions,
     runtime,
@@ -924,6 +925,20 @@ async def check_match_api(env: Env) -> None:
         return
     names = await asyncio.to_thread(_steam_names, data)
     await db(api_results.record_metadata, env.match_id, deadlock_match_id, data, names)
+    await _refresh_items()
+
+
+async def _refresh_items() -> None:
+    """Keep the copy of deadlock-api's shop items a day fresh, for the postgame's item names.
+    Best effort: a failure leaves the old names, and the next check tries again."""
+    if not await db(items.is_stale):
+        return
+    try:
+        fetched = await asyncio.to_thread(items.fetch_remote)
+    except deadlock_api.ApiError as exc:
+        logger.warning("Couldn't refresh the shop items: %s", exc)
+        return
+    await db(items.store, fetched)
 
 
 def _steam_names(data: dict[str, Any]) -> dict[int, str]:

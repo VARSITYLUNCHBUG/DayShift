@@ -25,7 +25,7 @@ from league.models.results import MatchResult, ResultSubmission
 from league.models.scoreboards import MatchAward, PlayerAlias, PlayerMatchStat, ScoreboardRead
 from league.models.subs import SubOffer, SubRequest
 from league.models.swaps import PlayerSwap
-from league.models.web import ChatMessage, ChatScope, HeroWish, MatchPostgame
+from league.models.web import ChatMessage, ChatScope, DeadlockItem, HeroWish, MatchPostgame
 
 __all__ = [
     "ApiMatchCheck",
@@ -38,6 +38,7 @@ __all__ = [
     "ChatScope",
     "Community",
     "CommunityRoleGrant",
+    "DeadlockItem",
     "DraftAction",
     "DraftModeVersion",
     "EarlyLeave",

@@ -14,8 +14,9 @@ Everything here is in the game's own terms:
   maps to a league player by a linked Steam account on the right team; anyone else keeps their
   hero and a "Player N" name, so the document never shows a Steam ID.
 - **Positions** are on the minimap, 0 to 1000 across and down from its top-left corner.
-- **Items** are deadlock-api's item IDs. The document carries no names yet: `item_names` is empty
-  in this schema, and the web shows "Item <id>" until a later schema version fills it.
+- **Items** are deadlock-api's item IDs. The stored document carries no names: `stored` adds
+  them from the shop catalogue as it's served (league/services/items.py), and the web shows
+  "Item <id>" for one the catalogue doesn't know yet.
 
 `document()` and the helpers it uses are pure: metadata in, document out. `save`, `build` and
 `league_players` read and write the database.
@@ -34,7 +35,7 @@ from django.db import transaction
 from pydantic import BaseModel, ConfigDict
 
 from league.models import Champion, Match, MatchPostgame
-from league.services import live, steam
+from league.services import items, live, steam
 
 logger = logging.getLogger(__name__)
 
@@ -284,8 +285,8 @@ class Postgame(_Doc):
     awards: list[Award]
     map: MapFrame
     replay: Replay
-    # Item ID to name. Empty in schema 1: names come in a later version, and until then the web
-    # shows "Item <id>".
+    # Item ID to name. Empty as stored; `stored` fills it from the shop catalogue. The web shows
+    # "Item <id>" for any missing.
     item_names: dict[str, str]
 
 
@@ -895,6 +896,11 @@ def build(match: Match, metadata: Mapping[str, Any] | None = None) -> MatchPostg
 
 
 def stored(match: Match) -> Postgame | None:
-    """The match's document, when it has one in this schema. Older ones need a rebuild."""
+    """The match's document, when it has one in this schema, with the names of the items in
+    its builds from the shop catalogue. Older ones need a rebuild."""
     row = MatchPostgame.objects.filter(match=match, schema_version=SCHEMA_VERSION).first()
-    return Postgame.model_validate(row.data) if row else None
+    if row is None:
+        return None
+    doc = Postgame.model_validate(row.data)
+    bought = {buy.item_id for line in doc.players for buy in line.build}
+    return doc.model_copy(update={"item_names": items.names(bought)})

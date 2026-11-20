@@ -52,6 +52,7 @@ from league.services import (
     deadlines,
     draft,
     early_leave,
+    items,
     lobby,
     postgame,
     prio,
@@ -112,6 +113,8 @@ DEADLOCK = (
     settings.BASE_DIR / "tests" / "fixtures" / "deadlock" / "match_140328807_metadata.json.gz"
 )
 DEADLOCK_ID = 140328807
+# Its items' names: a slice of deadlock-api's shop catalogue.
+SHOP_ITEMS = settings.BASE_DIR / "tests" / "fixtures" / "deadlock" / "shop_items.json"
 ID_UNDER = {
     "steam": "steam",
     "player": "player",
@@ -446,6 +449,7 @@ def completed(league: Community, players: list[Player], clock: Clock) -> Scene:
     results.submit_report(match.pk, match.captain_of(am).player, am, image(1), DEADLOCK_ID)
     results.confirm(match.pk, match.captain_of(hk).player)
     postgame.save(fresh(match), metadata)
+    items.store(items.parse(json.loads(SHOP_ITEMS.read_text(encoding="utf-8"))))
     return _scene(fresh(match), None, _onlooker(league))
 
 

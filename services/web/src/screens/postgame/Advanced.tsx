@@ -30,7 +30,7 @@ const SETS: { id: SetName; label: string }[] = [
 const SOURCE_LABEL = { troopers: "Troopers", players: "Kills", neutrals: "Neutrals", bosses: "Objectives", treasure: "Other" } as const;
 const SOURCE_TONE = { troopers: "text", players: "hk", neutrals: "muted", bosses: "am", treasure: "muted" } as const;
 
-/** "Item 1998374645": v1 postgames carry no item names. */
+/** The item's name from the shop catalogue, or "Item 1998374645" for one it doesn't know yet. */
 export function itemName(doc: Postgame, id: number): string {
   return doc.item_names[String(id)] ?? `Item ${id}`;
 }

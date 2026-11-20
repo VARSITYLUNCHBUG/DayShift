@@ -132,3 +132,6 @@ The web UI is in the published image: nothing else to build or run.
   proxy, make sure it forwards `Upgrade` and `Connection` and keeps a quiet socket open for at
   least a minute: the app pings within that.
 - **One web worker**, as the image's command already runs it (see above).
+- **Item names** on the postgame's builds come from a copy of deadlock-api's shop catalogue.
+  The bot refreshes it after a match check once it's a day old; `manage.py sync_items` fetches it
+  now. An item the copy doesn't know yet shows as "Item 1234".

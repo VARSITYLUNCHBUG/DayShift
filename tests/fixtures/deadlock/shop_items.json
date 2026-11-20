@@ -1,0 +1,597 @@
+[
+ {
+  "id": 7409189,
+  "name": "Improved Spirit",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 2
+ },
+ {
+  "id": 84321454,
+  "name": "Quicksilver Reload",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 2
+ },
+ {
+  "id": 98582110,
+  "name": "Stalker",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 112198670,
+  "name": "Spirit Shielding",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 334300056,
+  "name": "Stamina Mastery",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 3
+ },
+ {
+  "id": 343572757,
+  "name": "Spirit Burn",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 4
+ },
+ {
+  "id": 365620721,
+  "name": "Glass Cannon",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 4
+ },
+ {
+  "id": 380806748,
+  "name": "Compress Cooldown",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 2
+ },
+ {
+  "id": 381961617,
+  "name": "Active Reload",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 395867183,
+  "name": "Mystic Shot",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 395944548,
+  "name": "Torment Pulse",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 3
+ },
+ {
+  "id": 465043967,
+  "name": "Spirit Strike",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 1
+ },
+ {
+  "id": 499683006,
+  "name": "Bullet Lifesteal",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 600033864,
+  "name": "Majestic Leap",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 3
+ },
+ {
+  "id": 619484391,
+  "name": "Silence Wave",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 3
+ },
+ {
+  "id": 668299740,
+  "name": "Rapid Rounds",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 1
+ },
+ {
+  "id": 690458959,
+  "name": "Express Shot",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 3
+ },
+ {
+  "id": 709540378,
+  "name": "Cultist Sacrifice",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 3
+ },
+ {
+  "id": 710436191,
+  "name": "Capacitor",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 4
+ },
+ {
+  "id": 754480263,
+  "name": "Mystic Expansion",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 1
+ },
+ {
+  "id": 787198704,
+  "name": "Rapid Recharge",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 3
+ },
+ {
+  "id": 811521119,
+  "name": "Tesla Bullets",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 3
+ },
+ {
+  "id": 876563814,
+  "name": "Spirit Lifesteal",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 915014646,
+  "name": "Transcendent Cooldown",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 4
+ },
+ {
+  "id": 968099481,
+  "name": "Extra Spirit",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 1
+ },
+ {
+  "id": 1009965641,
+  "name": "Monster Rounds",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 1
+ },
+ {
+  "id": 1047818222,
+  "name": "Debuff Reducer",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 1055679805,
+  "name": "Vampiric Burst",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 4
+ },
+ {
+  "id": 1150006784,
+  "name": "Arcane Surge",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 2
+ },
+ {
+  "id": 1193964439,
+  "name": "Greater Expansion",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 3
+ },
+ {
+  "id": 1235347618,
+  "name": "Battle Vest",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 1342610602,
+  "name": "Close Quarters",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 1
+ },
+ {
+  "id": 1414025773,
+  "name": "Counterspell",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 3
+ },
+ {
+  "id": 1414319208,
+  "name": "Berserker",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 3
+ },
+ {
+  "id": 1437614329,
+  "name": "Melee Lifesteal",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 1
+ },
+ {
+  "id": 1548066885,
+  "name": "Extended Magazine",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 1
+ },
+ {
+  "id": 1644605047,
+  "name": "Reactive Barrier",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 1662311306,
+  "name": "Divine Barrier",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 4
+ },
+ {
+  "id": 1672893796,
+  "name": "Grit",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 1
+ },
+ {
+  "id": 1763073141,
+  "name": "Recharging Rush",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 1797283378,
+  "name": "Infuser",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 4
+ },
+ {
+  "id": 1798666702,
+  "name": "Shadow Weave",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 3
+ },
+ {
+  "id": 1804594021,
+  "name": "Rescue Beam",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 3
+ },
+ {
+  "id": 1955841979,
+  "name": "Spellbreaker",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 4
+ },
+ {
+  "id": 1976391348,
+  "name": "Cold Front",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 2
+ },
+ {
+  "id": 1998374645,
+  "name": "Mystic Burst",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 1
+ },
+ {
+  "id": 2064029594,
+  "name": "Opening Rounds",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 2081037738,
+  "name": "Mystic Vulnerability",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 2
+ },
+ {
+  "id": 2095565695,
+  "name": "Point Blank",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 3
+ },
+ {
+  "id": 2121044373,
+  "name": "Tankbuster",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 3
+ },
+ {
+  "id": 2152872419,
+  "name": "Sharpshooter",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 3
+ },
+ {
+  "id": 2163598980,
+  "name": "Spirit Resilience",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 3
+ },
+ {
+  "id": 2356412290,
+  "name": "Titanic Magazine",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 2447176615,
+  "name": "Enduring Speed",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 2519598785,
+  "name": "Boundless Spirit",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 4
+ },
+ {
+  "id": 2603935618,
+  "name": "Healbane",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 2617435668,
+  "name": "Cursed Relic",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 4
+ },
+ {
+  "id": 2678489038,
+  "name": "Hollow Point",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 3
+ },
+ {
+  "id": 2717651715,
+  "name": "Superior Duration",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 3
+ },
+ {
+  "id": 2739107182,
+  "name": "Burst Fire",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 3
+ },
+ {
+  "id": 2820116164,
+  "name": "Diviner's Kevlar",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 4
+ },
+ {
+  "id": 2829638276,
+  "name": "Extra Regen",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 1
+ },
+ {
+  "id": 2951612397,
+  "name": "Duration Extender",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 2
+ },
+ {
+  "id": 2971868509,
+  "name": "Bullet Resist Shredder",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 2
+ },
+ {
+  "id": 3005970438,
+  "name": "Escalating Exposure",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 4
+ },
+ {
+  "id": 3074274290,
+  "name": "Trophy Collector",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 3077079169,
+  "name": "High-Velocity Rounds",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 1
+ },
+ {
+  "id": 3190916303,
+  "name": "Spirit Snatch",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 3
+ },
+ {
+  "id": 3261353684,
+  "name": "Superior Cooldown",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 3
+ },
+ {
+  "id": 3270001687,
+  "name": "Warp Stone",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 3
+ },
+ {
+  "id": 3331811235,
+  "name": "Long Range",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 3399065363,
+  "name": "Sprint Boots",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 1
+ },
+ {
+  "id": 3403085434,
+  "name": "Fleetfoot",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 3577481646,
+  "name": "Mystic Reverb",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 4
+ },
+ {
+  "id": 3585132399,
+  "name": "Fortitude",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 3
+ },
+ {
+  "id": 3633614685,
+  "name": "Extra Health",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 1
+ },
+ {
+  "id": 3647584222,
+  "name": "Split Shot",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 3731635960,
+  "name": "Dispel Magic",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 3
+ },
+ {
+  "id": 3776945997,
+  "name": "Extra Charge",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 1
+ },
+ {
+  "id": 3812615317,
+  "name": "Arctic Blast",
+  "type": "upgrade",
+  "item_slot_type": "spirit",
+  "item_tier": 4
+ },
+ {
+  "id": 3862866912,
+  "name": "Restorative Shot",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 1
+ },
+ {
+  "id": 3970837787,
+  "name": "Enchanter's Emblem",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 2
+ },
+ {
+  "id": 4104549924,
+  "name": "Swift Striker",
+  "type": "upgrade",
+  "item_slot_type": "weapon",
+  "item_tier": 2
+ },
+ {
+  "id": 4139877411,
+  "name": "Extra Stamina",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 1
+ },
+ {
+  "id": 4204808176,
+  "name": "Rebuttal",
+  "type": "upgrade",
+  "item_slot_type": "vitality",
+  "item_tier": 1
+ }
+]

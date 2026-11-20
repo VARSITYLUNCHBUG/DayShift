@@ -89,6 +89,13 @@ def match_metadata(match_id: int) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def shop_items() -> list[dict[str, Any]]:
+    """deadlock-api's shop items (about 2 MB): the upgrades players buy, with their names."""
+    response = _request("GET", "/v1/assets/items/by-type/upgrade")
+    data = response.json() if response.status_code != 404 else []
+    return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+
 # --- Custom lobbies --------------------------------------------------------------------------
 
 

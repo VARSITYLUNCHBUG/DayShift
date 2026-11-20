@@ -9,6 +9,7 @@ import { serveHttp } from "../../test/http";
 import { renderPage, SIGNED_IN } from "../../test/render";
 import type { Session } from "../../api/session";
 import { awardLine, fightScore, moments, namesOf, PENDING, storyLine, winningSide } from "./model";
+import { itemName } from "./Advanced";
 import { PostgamePage } from "./PostgamePage";
 
 const ID = http.match().id;
@@ -145,5 +146,16 @@ describe("the room hands over", () => {
       { route: "/matches/999", session: PLAYER, serverTime: PAGES_NOW },
     );
     await waitFor(() => expect(screen.getByRole("heading", { name: "We can't find that match" })).toBeInTheDocument(), { timeout: 5000 });
+  });
+});
+
+describe("item names", () => {
+  it("names a bought item from the catalogue, and numbers one it doesn't know", () => {
+    const doc = http.postgame().data;
+    const bought = doc.players.flatMap((line) => line.build.map((buy) => buy.item_id));
+    const known = bought.find((id) => doc.item_names[String(id)]);
+    expect(known).toBeDefined();
+    expect(itemName(doc, known ?? 0)).toBe(doc.item_names[String(known)]);
+    expect(itemName(doc, 1)).toBe("Item 1");
   });
 });
