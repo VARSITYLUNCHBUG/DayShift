@@ -18,6 +18,8 @@ dependencies = [
     "pillow>=13.0.0",
     "fonttools>=4.55",
     "uvicorn[standard]>=0.30,<1",
+    # The player web UI's websocket (league/web/live): one consumer, no channel layer.
+    "channels>=4.3,<5",
 ]
 
 [dependency-groups]

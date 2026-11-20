@@ -58,8 +58,12 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Django 6 refuses ArrayField without it (postgres.E005).
     "django.contrib.postgres",
+    "channels",
     "league",
 ]
+
+# uvicorn serves config.asgi: HTTP through Django, and the player web UI's websocket at /ws/.
+ASGI_APPLICATION = "config.asgi.application"
 
 MIDDLEWARE = [
     # /healthz and /readyz, before ALLOWED_HOSTS and the HTTPS redirect (config.health).
@@ -137,7 +141,11 @@ CONTENT_SECURITY_POLICY: dict[str, list[str]] = {
     "default-src": ["'self'"],
     "script-src": ["'self'", "'nonce'"],
     "style-src": ["'self'", "'nonce'"],
-    "img-src": ["'self'", "data:"],
+    # The player web UI's components (React Aria) position popovers and tooltips with inline
+    # style attributes. Only attributes: inline <style> elements still need the nonce.
+    "style-src-attr": ["'unsafe-inline'"],
+    # blob: is the share card's preview, drawn in the page before it's downloaded.
+    "img-src": ["'self'", "data:", "blob:"],
     "font-src": ["'self'"],
     "connect-src": ["'self'"],
     "object-src": ["'none'"],
@@ -212,6 +220,29 @@ DEADLOCK_API_KEY = os.environ.get("DEADLOCK_API_KEY", "")
 ERROR_LOG_CHANNEL_ID = int(os.environ.get("ERROR_LOG_CHANNEL_ID") or 0)
 # Optional. Only needed to link Steam accounts by a custom profile URL (/id/name).
 STEAM_WEB_API_KEY = os.environ.get("STEAM_WEB_API_KEY", "")
+
+# --- Player web UI -----------------------------------------------------------------------------
+# The Discord server the web UI plays in: one per deployment. Defaults to the bot's server.
+WEB_GUILD_ID = int(os.environ.get("WEB_GUILD_ID") or DISCORD_GUILD_ID)
+# Where players reach the web UI. Sign-in redirects are built from it, never from the Host header.
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://localhost:8000").rstrip("/")
+# The Discord application's OAuth2 client, for "Sign in with Discord" (the `identify` scope).
+DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
+DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
+# The server's invite (https://discord.gg/...): where sign-in sends someone who isn't in it.
+DISCORD_INVITE_URL = os.environ.get("DISCORD_INVITE_URL", "").strip()
+if DISCORD_INVITE_URL and not DISCORD_INVITE_URL.startswith("https://"):
+    raise RuntimeError("DISCORD_INVITE_URL must be an https:// link.")
+# Threads the web process runs database work on, for the websocket and its snapshots.
+WEB_DB_THREADS = int(os.environ.get("WEB_DB_THREADS") or 8)
+# Sign in as any player without Discord: local testing only.
+WEB_DEV_LOGIN = env_bool("WEB_DEV_LOGIN")
+if WEB_DEV_LOGIN and not DEBUG:
+    raise RuntimeError("WEB_DEV_LOGIN only works with DEBUG on.")
+# The built single-page app (services/web: `npm run build`), served as static files under
+# /static/web/. Absent until it's built; Django then serves a page saying how to build it.
+WEB_DIST = BASE_DIR / "services" / "web" / "dist"
+STATICFILES_DIRS = [("web", WEB_DIST)] if WEB_DIST.is_dir() else []
 
 # --- Health ------------------------------------------------------------------------------------
 # Optional. A dead man's switch (healthchecks.io or any service like it): the bot's watchdog pings
