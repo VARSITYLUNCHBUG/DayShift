@@ -8,7 +8,13 @@ import re
 from django.db import IntegrityError, transaction
 
 from league.domain import copy
-from league.domain.draft_plan import PlanStep, build_plan, player_draft_length, team_for_role
+from league.domain.draft_plan import (
+    PlanStep,
+    build_plan,
+    player_draft_length,
+    player_pick_seconds,
+    team_for_role,
+)
 from league.domain.engine import (
     DraftablePlayer,
     Status,
@@ -159,7 +165,7 @@ def _advance_player_draft(match: Match, mode: DraftMode) -> None:
         )
         _advance_player_draft(match, mode)
         return
-    match.deadline_at = seconds_from_now(mode.player_draft.seconds)
+    match.deadline_at = seconds_from_now(player_pick_seconds(mode, match.step_index))
     match.bump("step_index", "deadline_at")
     render_board(match)
 

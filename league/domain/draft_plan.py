@@ -39,6 +39,19 @@ def player_draft_length(mode: DraftMode) -> int:
     return len(mode.player_draft.order)
 
 
+# A captain's first pick opens the draft, with the whole lobby to read: it gets this many times
+# the usual time. Every later pick, a double's second included, gets the usual.
+FIRST_PICK_TIME_FACTOR = 2
+
+
+def player_pick_seconds(mode: DraftMode, index: int) -> int:
+    """How long the player draft's pick `index` has. Each pick starts its own clock."""
+    order = mode.player_draft.order
+    seconds = mode.player_draft.seconds
+    first_of_captain = order.index(order[index]) == index
+    return seconds * FIRST_PICK_TIME_FACTOR if first_of_captain else seconds
+
+
 def champion_plan(mode: DraftMode) -> tuple[PlanStep, ...]:
     """Just the bans and picks, indexed from 0: what a scrim drafts."""
     champion_steps = build_plan(mode)[player_draft_length(mode) :]

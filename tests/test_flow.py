@@ -400,6 +400,9 @@ def test_player_pick_timeout_takes_highest_rated(
     seed(popped, players[5], 1300)
     match = vote_captains(ready_all(popped))
     clock.advance(46)
+    deadlines.tick()  # The first pick has double time: not yet.
+    assert not DraftAction.objects.filter(match=match, step_index=0).exists()
+    clock.advance(45)
     deadlines.tick()
     action = DraftAction.objects.get(match=match, step_index=0)
     assert action.source == "timeout"
@@ -894,3 +897,51 @@ def test_unconfirmed_teams_stand_when_time_runs_out(voting: Match, clock: Clock)
     match = fresh(match)
     assert match.status == Status.CHAMPION_DRAFT
     assert match.transitions.get(to_status=Status.CHAMPION_DRAFT).source == "timeout"
+
+
+# --- Captain check-in and the first picks --------------------------------------------------
+
+
+def test_a_missed_check_in_goes_to_the_highest_rated_not_the_next_vote(
+    voting: Match, players: list[Player], clock: Clock
+) -> None:
+    """Votes don't pick the heir: a captain who lets the check-in lapse can't hand it on to the
+    player their friends voted third."""
+    for voter in players[:6]:
+        lobby.cast_captain_votes(voting.pk, voter, [players[4].pk, players[7].pk])
+    for voter in players[6:9]:
+        lobby.cast_captain_votes(voting.pk, voter, [players[4].pk, players[5].pk])
+    seed(voting, players[3], 1800)
+    for voter in players[9:]:
+        lobby.cast_captain_votes(voting.pk, voter, [players[7].pk, players[5].pk])
+    match = fresh(voting)
+    assert match.status == Status.CAPTAIN_CHECKIN
+    lapsing = match.captain_of("B")
+    lobby.check_in(match.pk, match.captain_of("A").player)
+    clock.advance(match.mode.captains.checkin_seconds + 1)
+    deadlines.tick()
+    match = fresh(match)
+    heir = match.captain_of(lapsing.team)
+    assert heir.player == players[3]  # Highest rated, not players[5], next in the vote.
+
+
+def test_each_captains_first_pick_gets_double_time(voting: Match, clock: Clock) -> None:
+    """Each pick starts its own clock. A captain's first has twice the usual time; every other
+    pick, the second of a double included, has the usual."""
+    match = vote_captains(voting)
+    seconds = match.mode.player_draft.seconds
+    assert match.mode.player_draft.order.startswith("FSS")
+
+    def left() -> float:
+        return (fresh(match).deadline_at - clock.now()).total_seconds()
+
+    def pick() -> None:
+        current = fresh(match)
+        target = current.participants.filter(is_active=True, team="").order_by("id").first()
+        draft.pick_player(current.pk, acting_captain(current), current.step_index, target.player_id)
+
+    expected = [2 * seconds, 2 * seconds, seconds, seconds]
+    for index, wanted in enumerate(expected):
+        assert abs(left() - wanted) < 1, (index, left())
+        clock.advance(10)
+        pick()
