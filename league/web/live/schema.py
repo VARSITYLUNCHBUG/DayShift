@@ -480,6 +480,8 @@ class MatchSnap(_Wire):
     kind: MatchKind
     mode_name: str
     rating_label: str  # What `MatchPlayer.rating` and the deltas count: "Rating" or "Points".
+    # Who a captain gets when a player pick runs out of time: the mode's rule.
+    player_timeout: Literal["highest_rating", "random"] = "highest_rating"
     deadline_at: UtcTime | None
     closes_at: UtcTime | None  # When the match channel closes, once it has ended.
     started_at: UtcTime | None  # When the game itself started.

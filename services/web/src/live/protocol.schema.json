@@ -2142,6 +2142,14 @@
         "rating_label": {
           "type": "string"
         },
+        "player_timeout": {
+          "default": "highest_rating",
+          "enum": [
+            "highest_rating",
+            "random"
+          ],
+          "type": "string"
+        },
         "deadline_at": {
           "anyOf": [
             {
@@ -2381,6 +2389,7 @@
         "kind",
         "mode_name",
         "rating_label",
+        "player_timeout",
         "deadline_at",
         "closes_at",
         "started_at",

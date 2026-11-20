@@ -438,6 +438,7 @@ export interface MatchSnap {
   kind: MatchKind;
   mode_name: string;
   rating_label: string;
+  player_timeout: "highest_rating" | "random";
   deadline_at: string | null;
   closes_at: string | null;
   started_at: string | null;

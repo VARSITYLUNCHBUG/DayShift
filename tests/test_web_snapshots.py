@@ -703,6 +703,12 @@ def test_chat_lines_and_wishes_on_the_wire(popped: Match) -> None:
     assert public["viewer"]["can_wish"] is False
 
 
+def test_a_match_says_its_player_draft_timeout_rule(popped: Match) -> None:
+    """The mode picks the highest-rated player left by default, so the page says so."""
+    body = snapshots.build_match(popped.pk)
+    assert body is not None and body.snap.player_timeout == "highest_rating"
+
+
 def test_a_missing_match_has_no_body(league: Community) -> None:
     assert snapshots.build_match(123_456_789) is None
 

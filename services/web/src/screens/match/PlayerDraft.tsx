@@ -11,7 +11,7 @@ import { cn } from "../../lib/cn";
 import { number } from "../../lib/format";
 import type { MatchSnap, Team } from "../../live/protocol.gen";
 import { useMatchAction } from "../../match/live";
-import { leftRight, nameOf, playerDraftLine, playerPool, teamKey, teamPlayers, turnTitle } from "../../match/model";
+import { leftRight, nameOf, playerDraftLine, playerPool, playerTimeoutPick, teamKey, teamPlayers, turnTitle } from "../../match/model";
 import { Note, StageHead } from "./Parts";
 import { Room, useMe } from "./Room";
 import type { MatchScreenProps } from "./types";
@@ -65,7 +65,7 @@ export function PlayerDraft({ match }: MatchScreenProps) {
           acting
             ? pickingName
               ? `Picking ${pickingName}…`
-              : "Press a player to pick them. No pick in time and one is chosen at random."
+              : `Press a player to pick them. No pick in time and you get ${playerTimeoutPick(match)}.`
             : match.viewer.is_player && match.viewer.team === null
               ? "You're still to be picked. The lobby chat is open until the teams are set."
               : undefined

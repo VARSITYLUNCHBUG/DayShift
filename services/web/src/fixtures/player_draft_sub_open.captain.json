@@ -4,6 +4,7 @@
   "kind": "ranked",
   "mode_name": "3-ban draft",
   "rating_label": "Rating",
+  "player_timeout": "highest_rating",
   "deadline_at": null,
   "closes_at": null,
   "started_at": null,

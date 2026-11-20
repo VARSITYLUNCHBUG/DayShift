@@ -459,6 +459,11 @@ def build_match(match_id: int) -> MatchBody | None:
             subs_done=_subs_done(match_id),
             rating_label=leaderboards.label(community_id),
         )
+        mode = Match.objects.select_related("mode_version").get(pk=match_id).mode
+        timeout = "random" if mode.player_draft.on_timeout == "auto_random" else "highest_rating"
+        body = dataclasses.replace(
+            body, snap=body.snap.model_copy(update={"player_timeout": timeout})
+        )
         return _with_web_only(body, state)
 
 

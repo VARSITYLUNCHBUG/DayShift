@@ -4,6 +4,7 @@
   "kind": "ranked",
   "mode_name": "3-ban draft",
   "rating_label": "Rating",
+  "player_timeout": "highest_rating",
   "deadline_at": "2026-01-05T22:00:00.000Z",
   "closes_at": null,
   "started_at": "2026-01-05T19:00:00.000Z",

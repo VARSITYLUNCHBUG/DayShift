@@ -99,12 +99,17 @@ export function turnTitle(match: MatchSnap): string {
   return `${turn.captain_name || nameOf(match, turn.team)} is ${verb.ing}`;
 }
 
+/** Who the captain gets if their pick runs out of time, as the mode says. */
+export function playerTimeoutPick(match: MatchSnap): string {
+  return match.player_timeout === "random" ? "a random player" : "the highest-rated player left";
+}
+
 /** The player draft counts picks across both captains: "Pick 2 of 10 · then Vesper". */
 export function playerDraftLine(match: MatchSnap): string {
   const done = match.draft.filter((d) => d.action === "player_pick").length;
   const total = match.player_draft_order.length || done + playerPool(match).length;
   const next = match.turn?.next_captain_name;
-  return `Pick ${Math.min(done + 1, total)} of ${total}${next ? ` · then ${next}` : ""} · runs out: a random player`;
+  return `Pick ${Math.min(done + 1, total)} of ${total}${next ? ` · then ${next}` : ""} · runs out: ${playerTimeoutPick(match)}`;
 }
 
 /** The hero draft: "Ban 4 of 6 · then Vesper picks · runs out: a random hero". */
