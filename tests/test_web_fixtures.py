@@ -21,7 +21,7 @@ import re
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from league.domain.engine import ARCHMOTHER, LAST_PICK, Status
 from league.models import (
+    ChatMessage,
     Community,
     Match,
     Player,
@@ -41,6 +42,7 @@ from league.models import (
     SubRequest,
 )
 from league.services import (
+    chat,
     deadlines,
     draft,
     early_leave,
@@ -51,6 +53,7 @@ from league.services import (
     scrims,
     subs,
     swaps,
+    wishes,
 )
 from league.web.live import snapshots
 from tests.conftest import Clock, make_player
@@ -109,6 +112,7 @@ ID_UNDER = {
     "offers": "offer",
     "last_offer": "offer",
     "pending": "swap",
+    "messages": "chat",
 }
 
 
@@ -159,6 +163,52 @@ def _popped(league: Community, players: list[Player]) -> Match:
     return Match.objects.get()
 
 
+# --- Wishes and chat --------------------------------------------------------------------------
+
+
+def _seats(match: Match, team: str) -> list[Player]:
+    """A team's players, captain first."""
+    rows = match.participants.filter(removed_reason="", team=team).select_related("player")
+    return [row.player for row in rows.order_by("-is_captain", "id")]
+
+
+def _talk(match: Match, clock: Clock, lines: list[tuple[Player, str]]) -> None:
+    """Post these lines in the chat each sender sees, a few seconds apart, the last just now."""
+    sent = [chat.send(match.pk, player, body) for player, body in lines]
+    for back, message in enumerate(reversed(sent)):
+        moment = clock.now() - timedelta(seconds=5 + 17 * back)
+        ChatMessage.objects.filter(pk=message.pk).update(created_at=moment)
+
+
+def _wish(match: Match) -> None:
+    """Wishes on both teams: three, two and one, and the captains' too. Each team's view shows
+    only its own."""
+    pool = sorted(fresh(match).champion_pool)
+    for team, offset in (("A", 0), ("B", 7)):
+        captain, first, second, third, *_ = _seats(match, team)
+        heroes = pool[offset:]
+        wishes.set_wishes(match.pk, first, [heroes[0], heroes[1], heroes[2]])
+        wishes.set_wishes(match.pk, second, [heroes[3], heroes[0]])
+        wishes.set_wishes(match.pk, third, [heroes[4]])
+        wishes.set_wishes(match.pk, captain, [heroes[5], heroes[6]])
+
+
+def _team_talk(match: Match, clock: Clock) -> None:
+    a, b = _seats(match, "A"), _seats(match, "B")
+    _talk(
+        match,
+        clock,
+        [
+            (a[1], "I can flex, put me wherever"),
+            (b[0], "Who wants to go first pick?"),
+            (a[0], "Ban their best duo, then we take the frog."),
+            (b[2], "me pls"),
+            (a[2], "ok\nI'll take mid if nobody minds"),
+            (b[1], "Careful, they're stacked on hard carries"),
+        ],
+    )
+
+
 # --- Ranked -----------------------------------------------------------------------------------
 
 
@@ -189,6 +239,18 @@ def player_draft(league: Community, players: list[Player], clock: Clock) -> Scen
     target = match.participants.filter(team="").order_by("id").first()
     assert target is not None
     draft.pick_player(match.pk, acting_captain(match), match.step_index, target.player_id)
+    waiting = match.participants.filter(team="").order_by("id").select_related("player")
+    _talk(
+        match,
+        clock,
+        [
+            (match.captain_of("A").player, "gl hf everyone"),
+            (target.player, "thanks for the pick!"),
+            (waiting[0].player, "I play anything, pick me"),
+            (match.captain_of("B").player, "Noted. <b>No promises</b> & no tilting"),
+            (waiting[1].player, "first time here, be nice :)"),
+        ],
+    )
     return _scene(match, acting_captain(match), _onlooker(league))
 
 
@@ -229,12 +291,19 @@ def player_draft_sub_naming(league: Community, players: list[Player], clock: Clo
 
 
 def coinflip(league: Community, players: list[Player], clock: Clock) -> Scene:
+    """The teams are set: both have wishes, and a word in their team chat."""
     match = run_player_draft(vote_captains(ready_all(_popped(league, players))))
+    _wish(match)
+    a, b = _seats(match, "A"), _seats(match, "B")
+    _talk(match, clock, [(a[0], "Calling it: we go Hidden King."), (b[1], "we got this")])
     return _scene(match, match.captain_of(match.coinflip_winner).player, _onlooker(league))
 
 
 def champion_draft(league: Community, players: list[Player], clock: Clock) -> Scene:
+    """Three bans in. Both teams have wishes (some for heroes now banned) and team chat."""
     match = to_champion_draft(_popped(league, players))
+    _wish(match)
+    _team_talk(match, clock)
     for _ in range(3):
         champion = draft.available_champions(match)[0]
         draft.choose_champion(match.pk, acting_captain(match), match.step_index, champion)
@@ -311,8 +380,10 @@ def in_progress_early_leave(league: Community, players: list[Player], clock: Clo
 
 
 def awaiting_confirmation(league: Community, players: list[Player], clock: Clock) -> Scene:
+    """Captain A reported. The team chats are read-only now."""
     match = to_in_progress(_popped(league, players))
     clock.advance(1800)
+    _team_talk(match, clock)
     results.submit_report(match.pk, match.captain_of("A").player, "A", image(1))
     return _scene(match, match.captain_of("B").player, _onlooker(league))
 
@@ -480,6 +551,7 @@ def _numbering() -> dict[str, dict[str, str]]:
         "read": ScoreboardRead.objects,
         "swap": PlayerSwap.objects,
         "season": Season.objects,
+        "chat": ChatMessage.objects,
     }
     return {
         kind: {

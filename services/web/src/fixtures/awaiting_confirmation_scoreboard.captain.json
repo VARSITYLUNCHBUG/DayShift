@@ -640,7 +640,316 @@
     }
   ],
   "champion_step": null,
-  "champions": [],
+  "champions": [
+    {
+      "id": "6",
+      "name": "Abrams",
+      "slug": "abrams",
+      "icon_url": "/static/hero-art/abrams.webp",
+      "taken": true
+    },
+    {
+      "id": "77",
+      "name": "Apollo",
+      "slug": "apollo",
+      "icon_url": "/static/hero-art/apollo.webp",
+      "taken": false
+    },
+    {
+      "id": "88",
+      "name": "Baba",
+      "slug": "baba",
+      "icon_url": "/static/hero-art/baba.webp",
+      "taken": false
+    },
+    {
+      "id": "15",
+      "name": "Bebop",
+      "slug": "bebop",
+      "icon_url": "/static/hero-art/bebop.webp",
+      "taken": true
+    },
+    {
+      "id": "72",
+      "name": "Billy",
+      "slug": "billy",
+      "icon_url": "/static/hero-art/billy.webp",
+      "taken": false
+    },
+    {
+      "id": "16",
+      "name": "Calico",
+      "slug": "calico",
+      "icon_url": "/static/hero-art/calico.webp",
+      "taken": true
+    },
+    {
+      "id": "81",
+      "name": "Celeste",
+      "slug": "celeste",
+      "icon_url": "/static/hero-art/celeste.webp",
+      "taken": false
+    },
+    {
+      "id": "78",
+      "name": "Deadman Danny",
+      "slug": "deadman-danny",
+      "icon_url": "/static/hero-art/deadman-danny.webp",
+      "taken": false
+    },
+    {
+      "id": "64",
+      "name": "Drifter",
+      "slug": "drifter",
+      "icon_url": "/static/hero-art/drifter.webp",
+      "taken": false
+    },
+    {
+      "id": "11",
+      "name": "Dynamo",
+      "slug": "dynamo",
+      "icon_url": "/static/hero-art/dynamo.webp",
+      "taken": true
+    },
+    {
+      "id": "76",
+      "name": "Graves",
+      "slug": "graves",
+      "icon_url": "/static/hero-art/graves.webp",
+      "taken": false
+    },
+    {
+      "id": "17",
+      "name": "Grey Talon",
+      "slug": "grey-talon",
+      "icon_url": "/static/hero-art/grey-talon.webp",
+      "taken": true
+    },
+    {
+      "id": "13",
+      "name": "Haze",
+      "slug": "haze",
+      "icon_url": "/static/hero-art/haze.webp",
+      "taken": true
+    },
+    {
+      "id": "14",
+      "name": "Holliday",
+      "slug": "holliday",
+      "icon_url": "/static/hero-art/holliday.webp",
+      "taken": true
+    },
+    {
+      "id": "1",
+      "name": "Infernus",
+      "slug": "infernus",
+      "icon_url": "/static/hero-art/infernus.webp",
+      "taken": true
+    },
+    {
+      "id": "20",
+      "name": "Ivy",
+      "slug": "ivy",
+      "icon_url": "/static/hero-art/ivy.webp",
+      "taken": true
+    },
+    {
+      "id": "12",
+      "name": "Kelvin",
+      "slug": "kelvin",
+      "icon_url": "/static/hero-art/kelvin.webp",
+      "taken": true
+    },
+    {
+      "id": "4",
+      "name": "Lady Geist",
+      "slug": "lady-geist",
+      "icon_url": "/static/hero-art/lady-geist.webp",
+      "taken": true
+    },
+    {
+      "id": "31",
+      "name": "Lash",
+      "slug": "lash",
+      "icon_url": "/static/hero-art/lash.webp",
+      "taken": false
+    },
+    {
+      "id": "8",
+      "name": "McGinnis",
+      "slug": "mcginnis",
+      "icon_url": "/static/hero-art/mcginnis.webp",
+      "taken": true
+    },
+    {
+      "id": "63",
+      "name": "Mina",
+      "slug": "mina",
+      "icon_url": "/static/hero-art/mina.webp",
+      "taken": false
+    },
+    {
+      "id": "52",
+      "name": "Mirage",
+      "slug": "mirage",
+      "icon_url": "/static/hero-art/mirage.webp",
+      "taken": false
+    },
+    {
+      "id": "18",
+      "name": "Mo & Krill",
+      "slug": "mo-and-krill",
+      "icon_url": "/static/hero-art/mo-and-krill.webp",
+      "taken": true
+    },
+    {
+      "id": "87",
+      "name": "Nurse Harrow",
+      "slug": "nurse-harrow",
+      "icon_url": "/static/hero-art/nurse-harrow.webp",
+      "taken": false
+    },
+    {
+      "id": "67",
+      "name": "Paige",
+      "slug": "paige",
+      "icon_url": "/static/hero-art/paige.webp",
+      "taken": false
+    },
+    {
+      "id": "10",
+      "name": "Paradox",
+      "slug": "paradox",
+      "icon_url": "/static/hero-art/paradox.webp",
+      "taken": true
+    },
+    {
+      "id": "50",
+      "name": "Pocket",
+      "slug": "pocket",
+      "icon_url": "/static/hero-art/pocket.webp",
+      "taken": false
+    },
+    {
+      "id": "84",
+      "name": "Rat King",
+      "slug": "rat-king",
+      "icon_url": "/static/hero-art/rat-king.webp",
+      "taken": false
+    },
+    {
+      "id": "79",
+      "name": "Rem",
+      "slug": "rem",
+      "icon_url": "/static/hero-art/rem.webp",
+      "taken": false
+    },
+    {
+      "id": "2",
+      "name": "Seven",
+      "slug": "seven",
+      "icon_url": "/static/hero-art/seven.webp",
+      "taken": true
+    },
+    {
+      "id": "19",
+      "name": "Shiv",
+      "slug": "shiv",
+      "icon_url": "/static/hero-art/shiv.webp",
+      "taken": true
+    },
+    {
+      "id": "80",
+      "name": "Silver",
+      "slug": "silver",
+      "icon_url": "/static/hero-art/silver.webp",
+      "taken": false
+    },
+    {
+      "id": "60",
+      "name": "Sinclair",
+      "slug": "sinclair",
+      "icon_url": "/static/hero-art/sinclair.webp",
+      "taken": false
+    },
+    {
+      "id": "85",
+      "name": "Solomon",
+      "slug": "solomon",
+      "icon_url": "/static/hero-art/solomon.webp",
+      "taken": false
+    },
+    {
+      "id": "69",
+      "name": "The Doorman",
+      "slug": "the-doorman",
+      "icon_url": "/static/hero-art/the-doorman.webp",
+      "taken": false
+    },
+    {
+      "id": "65",
+      "name": "Venator",
+      "slug": "venator",
+      "icon_url": "/static/hero-art/venator.webp",
+      "taken": false
+    },
+    {
+      "id": "66",
+      "name": "Victor",
+      "slug": "victor",
+      "icon_url": "/static/hero-art/victor.webp",
+      "taken": false
+    },
+    {
+      "id": "3",
+      "name": "Vindicta",
+      "slug": "vindicta",
+      "icon_url": "/static/hero-art/vindicta.webp",
+      "taken": true
+    },
+    {
+      "id": "86",
+      "name": "Violet",
+      "slug": "violet",
+      "icon_url": "/static/hero-art/violet.webp",
+      "taken": false
+    },
+    {
+      "id": "35",
+      "name": "Viscous",
+      "slug": "viscous",
+      "icon_url": "/static/hero-art/viscous.webp",
+      "taken": false
+    },
+    {
+      "id": "58",
+      "name": "Vyper",
+      "slug": "vyper",
+      "icon_url": "/static/hero-art/vyper.webp",
+      "taken": false
+    },
+    {
+      "id": "25",
+      "name": "Warden",
+      "slug": "warden",
+      "icon_url": "/static/hero-art/warden.webp",
+      "taken": false
+    },
+    {
+      "id": "7",
+      "name": "Wraith",
+      "slug": "wraith",
+      "icon_url": "/static/hero-art/wraith.webp",
+      "taken": true
+    },
+    {
+      "id": "27",
+      "name": "Yamato",
+      "slug": "yamato",
+      "icon_url": "/static/hero-art/yamato.webp",
+      "taken": false
+    }
+  ],
   "coinflip": {
     "winner": "B",
     "winner_choice": "archmother",
@@ -746,6 +1055,14 @@
     "checked_in": false,
     "can_request_sub": false,
     "swap_give": [],
-    "swap_take": []
+    "swap_take": [],
+    "can_wish": false
+  },
+  "wishes": [],
+  "chat": {
+    "scope": "team",
+    "open": false,
+    "closed_reason": "Team chat closed when the game ended.",
+    "messages": []
   }
 }

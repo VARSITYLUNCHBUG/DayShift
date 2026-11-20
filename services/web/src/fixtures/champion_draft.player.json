@@ -804,6 +804,80 @@
     "checked_in": false,
     "can_request_sub": true,
     "swap_give": [],
-    "swap_take": []
+    "swap_take": [],
+    "can_wish": true
+  },
+  "wishes": [
+    {
+      "player_id": "2",
+      "champion_id": "7",
+      "rank": 1
+    },
+    {
+      "player_id": "2",
+      "champion_id": "8",
+      "rank": 2
+    },
+    {
+      "player_id": "3",
+      "champion_id": "1",
+      "rank": 1
+    },
+    {
+      "player_id": "3",
+      "champion_id": "2",
+      "rank": 2
+    },
+    {
+      "player_id": "3",
+      "champion_id": "3",
+      "rank": 3
+    },
+    {
+      "player_id": "6",
+      "champion_id": "4",
+      "rank": 1
+    },
+    {
+      "player_id": "6",
+      "champion_id": "1",
+      "rank": 2
+    },
+    {
+      "player_id": "7",
+      "champion_id": "6",
+      "rank": 1
+    }
+  ],
+  "chat": {
+    "scope": "team",
+    "open": true,
+    "closed_reason": null,
+    "messages": [
+      {
+        "id": "1",
+        "player_id": "3",
+        "name": "P3",
+        "team": "A",
+        "body": "I can flex, put me wherever",
+        "at": "2026-01-05T18:58:30.000Z"
+      },
+      {
+        "id": "3",
+        "player_id": "2",
+        "name": "P2",
+        "team": "A",
+        "body": "Ban their best duo, then we take the frog.",
+        "at": "2026-01-05T18:59:04.000Z"
+      },
+      {
+        "id": "5",
+        "player_id": "6",
+        "name": "P6",
+        "team": "A",
+        "body": "ok\nI'll take mid if nobody minds",
+        "at": "2026-01-05T18:59:38.000Z"
+      }
+    ]
   }
 }

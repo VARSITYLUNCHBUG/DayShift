@@ -75,6 +75,9 @@ type Verdict = Literal["report", "confirm", "dispute"]
 # up and a captain can start it. "started": a captain started it. "none": not yet, or a lobby
 # entered by hand.
 type LobbyState = Literal["none", "making", "failed", "ready", "started"]
+# The lobby chat is everyone's, while the teams are made; a team chat is that team's own.
+type ChatScope = Literal["lobby", "team"]
+type WishRank = Literal[1, 2, 3]
 Topic = Annotated[str, Field(pattern=r"^(me|queue|live|match:[1-9][0-9]{0,18})$")]
 MatchTopic = Annotated[str, Field(pattern=r"^match:[1-9][0-9]{0,18}$")]
 
@@ -427,6 +430,32 @@ class Scoreboard(_Wire):
     players: list[ScoreboardPlayer]  # Not matched yet. A row takes a player from its own team.
 
 
+class Wish(_Wire):
+    """A hero one of the viewer's team (or the viewer) wants to play."""
+
+    player_id: Id
+    champion_id: Id
+    rank: WishRank  # 1: most wanted.
+
+
+class ChatLine(_Wire):
+    id: Id
+    player_id: Id
+    name: str
+    team: Team | None  # The sender's team, for colouring the lobby chat.
+    body: str  # Plain text: render it as text, never as HTML.
+    at: UtcTime
+
+
+class ChatView(_Wire):
+    """The one chat the viewer can see now."""
+
+    scope: ChatScope
+    open: bool  # False: read-only, and `closed_reason` says why.
+    closed_reason: str | None
+    messages: list[ChatLine]  # Oldest first, the last 100.
+
+
 class Viewer(_Wire):
     """What the page needs to know about whoever is looking."""
 
@@ -442,6 +471,7 @@ class Viewer(_Wire):
     # could ask for. Empty for everyone else.
     swap_give: list[SwapChoice]
     swap_take: list[SwapChoice]
+    can_wish: bool = False  # `wish.set` is allowed now.
 
 
 class MatchSnap(_Wire):
@@ -483,6 +513,10 @@ class MatchSnap(_Wire):
     restarted_from: Id | None
     scoreboard: Scoreboard | None  # Captains only, while names are unmatched.
     viewer: Viewer
+    # The viewer's own team's hero wishes, by player then rank. Empty for anyone else.
+    wishes: list[Wish] = Field(default_factory=list)
+    # The chat the viewer can see now: none for spectators, or once the match is over.
+    chat: ChatView | None = None
 
 
 # --- Client to server -------------------------------------------------------------------------

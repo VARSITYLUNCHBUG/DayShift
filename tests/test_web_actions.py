@@ -7,6 +7,7 @@ cases run the real ASGI app with real NOTIFYs.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -20,8 +21,10 @@ from league.domain.engine import Status
 from league.integrations import deadlock_api
 from league.models import (
     CaptainVote,
+    ChatMessage,
     Community,
     EarlyLeave,
+    HeroWish,
     Match,
     Player,
     PlayerSwap,
@@ -106,6 +109,8 @@ CONTRACT = {
     "subs.answer_offer",
     "scrims.claim",
     "scrims.start",
+    "wish.set",
+    "chat.send",
 }
 SCRIM_CHANNEL = 8200
 
@@ -442,6 +447,29 @@ def _scrim_start(league: Community, popped: Match, players: list[Player]) -> Cas
     )
 
 
+def _wish_set(league: Community, popped: Match, players: list[Player]) -> Case:
+    match = run_player_draft(vote_captains(ready_all(popped)))
+    player = _non_captain(match, "A")
+    heroes = sorted(match.champion_pool)[:2]
+
+    def check(reply: Reply) -> None:
+        rows = HeroWish.objects.filter(match=match, player=player).order_by("rank")
+        assert [row.champion_id for row in rows] == heroes[::-1]
+
+    args = {"match_id": str(match.pk), "champion_ids": [str(pk) for pk in heroes[::-1]]}
+    return Case(player, args, check)
+
+
+def _chat_send(league: Community, popped: Match, players: list[Player]) -> Case:
+    match = vote_captains(ready_all(popped))
+    player = _non_captain(match)
+    return Case(
+        player,
+        {"match_id": str(match.pk), "body": "  gl hf  "},
+        lambda r: assert_(ChatMessage.objects.get(match=match, player=player).body == "gl hf"),
+    )
+
+
 def assert_(condition: object) -> None:
     assert condition
 
@@ -473,6 +501,8 @@ CASES: dict[str, Callable[[Community, Match, list[Player]], Case]] = {
     "subs.answer_offer": _sub_answer_offer,
     "scrims.claim": _scrim_claim,
     "scrims.start": _scrim_start,
+    "wish.set": _wish_set,
+    "chat.send": _chat_send,
 }  # `draft.api_start` waits on deadlock-api, so it has tests of its own below.
 
 
@@ -546,6 +576,28 @@ def test_refusals_come_back_as_plain_text(league: Community, popped: Match) -> N
         waiting = match.captain_of("B").player
     pick = {"match_id": match_id, "step_index": match.step_index, "player_id": "1"}
     assert act(waiting, "draft.pick_player", pick).error == "It's not your turn to pick a player."
+
+
+def test_wish_and_chat_refusals_come_back_in_words(popped: Match) -> None:
+    match = run_player_draft(vote_captains(ready_all(popped)))
+    player = _non_captain(match, "A")
+    match_id = str(match.pk)
+    heroes = [str(pk) for pk in sorted(match.champion_pool)[:4]]
+    wish = {"match_id": match_id, "champion_ids": heroes}
+    assert act(player, "wish.set", wish).error == "Wish for up to 3 heroes."
+    twice = {"match_id": match_id, "champion_ids": [heroes[0], heroes[0]]}
+    assert act(player, "wish.set", twice).error == "Wish for each hero only once."
+    assert act(player, "chat.send", {"match_id": match_id, "body": "x" * 501}).error == (
+        "Keep it to 500 characters."
+    )
+    for number in range(5):
+        ok(act(player, "chat.send", {"match_id": match_id, "body": f"line {number}"}))
+    assert act(player, "chat.send", {"match_id": match_id, "body": "more"}).error == (
+        "Slow down a little."
+    )
+    outsider = make_player(50)
+    assert not act(outsider, "chat.send", {"match_id": match_id, "body": "hi"}).ok
+    assert not act(outsider, "wish.set", {"match_id": match_id, "champion_ids": []}).ok
 
 
 def test_the_host_enters_a_code_only_once_the_bot_cant(popped: Match) -> None:
@@ -640,6 +692,10 @@ def test_a_cooldown_refusal_reads_as_plain_text(league: Community) -> None:
         ("draft.lobby_code", {"match_id": "1", "code": "x" * 33}),
         ("results.dispute", {"match_id": "1", "note": "x" * 501}),
         ("queue.join", {"anything": 1}),
+        ("wish.set", {"match_id": "1", "champion_ids": ["frog"]}),
+        ("wish.set", {"match_id": "1", "champion_ids": ["1"] * 13}),
+        ("chat.send", {"match_id": "1"}),
+        ("chat.send", {"match_id": "1", "body": "x" * 4001}),
     ],
 )
 def test_bad_arguments_are_refused_before_any_call(
@@ -770,6 +826,35 @@ def test_other_sockets_hear_the_change_by_notification(
         )
         await _acked(actor, "r")
         await until(watcher, snap(topic, lambda m: any(p["is_ready"] for p in m["players"])))
+
+    run(test)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_team_chat_reaches_the_team_and_not_the_other(popped: Match) -> None:
+    match = to_champion_draft(popped)
+    sender = _non_captain(match, "A")
+    mate, rival = match.captain_of("A").player, match.captain_of("B").player
+
+    async def test() -> None:
+        topic = f"match:{match.pk}"
+        own, ours, theirs = await signed_in(sender), await signed_in(mate), await signed_in(rival)
+        for ws in (own, ours, theirs):
+            await subscribe(ws, topic)
+        await listening()
+        args = {"match_id": str(match.pk), "body": "push mid"}
+        await own.send_json_to({"t": "act", "id": "c", "name": "chat.send", "args": args})
+        ack, _ = await _acked(own, "c")
+        assert ack["ok"], ack
+
+        def heard(data: Msg) -> bool:
+            lines = (data["chat"] or {}).get("messages", [])
+            return any(line["body"] == "push mid" for line in lines)
+
+        await until(ours, snap(topic, heard))
+        after = await until(theirs, snap(topic))
+        assert after["data"]["chat"]["scope"] == "team"
+        assert "push mid" not in json.dumps(after)
 
     run(test)
 

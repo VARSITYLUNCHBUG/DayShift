@@ -292,6 +292,55 @@
     "checked_in": false,
     "can_request_sub": true,
     "swap_give": [],
-    "swap_take": []
+    "swap_take": [],
+    "can_wish": false
+  },
+  "wishes": [],
+  "chat": {
+    "scope": "lobby",
+    "open": true,
+    "closed_reason": null,
+    "messages": [
+      {
+        "id": "1",
+        "player_id": "2",
+        "name": "P2",
+        "team": "A",
+        "body": "gl hf everyone",
+        "at": "2026-01-05T18:58:47.000Z"
+      },
+      {
+        "id": "2",
+        "player_id": "3",
+        "name": "P3",
+        "team": "A",
+        "body": "thanks for the pick!",
+        "at": "2026-01-05T18:59:04.000Z"
+      },
+      {
+        "id": "3",
+        "player_id": "4",
+        "name": "P4",
+        "team": null,
+        "body": "I play anything, pick me",
+        "at": "2026-01-05T18:59:21.000Z"
+      },
+      {
+        "id": "4",
+        "player_id": "1",
+        "name": "P1",
+        "team": "B",
+        "body": "Noted. <b>No promises</b> & no tilting",
+        "at": "2026-01-05T18:59:38.000Z"
+      },
+      {
+        "id": "5",
+        "player_id": "5",
+        "name": "P5",
+        "team": null,
+        "body": "first time here, be nice :)",
+        "at": "2026-01-05T18:59:55.000Z"
+      }
+    ]
   }
 }

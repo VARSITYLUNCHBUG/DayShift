@@ -804,6 +804,9 @@
     "checked_in": false,
     "can_request_sub": false,
     "swap_give": [],
-    "swap_take": []
-  }
+    "swap_take": [],
+    "can_wish": false
+  },
+  "wishes": [],
+  "chat": null
 }

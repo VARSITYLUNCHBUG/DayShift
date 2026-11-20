@@ -27,6 +27,7 @@ from league.integrations import deadlock_api
 from league.models import Community, Match, Player, ScoreboardRead, SubOffer, SubRequest
 from league.models.moderation import PenaltyKind
 from league.services import (
+    chat,
     draft,
     early_leave,
     live,
@@ -38,6 +39,7 @@ from league.services import (
     standing,
     subs,
     swaps,
+    wishes,
 )
 from league.web.live import schema as s
 from league.web.live.dbpool import web_db
@@ -199,6 +201,17 @@ class SwapProposeArgs(MatchArgs):
 class SwapAnswerArgs(MatchArgs):
     swap_id: PkId
     accept: bool
+
+
+class WishArgs(MatchArgs):
+    # Most wanted first. The service refuses more than three, or a hero twice, in words: the
+    # wider limit here only keeps out nonsense.
+    champion_ids: Annotated[list[PkId], Field(max_length=12)]
+
+
+class ChatArgs(MatchArgs):
+    # The service trims it and refuses it, in words, if it's empty or too long once trimmed.
+    body: Annotated[str, Field(max_length=4000)]
 
 
 # --- Scope: only the web's own server ----------------------------------------------------------
@@ -372,6 +385,23 @@ def _swap_propose(who: Actor, args: SwapProposeArgs) -> Done:
 def _swap_answer(who: Actor, args: SwapAnswerArgs) -> Done:
     match_id = _match_here(who, args.match_id)
     swaps.answer(match_id, who.player, args.swap_id, args.accept)
+    return _match_done(match_id)
+
+
+# --- Wishes and chat ---------------------------------------------------------------------------
+
+
+@_action("wish.set", WishArgs)
+def _wish_set(who: Actor, args: WishArgs) -> Done:
+    match_id = _match_here(who, args.match_id)
+    wishes.set_wishes(match_id, who.player, args.champion_ids)
+    return _match_done(match_id)
+
+
+@_action("chat.send", ChatArgs)
+def _chat_send(who: Actor, args: ChatArgs) -> Done:
+    match_id = _match_here(who, args.match_id)
+    chat.send(match_id, who.player, args.body)
     return _match_done(match_id)
 
 

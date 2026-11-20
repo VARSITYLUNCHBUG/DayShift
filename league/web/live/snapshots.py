@@ -6,11 +6,13 @@ view even while the bot writes. They call the same read models the Discord board
 
 A match is built once per change (`build_match`) and projected per viewer (`project_match`),
 which fills in `viewer`, hides the lobby code from anyone not on the roster, and adds whatever
-only the viewer's team may see (`MatchBody.by_team`).
+only the roster (`MatchBody.roster_only`: the lobby chat) or only the viewer's team
+(`MatchBody.by_team`: its chat and hero wishes) may see.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
@@ -26,6 +28,7 @@ from league.domain.mode_schema import parse_mode
 from league.models import (
     CaptainVote,
     Champion,
+    ChatScope,
     Community,
     Match,
     MatchParticipant,
@@ -40,6 +43,7 @@ from league.models.matches import MatchKind
 from league.models.subs import UNRESOLVED, OfferSource, OfferStatus, SubOffer, SubRequest, SubStatus
 from league.services import (
     boards,
+    chat,
     community,
     leaderboards,
     lobby,
@@ -49,6 +53,7 @@ from league.services import (
     queue,
     runtime,
     standing,
+    wishes,
 )
 from league.web import heroes
 from league.web.live import schema as s
@@ -415,6 +420,9 @@ class MatchBody:
     swap_choices: dict[str, list[s.SwapChoice]] = field(default_factory=dict)
     # MatchSnap fields only a team's own players see (its chat, its hero wishes), by team.
     by_team: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # MatchSnap fields every player on the roster sees, and nobody else (the lobby chat).
+    roster_only: dict[str, Any] = field(default_factory=dict)
+    wishers: frozenset[int] = frozenset()  # Players who may change their hero wishes now.
 
 
 _NO_VIEWER = s.Viewer(
@@ -428,6 +436,7 @@ _NO_VIEWER = s.Viewer(
     can_request_sub=False,
     swap_give=[],
     swap_take=[],
+    can_wish=False,
 )
 
 
@@ -441,7 +450,7 @@ def build_match(match_id: int) -> MatchBody | None:
         if not Match.objects.filter(pk=match_id).exists():
             return None
         state = boards.board_state(match_id)
-        return _body(
+        body = _body(
             state,
             _votes(state),
             responses=_responses(match_id),
@@ -450,6 +459,100 @@ def build_match(match_id: int) -> MatchBody | None:
             subs_done=_subs_done(match_id),
             rating_label=leaderboards.label(community_id),
         )
+        return _with_web_only(body, state)
+
+
+# --- What only the web has: hero wishes and the chats -----------------------------------------
+
+
+def _with_web_only(body: MatchBody, state: boards.BoardState) -> MatchBody:
+    """Add each team's wishes and chat, the lobby chat, and the heroes the wishes name."""
+    teams = {line.player_id: line.team for line in state.players if line.team in {"A", "B"}}
+    by_team: dict[str, dict[str, Any]] = {"A": {}, "B": {}}
+    snap = body.snap
+    if wishes.shown(state.kind, state.status):
+        for team, rows in _wishes(state.match_id, state, teams).items():
+            by_team[team]["wishes"] = rows
+        if not snap.champions:
+            # Outside the hero draft the board has no grid, but the wishes still need their
+            # heroes: the coinflip's wish picker, and the team sheet afterwards.
+            snap = snap.model_copy(update={"champions": _pool(state.match_id, snap)})
+    roster_only: dict[str, Any] = {}
+    room = chat.room(state.kind, state.status)
+    if room is not None and room.kind == "lobby":
+        roster_only["chat"] = _chat_view(state.match_id, room, ChatScope.LOBBY)
+    elif room is not None:
+        for team in ("A", "B"):
+            scope = chat.scope_of("team", team)
+            assert scope is not None
+            by_team[team]["chat"] = _chat_view(state.match_id, room, scope)
+    wishers = frozenset(teams) if wishes.can_wish(state.kind, state.status) else frozenset()
+    return dataclasses.replace(
+        body,
+        snap=snap,
+        by_team={team: fields for team, fields in by_team.items() if fields},
+        roster_only=roster_only,
+        wishers=wishers,
+    )
+
+
+def _wishes(
+    match_id: int, state: boards.BoardState, teams: dict[int, str]
+) -> dict[str, list[s.Wish]]:
+    """Each team's wishes, from whoever is on it now: a swapped player's go with them."""
+    out: dict[str, list[s.Wish]] = {"A": [], "B": []}
+    roster = [line.player_id for line in state.players if line.player_id in teams]
+    for row in wishes.of_players(match_id, roster):
+        out[teams[row.player_id]].append(
+            s.Wish(
+                player_id=str(row.player_id),
+                champion_id=str(row.champion_id),
+                rank=cast(s.WishRank, row.rank),
+            )
+        )
+    return out
+
+
+def _pool(match_id: int, snap: s.MatchSnap) -> list[s.ChampionChoice]:
+    """The match's heroes as the hero draft's grid lists them, by name."""
+    pool = Match.objects.filter(pk=match_id).values_list("champion_pool", flat=True).first()
+    used = {entry.champion.id for entry in snap.draft if entry.champion is not None}
+    return [
+        s.ChampionChoice(
+            id=str(row.pk),
+            name=row.name,
+            slug=row.slug,
+            icon_url=heroes.icon_url(row.slug, row.icon_url),
+            taken=str(row.pk) in used,
+        )
+        for row in Champion.objects.filter(pk__in=pool or []).order_by("name")
+    ]
+
+
+def _chat_view(match_id: int, room: chat.Room, scope: ChatScope) -> s.ChatView:
+    lines = chat.latest(match_id, scope)
+    # Each sender's team now, the subbed-out included: their lines stay.
+    teams = dict(
+        MatchParticipant.objects.filter(
+            match_id=match_id, player_id__in={line.player_id for line in lines}
+        ).values_list("player_id", "team")
+    )
+    return s.ChatView(
+        scope=room.kind,
+        open=room.open,
+        closed_reason=room.closed_reason,
+        messages=[
+            s.ChatLine(
+                id=str(line.pk),
+                player_id=str(line.player_id),
+                name=line.player.display_name,
+                team=_team(teams.get(line.player_id, "")),
+                body=line.body,
+                at=line.created_at,
+            )
+            for line in lines
+        ],
+    )
 
 
 def _subs_done(match_id: int) -> list[s.SubDone]:
@@ -826,6 +929,7 @@ def project_match(body: MatchBody, viewer_player_id: int | None) -> s.MatchSnap:
         update={
             # Matching names is for captains (`ocr.can_map`); nobody else gets the names.
             "scoreboard": snap.scoreboard if me.is_captain else None,
+            **body.roster_only,
             **(body.by_team.get(me.team, {}) if me.team is not None else {}),
             "viewer": s.Viewer(
                 is_player=True,
@@ -838,6 +942,7 @@ def project_match(body: MatchBody, viewer_player_id: int | None) -> s.MatchSnap:
                 can_request_sub=body.can_request_sub and viewer_player_id not in body.leaving,
                 swap_give=give,
                 swap_take=take,
+                can_wish=viewer_player_id in body.wishers,
             ),
         }
     )

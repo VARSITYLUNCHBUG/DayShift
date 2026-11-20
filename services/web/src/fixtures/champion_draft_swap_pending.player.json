@@ -771,6 +771,14 @@
     "checked_in": false,
     "can_request_sub": true,
     "swap_give": [],
-    "swap_take": []
+    "swap_take": [],
+    "can_wish": true
+  },
+  "wishes": [],
+  "chat": {
+    "scope": "team",
+    "open": true,
+    "closed_reason": null,
+    "messages": []
   }
 }

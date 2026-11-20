@@ -23,6 +23,7 @@ from league.models import Champion, Community, Match, Player, SteamAccount
 from league.models.moderation import PenaltyKind
 from league.services import (
     boards,
+    chat,
     common,
     draft,
     early_leave,
@@ -35,6 +36,7 @@ from league.services import (
     scrims,
     subs,
     swaps,
+    wishes,
 )
 from league.web.live import actions, dbpool, schema, snapshots
 from league.web.text import plain
@@ -667,6 +669,38 @@ def test_team_only_fields_reach_only_that_team(popped: Match) -> None:
     assert snapshots.project_match(body, a).mode_name == "secret"
     assert snapshots.project_match(body, b).mode_name != "secret"
     assert snapshots.project_match(body, None).mode_name != "secret"
+
+
+def test_roster_only_fields_reach_the_roster_and_nobody_else(popped: Match) -> None:
+    """The lobby chat's way in: `roster_only` goes to every player in the match, team or not."""
+    match = vote_captains(ready_all(popped))
+    body = dataclasses.replace(_body(match), roster_only={"mode_name": "ours"})
+    undrafted = match.participants.filter(team="").order_by("id").first()
+    assert undrafted is not None
+    assert snapshots.project_match(body, undrafted.player_id).mode_name == "ours"
+    assert snapshots.project_match(body, make_player(50).pk).mode_name != "ours"
+    assert snapshots.project_match(body, None).mode_name != "ours"
+
+
+def test_chat_lines_and_wishes_on_the_wire(popped: Match) -> None:
+    match = to_champion_draft(popped)
+    player = match.participants.filter(team="A", is_captain=False).order_by("id").first()
+    assert player is not None
+    hero = sorted(match.champion_pool)[0]
+    wishes.set_wishes(match.pk, player.player, [hero])
+    chat.send(match.pk, player.player, "hello")
+    data = snapshots.project_match(_body(match), player.player_id).model_dump(mode="json")
+    assert data["wishes"] == [
+        {"player_id": str(player.player_id), "champion_id": str(hero), "rank": 1}
+    ]
+    assert data["viewer"]["can_wish"] is True
+    (line,) = data["chat"]["messages"]
+    assert data["chat"]["scope"] == "team" and data["chat"]["open"]
+    assert line["at"].endswith("Z") and line["team"] == "A" and line["body"] == "hello"
+    assert isinstance(line["id"], str) and line["player_id"] == str(player.player_id)
+    public = snapshots.project_match(_body(match), None).model_dump(mode="json")
+    assert public["wishes"] == [] and public["chat"] is None
+    assert public["viewer"]["can_wish"] is False
 
 
 def test_a_missing_match_has_no_body(league: Community) -> None:

@@ -129,6 +129,9 @@
     },
     "ActionArgs": {
       "properties": {
+        "chat.send": {
+          "$ref": "#/$defs/ChatArgs"
+        },
         "draft.api_start": {
           "$ref": "#/$defs/MatchArgs"
         },
@@ -209,9 +212,13 @@
         },
         "swap.propose": {
           "$ref": "#/$defs/SwapProposeArgs"
+        },
+        "wish.set": {
+          "$ref": "#/$defs/WishArgs"
         }
       },
       "required": [
+        "chat.send",
         "draft.api_start",
         "draft.champion",
         "draft.coinflip",
@@ -238,7 +245,8 @@
         "subs.options",
         "subs.request",
         "swap.answer",
-        "swap.propose"
+        "swap.propose",
+        "wish.set"
       ],
       "title": "ActionArgs",
       "type": "object"
@@ -595,6 +603,109 @@
         "side"
       ],
       "title": "ChampionStep",
+      "type": "object"
+    },
+    "ChatArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "body": {
+          "maxLength": 4000,
+          "type": "string"
+        }
+      },
+      "required": [
+        "match_id",
+        "body"
+      ],
+      "title": "ChatArgs",
+      "type": "object"
+    },
+    "ChatLine": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "player_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Team"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "player_id",
+        "name",
+        "team",
+        "body",
+        "at"
+      ],
+      "title": "ChatLine",
+      "type": "object"
+    },
+    "ChatScope": {
+      "enum": [
+        "lobby",
+        "team"
+      ],
+      "type": "string"
+    },
+    "ChatView": {
+      "additionalProperties": false,
+      "description": "The one chat the viewer can see now.",
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/ChatScope"
+        },
+        "open": {
+          "type": "boolean"
+        },
+        "closed_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/ChatLine"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "scope",
+        "open",
+        "closed_reason",
+        "messages"
+      ],
+      "title": "ChatView",
       "type": "object"
     },
     "ClaimArgs": {
@@ -2245,6 +2356,23 @@
         },
         "viewer": {
           "$ref": "#/$defs/Viewer"
+        },
+        "wishes": {
+          "items": {
+            "$ref": "#/$defs/Wish"
+          },
+          "type": "array"
+        },
+        "chat": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -2285,7 +2413,9 @@
         "gif_url",
         "restarted_from",
         "scoreboard",
-        "viewer"
+        "viewer",
+        "wishes",
+        "chat"
       ],
       "title": "MatchSnap",
       "type": "object"
@@ -5311,6 +5441,10 @@
             "$ref": "#/$defs/SwapChoice"
           },
           "type": "array"
+        },
+        "can_wish": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
@@ -5323,7 +5457,8 @@
         "checked_in",
         "can_request_sub",
         "swap_give",
-        "swap_take"
+        "swap_take",
+        "can_wish"
       ],
       "title": "Viewer",
       "type": "object"
@@ -5351,6 +5486,59 @@
       ],
       "title": "VoteArgs",
       "type": "object"
+    },
+    "Wish": {
+      "additionalProperties": false,
+      "description": "A hero one of the viewer's team (or the viewer) wants to play.",
+      "properties": {
+        "player_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "champion_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "rank": {
+          "$ref": "#/$defs/WishRank"
+        }
+      },
+      "required": [
+        "player_id",
+        "champion_id",
+        "rank"
+      ],
+      "title": "Wish",
+      "type": "object"
+    },
+    "WishArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "match_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "type": "string"
+        },
+        "champion_ids": {
+          "items": {
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "maxItems": 12,
+          "type": "array"
+        }
+      },
+      "required": [
+        "match_id",
+        "champion_ids"
+      ],
+      "title": "WishArgs",
+      "type": "object"
+    },
+    "WishRank": {
+      "enum": [
+        1,
+        2,
+        3
+      ],
+      "type": "integer"
     },
     "YourNight": {
       "additionalProperties": false,

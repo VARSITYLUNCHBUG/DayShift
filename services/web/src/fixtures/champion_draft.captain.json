@@ -846,6 +846,80 @@
         "player_id": "11",
         "name": "P11"
       }
+    ],
+    "can_wish": true
+  },
+  "wishes": [
+    {
+      "player_id": "1",
+      "champion_id": "15",
+      "rank": 1
+    },
+    {
+      "player_id": "1",
+      "champion_id": "16",
+      "rank": 2
+    },
+    {
+      "player_id": "4",
+      "champion_id": "10",
+      "rank": 1
+    },
+    {
+      "player_id": "4",
+      "champion_id": "11",
+      "rank": 2
+    },
+    {
+      "player_id": "4",
+      "champion_id": "12",
+      "rank": 3
+    },
+    {
+      "player_id": "5",
+      "champion_id": "13",
+      "rank": 1
+    },
+    {
+      "player_id": "5",
+      "champion_id": "10",
+      "rank": 2
+    },
+    {
+      "player_id": "8",
+      "champion_id": "14",
+      "rank": 1
+    }
+  ],
+  "chat": {
+    "scope": "team",
+    "open": true,
+    "closed_reason": null,
+    "messages": [
+      {
+        "id": "2",
+        "player_id": "1",
+        "name": "P1",
+        "team": "B",
+        "body": "Who wants to go first pick?",
+        "at": "2026-01-05T18:58:47.000Z"
+      },
+      {
+        "id": "4",
+        "player_id": "5",
+        "name": "P5",
+        "team": "B",
+        "body": "me pls",
+        "at": "2026-01-05T18:59:21.000Z"
+      },
+      {
+        "id": "6",
+        "player_id": "4",
+        "name": "P4",
+        "team": "B",
+        "body": "Careful, they're stacked on hard carries",
+        "at": "2026-01-05T18:59:55.000Z"
+      }
     ]
   }
 }
