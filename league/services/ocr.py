@@ -47,7 +47,7 @@ from league.models import (
 from league.models.alerts import AlertKind
 from league.models.permissions import Area
 from league.models.scoreboards import AwardSource, MapSource, ReadStatus
-from league.services import alerts, runtime
+from league.services import alerts, live, runtime
 from league.services.common import add_effect, now
 
 logger = logging.getLogger(__name__)
@@ -375,6 +375,8 @@ def ingest(
     read.status = _status(problems, unmapped)
     read.save(update_fields=["status"])
     act_on(read)
+    # The web shows captains the names to match: a read changes the match page.
+    live.publish(live.match_topic(match.pk))
     if unmapped and match.status not in {Status.VOIDED}:
         add_effect(
             match.community,
@@ -538,4 +540,5 @@ def map_row(read_id: int, row: int, player_id: int, actor: Player, *, is_staff: 
         read.status = _status(list(read.problems), 0)
         read.save(update_fields=["status"])
         act_on(read)
+    live.publish(live.match_topic(read.match_id))
     return left

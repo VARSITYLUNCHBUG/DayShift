@@ -18,6 +18,7 @@ from league.models import (
 from league.models.matches import MatchKind
 from league.models.outbox import EffectStatus
 from league.models.subs import UNRESOLVED, OfferStatus, SubStatus
+from league.services import live
 
 
 def now() -> datetime:
@@ -45,6 +46,7 @@ def transition(
 
     Save it with `match.save_transition(...)`, alongside whatever else changed."""
     match.record_transition(target, source=source, actor=actor, deadline_at=deadline_at, at=now())
+    match.publish()
     clear_notices(match)
 
 
@@ -128,6 +130,8 @@ READY_BOARD_DELAY_SECONDS = 1.0
 def render_board(match: Match) -> None:
     from league.domain.engine import Status
 
+    # Before the render coalesces: the web refreshes on every change, not on every Discord edit.
+    match.publish()
     delay = READY_BOARD_DELAY_SECONDS if match.status == Status.READY_CHECK else 0
     request_render(match.community, "render_board", match, delay_seconds=delay)
 
@@ -138,6 +142,7 @@ QUEUE_RENDER_DELAY_SECONDS = 1.5
 
 
 def render_queue(community: Community) -> None:
+    live.publish(live.queue_topic(community.pk))
     request_render(community, "render_queue", delay_seconds=QUEUE_RENDER_DELAY_SECONDS)
 
 
@@ -148,8 +153,12 @@ def close_subs(match: Match) -> None:
     """
     moment = now()
     pending = SubOffer.objects.filter(request__match=match, status=OfferStatus.PENDING)
-    for offer_id in pending.values_list("pk", flat=True):
+    offered: list[int] = []
+    for offer_id, player_id in pending.values_list("pk", "player_id"):
         add_effect(match.community, "close_sub_offer", {"offer_id": offer_id}, match=match)
+        offered.append(player_id)
+    # Each player asked loses their offer: their own page changes.
+    live.publish(*(live.player_topic(player_id) for player_id in offered))
     pending.update(status=OfferStatus.WITHDRAWN, resolved_at=moment)
     match.sub_requests.filter(status__in=UNRESOLVED).update(
         status=SubStatus.CANCELLED, resolved_at=moment

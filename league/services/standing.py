@@ -37,6 +37,7 @@ from league.models import (
 )
 from league.models.community import effective_penalty_policy
 from league.models.moderation import CaptainStatus
+from league.services import live
 from league.services.common import now
 
 
@@ -190,6 +191,7 @@ def adjust_strikes(
         reason=reason[:500],
         created_at=now(),
     )
+    live.publish(live.player_topic(player.pk))  # The player's page shows their strikes.
     return standing(community, player)
 
 

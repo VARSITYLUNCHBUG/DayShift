@@ -45,7 +45,7 @@ from league.models.subs import (
     SubReason,
     SubStatus,
 )
-from league.services import lobby, penalties
+from league.services import live, lobby, penalties
 from league.services.common import (
     add_effect,
     now,
@@ -376,6 +376,7 @@ def _make_offer(
         created_at=moment,
     )
     add_effect(match.community, "sub_offer", {"offer_id": offer.pk}, match=match)
+    live.publish(live.player_topic(player.pk))
     return offer
 
 
@@ -556,6 +557,7 @@ def _close_offer(offer: SubOffer, status: str) -> None:
     offer.status = status
     offer.resolved_at = now()
     offer.save(update_fields=["status", "resolved_at"])
+    live.publish(live.player_topic(offer.player_id))
     close_offer_notice(offer)
 
 
@@ -732,12 +734,14 @@ def tick(moment: datetime) -> int:
 
 
 def extend_past_due(new_deadline: datetime) -> int:
-    count = SubRequest.objects.filter(status__in=UNRESOLVED, deadline_at__lt=new_deadline).update(
-        deadline_at=new_deadline
-    )
-    count += SubOffer.objects.filter(
-        status=OfferStatus.PENDING, deadline_at__lt=new_deadline
-    ).update(deadline_at=new_deadline)
+    requests = SubRequest.objects.filter(status__in=UNRESOLVED, deadline_at__lt=new_deadline)
+    offers = SubOffer.objects.filter(status=OfferStatus.PENDING, deadline_at__lt=new_deadline)
+    # The web shows these deadlines: tell it which matches and players they belong to.
+    topics = [live.match_topic(pk) for pk in requests.values_list("match_id", flat=True)]
+    topics += [live.player_topic(pk) for pk in offers.values_list("player_id", flat=True)]
+    count = requests.update(deadline_at=new_deadline)
+    count += offers.update(deadline_at=new_deadline)
+    live.publish(*topics)
     return count
 
 

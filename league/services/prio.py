@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 from django.db import transaction
 
 from league.models import MatchParticipant, Player, PrioEntry
+from league.services import live
 from league.services.common import now
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ def joined_queue(community_id: int, player: Player) -> datetime:
         entry.grace_until = None
         entry.display_name = player.display_name[:100] or entry.display_name
         entry.save(update_fields=["grace_until", "display_name"])
+        live.publish(live.queue_topic(community_id))
         return entry.queued_at
     if entry is not None:
         entry.delete()  # Held, but the hold ran out before the timer got to it.
@@ -70,6 +72,7 @@ def joined_queue(community_id: int, player: Player) -> datetime:
         display_name=player.display_name[:100] or str(player.discord_user_id),
         queued_at=moment,
     )
+    live.publish(live.queue_topic(community_id))
     return moment
 
 
@@ -78,6 +81,7 @@ def left_queue(community_id: int, user_ids: Collection[int]) -> None:
     PrioEntry.objects.filter(
         community_id=community_id, discord_user_id__in=list(user_ids), grace_until__isnull=True
     ).update(grace_until=now() + timedelta(seconds=GRACE_SECONDS))
+    live.publish(live.queue_topic(community_id))
 
 
 def requeued(community_id: int, places: Collection[tuple[Player, datetime]]) -> None:
@@ -92,16 +96,19 @@ def requeued(community_id: int, places: Collection[tuple[Player, datetime]]) -> 
                 "grace_until": None,
             },
         )
+    live.publish(live.queue_topic(community_id))
 
 
 def drop_players(community_id: int, user_ids: Collection[int]) -> None:
     """Off the list now, with no place held: put in a match, or taken out of the queue by staff."""
     PrioEntry.objects.filter(community_id=community_id, discord_user_id__in=list(user_ids)).delete()
+    live.publish(live.queue_topic(community_id))
 
 
 def drop_all(community_id: int) -> None:
     """The queue was cleared."""
     PrioEntry.objects.filter(community_id=community_id).delete()
+    live.publish(live.queue_topic(community_id))
 
 
 @transaction.atomic
@@ -111,15 +118,21 @@ def remove(community_id: int, user_id: int) -> bool:
     deleted, _ = PrioEntry.objects.filter(
         community_id=community_id, discord_user_id=user_id
     ).delete()
+    if deleted:
+        live.publish(live.queue_topic(community_id))
     return bool(deleted)
 
 
 # --- Timers ---------------------------------------------------------------------------------
 
 
+@transaction.atomic
 def tick(moment: datetime) -> int:
     """Take off anyone whose hold has run out."""
-    deleted, _ = PrioEntry.objects.filter(grace_until__lte=moment).delete()
+    expired = PrioEntry.objects.select_for_update().filter(grace_until__lte=moment)
+    communities = sorted(set(expired.values_list("community_id", flat=True)))
+    deleted, _ = expired.delete()
+    live.publish(*(live.queue_topic(community_id) for community_id in communities))
     return deleted
 
 

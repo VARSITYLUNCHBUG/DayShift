@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from league.domain.standing import ladder_rung
 from league.models import Community, Match, Penalty, Player
 from league.models.moderation import PenaltyKind
-from league.services import standing
+from league.services import live, standing
 from league.services.common import now
 
 
@@ -49,7 +49,7 @@ def issue(
     rung = ladder_rung(before, len(ladder))
     if minutes is None:
         minutes = ladder[rung]
-    return Penalty.objects.create(
+    penalty = Penalty.objects.create(
         community=community,
         player=player,
         match=match,
@@ -61,6 +61,8 @@ def issue(
         reason=reason[:500],
         issued_by=issued_by,
     )
+    live.publish(live.player_topic(player.pk))
+    return penalty
 
 
 def revoke_active(community: Community, player: Player, *, keep_strikes: bool = False) -> int:
@@ -69,9 +71,12 @@ def revoke_active(community: Community, player: Player, *, keep_strikes: bool = 
     fields: dict[str, object] = {"revoked_at": now()}
     if not keep_strikes:
         fields["strikes_waived"] = True
-    return Penalty.objects.filter(
+    revoked = Penalty.objects.filter(
         community=community, player=player, revoked_at__isnull=True, expires_at__gt=now()
     ).update(**fields)
+    if revoked:
+        live.publish(live.player_topic(player.pk))
+    return revoked
 
 
 def refusal_text(community: Community, player: Player, penalty: Penalty) -> str:

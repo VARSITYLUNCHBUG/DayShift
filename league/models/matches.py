@@ -197,11 +197,20 @@ class Match(models.Model):
     def save_transition(self, *extra_fields: str) -> None:
         """Persist a transition and any fields changed alongside it."""
         self.save(update_fields=["status", "deadline_at", "version", *extra_fields])
+        self.publish()
 
     def bump(self, *fields: str) -> None:
         """Save changes to a locked match that stay within its current status."""
         self.version += 1
         self.save(update_fields=[*fields, "version"])
+        self.publish()
+
+    def publish(self) -> None:
+        """Tell the web process this match changed (`league.services.live`). It arrives once the
+        change commits, and once per transaction however often it's sent."""
+        from league.services import live
+
+        live.publish(live.match_topic(self.pk))
 
     def captain_of(self, team: str) -> MatchParticipant:
         return self.participants.select_related("player").get(

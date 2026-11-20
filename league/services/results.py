@@ -14,7 +14,16 @@ from league.models.matches import Source
 from league.models.permissions import Area
 from league.models.results import Verdict
 from league.models.scoreboards import AwardSource
-from league.services import alerts, api_results, interim, leaderboards, ratings, runtime, standing
+from league.services import (
+    alerts,
+    api_results,
+    interim,
+    leaderboards,
+    live,
+    ratings,
+    runtime,
+    standing,
+)
 from league.services import awards as award_service
 from league.services.boards import outcome_label
 from league.services.common import (
@@ -122,7 +131,10 @@ def _end_game(match: Match) -> None:
     into the Waiting Room. The text channel stays for the confirmation and any dispute, and
     finalising never runs the voice cleanup twice. Caller holds the match lock."""
     community = lock_community(match.community_id)
-    match.participants.filter(is_active=True).update(is_active=False)
+    leaving = match.participants.filter(is_active=True)
+    # Each player's own page stops showing them in a live match.
+    live.publish(*(live.player_topic(pk) for pk in leaving.values_list("player_id", flat=True)))
+    leaving.update(is_active=False)
     add_effect(community, "cleanup_voice", match=match, dedupe_key=f"cleanup_voice:{match.pk}")
     render_queue(community)
     try_pop(community)
@@ -304,8 +316,7 @@ def on_in_progress_timeout(match: Match) -> None:
 
 def on_disputed_timeout(match: Match) -> None:
     match.deadline_at = seconds_from_now(STAFF_REPING_SECONDS)
-    match.version += 1
-    match.save(update_fields=["deadline_at", "version"])
+    match.bump("deadline_at")
     alerts.reping_dispute(match)
 
 

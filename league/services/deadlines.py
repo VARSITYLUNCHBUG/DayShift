@@ -16,6 +16,7 @@ from league.models.matches import MatchKind
 from league.services import (
     draft,
     early_leave,
+    live,
     lobby,
     prio,
     queue,
@@ -91,9 +92,11 @@ def extend_past_due(grace_seconds: int = STARTUP_GRACE_SECONDS) -> int:
     """After downtime, give everyone time to react rather than firing a burst of auto-picks."""
     moment = now()
     new_deadline = moment + timedelta(seconds=grace_seconds)
-    count = Match.objects.filter(status__in=TIMED, deadline_at__lt=new_deadline).update(
-        deadline_at=new_deadline
-    )
+    overdue = Match.objects.filter(status__in=TIMED, deadline_at__lt=new_deadline)
+    # The web counts down to these deadlines: tell it which matches moved.
+    topics = [live.match_topic(pk) for pk in overdue.values_list("pk", flat=True)]
+    count = overdue.update(deadline_at=new_deadline)
+    live.publish(*topics)
     count += subs.extend_past_due(new_deadline)
     return count
 
