@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import time
 from collections.abc import Iterable
 from typing import Any, Literal, Protocol
 
@@ -20,6 +21,20 @@ class ChannelGone(Exception):
     """The target channel or message no longer exists: treat deletion and edits as done."""
 
 
+class EditCapped(Exception):
+    """Discord refused an edit because the message is over an hour old and has been edited too
+    often since (error 30046). Post a fresh message instead, where that makes sense."""
+
+
+# Discord's code for that cap. Its HTTP status isn't documented, so match on the code alone.
+EDIT_CAPPED_CODE = 30046
+
+
+def _raise_if_capped(exc: discord.HTTPException, message_id: int) -> None:
+    if exc.code == EDIT_CAPPED_CODE:
+        raise EditCapped(str(message_id)) from exc
+
+
 class Gateway(Protocol):
     async def create_text_channel(
         self,
@@ -28,6 +43,8 @@ class Gateway(Protocol):
         name: str,
         member_ids: Iterable[int],
         staff_role_ids: Iterable[int],
+        *,
+        viewer_role_ids: Iterable[int] = (),
     ) -> int: ...
 
     async def create_voice_channel(
@@ -39,6 +56,7 @@ class Gateway(Protocol):
         staff_role_ids: Iterable[int],
         *,
         open_to_everyone: bool = False,
+        viewer_role_ids: Iterable[int] = (),
     ) -> int: ...
 
     def voice_member_ids(self, guild_id: int, channel_id: int | None) -> set[int]: ...
@@ -72,8 +90,10 @@ class Gateway(Protocol):
         file: tuple[str, bytes] | None = None,
         ping_role_ids: Iterable[int] = (),
         ping_user_ids: Iterable[int] = (),
+        reply_to: int | None = None,
     ) -> int:
-        """Post a view. Its mentions never ping, except the roles and members named here."""
+        """Post a view, as a reply to message `reply_to` if given. Its mentions never ping,
+        except the roles and members named here."""
         ...
 
     async def edit_view(
@@ -126,6 +146,17 @@ VOICE_MEMBER = discord.PermissionOverwrite(
     use_voice_activation=True,
 )
 HIDDEN = discord.PermissionOverwrite(view_channel=False, connect=False)
+# The PUGs role watches every match: it reads the text channel and sees who's in voice, but only
+# the match's own players and staff talk there. Member and staff overwrites outrank these denies.
+TEXT_VIEWER = discord.PermissionOverwrite(
+    view_channel=True,
+    read_message_history=True,
+    send_messages=False,
+    add_reactions=False,
+    create_public_threads=False,
+    create_private_threads=False,
+)
+VOICE_VIEWER = discord.PermissionOverwrite(view_channel=True, connect=False)
 # The API's overwrite type for a member (0 is a role).
 MEMBER_OVERWRITE: Literal[1] = 1
 # From 16 November 2026, a bot without VIEW_CHANNEL has channels obfuscated or left out of
@@ -157,6 +188,23 @@ def _member(user_id: int) -> discord.Object:
 class DiscordGateway:
     def __init__(self, client: discord.Client) -> None:
         self.client = client
+        # Each watched channel's newest message, from the gateway's message events and our own
+        # sends. Message IDs grow with time, so the largest seen is the last. Without an entry
+        # (a restart, a reconnect, a deleted last message) the channel's history is read once.
+        self._last_message: dict[int, int] = {}
+        # (channel, max_age) to an invite URL and when it stops being worth handing out.
+        self._invites: dict[tuple[int, int], tuple[str, float]] = {}
+
+    def note_last_message(self, channel_id: int, message_id: int) -> None:
+        if message_id > self._last_message.get(channel_id, 0):
+            self._last_message[channel_id] = message_id
+
+    def forget_last_message(self, channel_id: int, message_id: int) -> None:
+        if self._last_message.get(channel_id) == message_id:
+            del self._last_message[channel_id]
+
+    def forget_last_messages(self) -> None:
+        self._last_message.clear()
 
     def _guild(self, guild_id: int) -> discord.Guild:
         guild = self.client.get_guild(guild_id)
@@ -171,11 +219,23 @@ class DiscordGateway:
         staff_role_ids: Iterable[int],
         member_perms: discord.PermissionOverwrite,
         self_perms: discord.PermissionOverwrite,
+        viewer_role_ids: Iterable[int] = (),
+        viewer_perms: discord.PermissionOverwrite | None = None,
     ) -> dict[Any, discord.PermissionOverwrite]:
         overwrites: dict[Any, discord.PermissionOverwrite] = {
             guild.default_role: HIDDEN,
             _member(self.client.user.id): self_perms,  # type: ignore[union-attr]
         }
+        if viewer_perms is not None:
+            for role_id in viewer_role_ids:
+                # The @everyone role's ID is the guild's, so a server with no PUGs role opens
+                # to all.
+                target = (
+                    guild.default_role
+                    if role_id == guild.id
+                    else discord.Object(role_id, type=discord.Role)
+                )
+                overwrites[target] = viewer_perms
         for role_id in staff_role_ids:
             overwrites[discord.Object(id=role_id, type=discord.Role)] = member_perms
         for user_id in member_ids:
@@ -192,12 +252,16 @@ class DiscordGateway:
         name: str,
         member_ids: Iterable[int],
         staff_role_ids: Iterable[int],
+        *,
+        viewer_role_ids: Iterable[int] = (),
     ) -> int:
+        """A match text channel: its players and staff talk, `viewer_role_ids` only read."""
         guild = self._guild(guild_id)
+        overwrites = self._overwrites(
+            guild, member_ids, staff_role_ids, TEXT_MEMBER, SELF_TEXT, viewer_role_ids, TEXT_VIEWER
+        )
         channel = await guild.create_text_channel(
-            name,
-            category=self._category(guild, category_id),
-            overwrites=self._overwrites(guild, member_ids, staff_role_ids, TEXT_MEMBER, SELF_TEXT),
+            name, category=self._category(guild, category_id), overwrites=overwrites
         )
         return channel.id
 
@@ -210,11 +274,21 @@ class DiscordGateway:
         staff_role_ids: Iterable[int],
         *,
         open_to_everyone: bool = False,
+        viewer_role_ids: Iterable[int] = (),
     ) -> int:
-        """A match voice channel for its players and staff. With `open_to_everyone` (the server's
-        Open match voice setting) anyone in the server can see and join it too."""
+        """A match voice channel for its players and staff, which `viewer_role_ids` can see but
+        not join. With `open_to_everyone` (the server's Open match voice setting) anyone in the
+        server can see and join it too."""
         guild = self._guild(guild_id)
-        overwrites = self._overwrites(guild, member_ids, staff_role_ids, VOICE_MEMBER, SELF_VOICE)
+        overwrites = self._overwrites(
+            guild,
+            member_ids,
+            staff_role_ids,
+            VOICE_MEMBER,
+            SELF_VOICE,
+            viewer_role_ids,
+            VOICE_VIEWER,
+        )
         if open_to_everyone:
             overwrites[guild.default_role] = VOICE_MEMBER
         channel = await guild.create_voice_channel(
@@ -260,7 +334,15 @@ class DiscordGateway:
         channel = self._guild(guild_id).get_channel(channel_id)
         if not isinstance(channel, discord.VoiceChannel):
             return None
+        # One invite per channel, not one per player: a pop gathers twelve at once. Reused
+        # while it has at least half its life left, so a DM never carries one about to lapse.
+        key = (channel_id, max_age)
+        cached = self._invites.get(key)
+        if cached is not None and cached[1] > time.monotonic():
+            return cached[0]
         invite = await channel.create_invite(max_age=max_age, max_uses=0, unique=False)
+        reuse_until = time.monotonic() + max_age / 2 if max_age else float("inf")
+        self._invites[key] = (invite.url, reuse_until)
         return invite.url
 
     async def send_dm(self, user_id: int, view: discord.ui.LayoutView) -> int | None:
@@ -281,6 +363,9 @@ class DiscordGateway:
             await channel.get_partial_message(message_id).edit(view=view)
         except (discord.Forbidden, discord.NotFound) as exc:
             raise ChannelGone(str(message_id)) from exc
+        except discord.HTTPException as exc:
+            _raise_if_capped(exc, message_id)
+            raise
 
     async def _messageable(self, channel_id: int) -> Any:
         channel = self.client.get_channel(channel_id)
@@ -299,6 +384,7 @@ class DiscordGateway:
         file: tuple[str, bytes] | None = None,
         ping_role_ids: Iterable[int] = (),
         ping_user_ids: Iterable[int] = (),
+        reply_to: int | None = None,
     ) -> int:
         channel = await self._messageable(channel_id)
         roles = [discord.Object(id=role_id) for role_id in ping_role_ids]
@@ -311,10 +397,16 @@ class DiscordGateway:
         kwargs: dict[str, Any] = {"view": view, "allowed_mentions": allowed}
         if file is not None:
             kwargs["file"] = discord.File(io.BytesIO(file[1]), filename=file[0])
+        if reply_to is not None:
+            # A reply to a deleted message posts on its own rather than failing.
+            kwargs["reference"] = discord.MessageReference(
+                message_id=reply_to, channel_id=channel_id, fail_if_not_exists=False
+            )
         try:
             message = await channel.send(**kwargs)
         except discord.NotFound as exc:
             raise ChannelGone(str(channel_id)) from exc
+        self.note_last_message(channel_id, message.id)
         return message.id
 
     async def edit_view(
@@ -328,6 +420,9 @@ class DiscordGateway:
             await channel.get_partial_message(message_id).edit(**kwargs)
         except discord.NotFound as exc:
             raise ChannelGone(str(message_id)) from exc
+        except discord.HTTPException as exc:
+            _raise_if_capped(exc, message_id)
+            raise
 
     async def send_text(
         self,
@@ -350,6 +445,7 @@ class DiscordGateway:
             message = await channel.send(content, allowed_mentions=allowed)
         except discord.NotFound as exc:
             raise ChannelGone(str(channel_id)) from exc
+        self.note_last_message(channel_id, message.id)
         return message.id
 
     async def edit_text(
@@ -365,11 +461,18 @@ class DiscordGateway:
             )
         except discord.NotFound as exc:
             raise ChannelGone(str(message_id)) from exc
+        except discord.HTTPException as exc:
+            _raise_if_capped(exc, message_id)
+            raise
 
     async def latest_message_id(self, channel_id: int) -> int | None:
+        known = self._last_message.get(channel_id)
+        if known is not None:
+            return known
         channel = await self._messageable(channel_id)
         try:
             async for message in channel.history(limit=1):
+                self.note_last_message(channel_id, message.id)
                 return message.id
         except discord.NotFound as exc:
             raise ChannelGone(str(channel_id)) from exc
@@ -380,6 +483,7 @@ class DiscordGateway:
         channel = await self._messageable(channel_id)
         with contextlib.suppress(discord.NotFound):  # Already gone counts as deleted.
             await channel.get_partial_message(message_id).delete()
+        self.forget_last_message(channel_id, message_id)
 
     async def delete_channel(self, channel_id: int) -> None:
         try:

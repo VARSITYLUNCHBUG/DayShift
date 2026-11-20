@@ -74,7 +74,8 @@ class DraftLine:
     label: str
     auto: bool
     random_choice: bool = False
-    emoji: str = ""  # A champion's plain emoji: text never shows custom ones.
+    emoji: str = ""  # A champion's plain emoji, shown when it has no custom one.
+    emoji_id: int | None = None  # Its custom hero icon.
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +295,7 @@ def board_state(match_id: int) -> BoardState:
 
     champion_names = dict(Champion.objects.values_list("pk", "name"))
     champion_emojis = dict(Champion.objects.values_list("pk", "unicode_emoji"))
+    champion_icons = dict(Champion.objects.values_list("pk", "discord_emoji_id"))
     actions = match.draft_actions.select_related("target_player").order_by("step_index")
     for action in actions:
         if action.target_player is not None:
@@ -310,6 +312,10 @@ def board_state(match_id: int) -> BoardState:
                 action.source == "timeout",
                 action.random_choice,
                 emoji=champion_emojis.get(action.target_champion_id or 0, "") or "",
+                # The same rule as the grid's buttons: only where the bot may use them.
+                emoji_id=champion_icons.get(action.target_champion_id or 0)
+                if match.custom_emojis
+                else None,
             )
         )
 

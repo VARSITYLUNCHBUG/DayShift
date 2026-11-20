@@ -139,7 +139,8 @@ def mark_ready(match_id: int, player: Player) -> None:
         )
     match.bump()
     if match.participants.active().filter(ready_at__isnull=True).exists():
-        effects.request_ready_ping(match)
+        # The board shows who's ready. The ping isn't edited: an edit notifies nobody, and
+        # twelve of them in seconds only spent the channel's rate limit.
         render_board(match)
     else:
         begin_captain_phase(match)

@@ -77,13 +77,16 @@ def countdown(deadline_at: datetime | None) -> str:
     return f" ⌛ {relative(deadline_at)}"
 
 
-def hero_emoji_text(unicode_emoji: str) -> str:
-    """The emoji to show before a hero's name in text: its plain emoji, or nothing.
+def hero_emoji_text(unicode_emoji: str, emoji_id: int | None = None) -> str:
+    """The emoji to show before a hero's name in text: its custom hero icon when one is set, else
+    its plain emoji, or nothing.
 
-    Never a custom emoji: in message text Discord only draws one if the bot is in the server that
-    owns it, and the hero emojis belong to Bebot's server, so others see a bare ":mina:". Buttons
-    are different: they reference the emoji by ID and draw it anywhere.
+    Text draws a custom emoji only where the bot can use it: one of the bot's own application
+    emojis, or one from a server the bot is in. Staff set the IDs, so they point at icons the bot
+    can use. The name in the markup is a placeholder: Discord draws an emoji by its ID.
     """
+    if emoji_id:
+        return f"<:h:{emoji_id}>"
     return unicode_emoji
 
 

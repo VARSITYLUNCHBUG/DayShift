@@ -45,6 +45,7 @@ from tests.helpers import (
 GUILD_ID = 999
 ARCHIVE_CHANNEL = 7004
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+MATCH_ID = "122069248"  # A Deadlock match ID: the report form requires one.
 
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -378,7 +379,7 @@ def test_report_modal_journey(wired: Community) -> None:
 
     # discord.py fills these from the submitted payload; stand in for the filled components.
     modal.screenshot = MagicMock(values=[attachment()])
-    modal.deadlock_id = MagicMock(value="122069248")
+    modal.deadlock_id = MagicMock(value=MATCH_ID)
     submit = fake_interaction(captain)
     asyncio.run(modal.on_submit(submit))
 
@@ -394,12 +395,14 @@ def test_report_modal_journey(wired: Community) -> None:
     assert "other captain" in replies(submit)[0]
 
 
-def test_add_my_screenshot_still_asks_who_won(wired: Community) -> None:
+def test_add_my_report_still_asks_who_won(wired: Community) -> None:
     match = in_progress(wired)
     captain_a = match.captain_of("A").player
     captain_b = match.captain_of("B").player
     asyncio.run(
-        process_report(fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), "")
+        process_report(
+            fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), MATCH_ID
+        )
     )
     opener = fake_interaction(captain_b)
     click(opener, "report_open", match.pk)
@@ -410,7 +413,7 @@ def test_add_my_screenshot_still_asks_who_won(wired: Community) -> None:
 
     modal.winner_select = MagicMock(values=["B"])
     modal.screenshot = MagicMock(values=[attachment()])
-    modal.deadlock_id = MagicMock(value="")
+    modal.deadlock_id = MagicMock(value=MATCH_ID)
     asyncio.run(modal.on_submit(fake_interaction(captain_b)))
     assert fresh(match).status == Status.DISPUTED  # Different winners go to staff.
 
@@ -431,7 +434,7 @@ def test_bad_screenshots_are_refused_and_not_archived(
 
     async def run() -> None:
         with pytest.raises(InvalidAction, match=message):
-            await process_report(interaction, match.pk, captain, "A", file, "")
+            await process_report(interaction, match.pk, captain, "A", file, MATCH_ID)
 
     asyncio.run(run())
     interaction.archive.send.assert_not_called()
@@ -451,7 +454,9 @@ def test_confirm_and_dispute_buttons(wired: Community) -> None:
     captain_a = match.captain_of("A").player
     captain_b = match.captain_of("B").player
     asyncio.run(
-        process_report(fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), "")
+        process_report(
+            fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), MATCH_ID
+        )
     )
     click(fake_interaction(captain_b), "confirm", match.pk)
     match = fresh(match)
@@ -464,7 +469,9 @@ def test_dispute_modal_then_staff_buttons(wired: Community) -> None:
     captain_a = match.captain_of("A").player
     captain_b = match.captain_of("B").player
     asyncio.run(
-        process_report(fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), "")
+        process_report(
+            fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), MATCH_ID
+        )
     )
     opener = fake_interaction(captain_b)
     click(opener, "dispute_open", match.pk)
@@ -492,10 +499,14 @@ def test_a_disputes_role_can_rule_on_a_dispute(wired: Community) -> None:
     captain_a = match.captain_of("A").player
     captain_b = match.captain_of("B").player
     asyncio.run(
-        process_report(fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), "")
+        process_report(
+            fake_interaction(captain_a), match.pk, captain_a, "A", attachment(), MATCH_ID
+        )
     )
     asyncio.run(
-        process_report(fake_interaction(captain_b), match.pk, captain_b, "B", attachment(), "")
+        process_report(
+            fake_interaction(captain_b), match.pk, captain_b, "B", attachment(), MATCH_ID
+        )
     )
     assert fresh(match).status == Status.DISPUTED
     staffer = fake_interaction(make_player(92), role_ids=(555,))
@@ -554,7 +565,7 @@ def test_submit_command_is_the_upload_fallback(wired: Community) -> None:
         interaction,
         winner=player_commands.TEAM_CHOICES[0],
         screenshot=attachment(),
-        deadlock_match_id="",
+        deadlock_match_id=MATCH_ID,
     )
     match = fresh(match)
     assert match.status == Status.AWAITING_CONFIRMATION
@@ -568,7 +579,7 @@ def test_submit_command_refuses_non_captains(wired: Community) -> None:
         interaction,
         winner=player_commands.TEAM_CHOICES[0],
         screenshot=attachment(),
-        deadlock_match_id="",
+        deadlock_match_id=MATCH_ID,
     )
     assert "not a captain" in replies(interaction)[0]
 

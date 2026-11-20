@@ -110,6 +110,26 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     return instance
 
 
+@pytest.fixture(autouse=True)
+def _forget_leaderboard_pages() -> None:
+    """The bot remembers what its panels last showed, per process; tests start fresh."""
+    from bot.effects import flow, handlers
+
+    handlers._LEADERBOARD_SHOWN.clear()
+    handlers._QUEUE_SHOWN.clear()
+    flow.forget_shown()
+
+
+@pytest.fixture(autouse=True)
+def _queue_renders_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The queue panel waits a moment to fold bursts into one edit; tests drain at once, so they
+    skip it. test_postmatch checks the wait itself."""
+    from league.services import common
+
+    monkeypatch.setattr(common, "QUEUE_RENDER_DELAY_SECONDS", 0)
+    monkeypatch.setattr(common, "READY_BOARD_DELAY_SECONDS", 0)
+
+
 @pytest.fixture
 def league(db: None) -> Community:
     # The presets are already published: tests.parallel seeds every test database with them.

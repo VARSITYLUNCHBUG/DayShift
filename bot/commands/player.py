@@ -98,15 +98,15 @@ async def stats_command(
 )
 @app_commands.describe(
     winner="Which team won",
-    screenshot="The post-match scoreboard",
-    deadlock_match_id="Optional Deadlock match ID",
+    deadlock_match_id="The Deadlock match ID, from the scoreboard",
+    screenshot="Optional: the post-match scoreboard",
 )
 @app_commands.choices(winner=TEAM_CHOICES)
 async def submit_command(
     interaction: Interaction[Any],
     winner: TeamChoice,
-    screenshot: discord.Attachment,
-    deadlock_match_id: str = "",
+    deadlock_match_id: str,
+    screenshot: discord.Attachment | None = None,
 ) -> None:
     async def run() -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
