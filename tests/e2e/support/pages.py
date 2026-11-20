@@ -338,6 +338,10 @@ class BotModal:
         expect(self.dialog.get_by_text("1 file chosen.")).to_be_visible()
         return self
 
+    def fill(self, label: str, text: str) -> Self:
+        self.dialog.get_by_label(label).fill(text)
+        return self
+
     def submit(self, as_user: str) -> None:
         self.dialog.get_by_role("button", name=f"Submit as {as_user}").click()
         expect(self.dialog).to_be_hidden(timeout=ACTION_TIMEOUT)

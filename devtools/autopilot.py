@@ -107,6 +107,16 @@ FILE_UPLOAD = 19
 MOVED_ON = frozenset({404, 409})
 
 
+def deadlock_match_id_of(match: Match) -> str:
+    """What a captain enters as the Deadlock match ID: the one deadlock-api's lobby got, or a
+    stand-in for a lobby a captain hosted."""
+    return str(match.deadlock_match_id or DEV_DEADLOCK_MATCH_ID_BASE + match.pk)
+
+
+# Far from deadlock-api's stand-in's own IDs, so a made-up one is never mistaken for a real one.
+DEV_DEADLOCK_MATCH_ID_BASE = 990_000_000
+
+
 @dataclass(slots=True)
 class Move:
     player: Player | None
@@ -747,7 +757,8 @@ class Clicker:
             self.act(user, self._id("api_start"), "the Start match button")
         elif action == "report":
             opened = self.press(user, self._id("report_open", args["winner"]), "the report")
-            self.submit_modal(user, opened, "the report")
+            # The report's one required text field is the Deadlock match ID.
+            self.submit_modal(user, opened, "the report", deadlock_match_id_of(match))
         elif action == "confirm":
             self.act(user, self._id("confirm"), "the Confirm button")
         elif action == "dispute":
