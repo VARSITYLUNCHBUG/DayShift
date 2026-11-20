@@ -25,6 +25,7 @@ Deadlock 6v6 inhouse PUGs on Discord, from queue to results.
 [![Docker image](https://img.shields.io/badge/ghcr.io-image-2496ED?logo=docker&logoColor=white)](https://github.com/VARSITYLUNCHBUG/DayShift/pkgs/container/dayshift)
 
 [Features](#features) |
+[Web UI](#web-ui) |
 [Quick start](#quick-start) |
 [Documentation](#documentation) |
 [Player guide](https://github.com/VARSITYLUNCHBUG/DayShift/wiki) |
@@ -85,6 +86,13 @@ flowchart LR
   Deadlock's match history.
 - **A Discord simulator** and control panel, so the whole stack runs and tests without a real
   Discord server.
+
+## Web UI
+
+Players can also play on the web, signed in with Discord: the same queue, drafts, lobby and
+results as the Discord buttons, live, plus hero wishes, team chat, postgame screens and a private
+profile. The web service serves it from the same image. [The player web UI](docs/web-ui.md)
+covers sign-in, running it locally and deploying it.
 
 ## Quick start
 

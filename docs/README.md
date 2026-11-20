@@ -15,6 +15,7 @@ Everything past the [README](../README.md). Players have their own short guide i
 | [Scrims and Bebot's tools](scrims-and-tools.md) | Scrim drafts, the priority list, named pings, the error channel |
 | [The admin and staff](admin.md) | What's in the admin, runtime settings, champions and draft modes, permissions, the staff channel |
 | [Commands](commands.md) | Every slash command, by who can use it |
+| [The player web UI](web-ui.md) | Playing on the web: sign-in and privacy, live updates, running and testing it locally, deploying it |
 
 ## Hosting it
 
