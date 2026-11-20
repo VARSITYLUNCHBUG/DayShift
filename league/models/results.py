@@ -27,6 +27,9 @@ class ResultSubmission(models.Model):
     archive_channel_id = models.BigIntegerField(null=True, blank=True)
     archive_message_id = models.BigIntegerField(null=True, blank=True)
     attachment_id = models.BigIntegerField(null=True, blank=True)
+    # The screenshot's file type (png, jpg or webp), so the results post can name its image
+    # without downloading it again.
+    image_extension = models.CharField(max_length=8, blank=True)
     note = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField()
 

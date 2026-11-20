@@ -42,6 +42,16 @@ again at once, with `/deadlock check`. Awards from deadlock-api replace a captai
 scoreboard's, but never staff's. The results post shows each linked player's hero, K/D/A and damage
 from the API when there was no scoreboard read.
 
+Once both the results post and deadlock-api's data are in, whichever comes second, the bot replies
+to the post with the game's scoreboard: the winner, mode, duration and start time, then each team's
+kills and souls, and each player's K/D/A, Steam name, hero, souls, damage, objective damage and
+healing (healing counts barriers given, as the in-game scoreboard does), and the best in the match.
+It posts once per Deadlock match ID, so a corrected ID gets a reply of its own. A match none of the
+linked players were in is taken for a wrong ID and gets none.
+
+Without `DEADLOCK_API_KEY` deadlock-api rate-limits hard. A 429 waits at least as long as its
+`Retry-After` asks, and never less than 10 minutes, before the next try.
+
 ### Lobbies
 
 Always on; set the region in Runtime settings, such as `south_africa`. When the champion draft

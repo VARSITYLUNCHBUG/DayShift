@@ -228,6 +228,7 @@ def placeholder_image(match: Match, player: Player) -> ImageRef:
         archive_channel_id=match.community.archive_channel_id or 1,
         archive_message_id=number,
         attachment_id=number + 1,
+        extension="png",
     )
 
 

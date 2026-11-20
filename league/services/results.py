@@ -41,10 +41,13 @@ class ImageRef:
     archive_channel_id: int
     archive_message_id: int
     attachment_id: int
+    extension: str = ""  # png, jpg or webp.
 
 
 def _captain_team(match: Match, player: Player) -> str:
-    participant = match.participants.filter(player=player, is_captain=True, is_active=True).first()
+    # The roster, not who's still active: once a result is reported the game is over and the
+    # players are free, but the captains can still confirm or dispute it.
+    participant = match.participants.roster().filter(player=player, is_captain=True).first()
     if participant is None:
         raise NotAllowed("Only a captain can do that.")
     return participant.team
@@ -80,6 +83,7 @@ def _create_submission(
         archive_channel_id=image.archive_channel_id if image else None,
         archive_message_id=image.archive_message_id if image else None,
         attachment_id=image.attachment_id if image else None,
+        image_extension=image.extension if image else "",
         note=note[:500],
         created_at=now(),
     )
@@ -112,6 +116,18 @@ def _after_submission(
     api_results.schedule(match)  # Deduplicated: the first attempt is queued once per match ID.
 
 
+def _end_game(match: Match) -> None:
+    """A captain reported who won, so the game is over for its players, however the result is
+    settled. They leave the match, so they can queue again, and its team voices are emptied
+    into the Waiting Room. The text channel stays for the confirmation and any dispute, and
+    finalising never runs the voice cleanup twice. Caller holds the match lock."""
+    community = lock_community(match.community_id)
+    match.participants.filter(is_active=True).update(is_active=False)
+    add_effect(community, "cleanup_voice", match=match, dedupe_key=f"cleanup_voice:{match.pk}")
+    render_queue(community)
+    try_pop(community)
+
+
 def _read_scoreboard(match: Match, submission: ResultSubmission) -> None:
     if runtime.of(match.community_id).score_ocr != "off" and submission.archive_message_id:
         add_effect(
@@ -128,11 +144,14 @@ def submit_report(
     match_id: int,
     captain: Player,
     winner: str,
-    image: ImageRef,
+    image: ImageRef | None,
     deadlock_match_id: int | None = None,
     awards: dict[int, str] | None = None,
 ) -> str:
-    """Record a captain's report and return the match's new status."""
+    """Record a captain's report and return the match's new status.
+
+    The first report ends the game: everyone goes back to the Waiting Room and can queue again,
+    whether the other captain then confirms or disputes it."""
     match = Match.objects.lock(match_id)
     if match.status not in {Status.IN_PROGRESS, Status.AWAITING_CONFIRMATION}:
         raise StaleAction("This match isn't waiting for a result.")
@@ -162,8 +181,10 @@ def submit_report(
             deadline_at=seconds_from_now(mode.results.confirm_window_seconds),
         )
         match.save_transition()
+        _end_game(match)
         other = (
-            match.participants.filter(is_captain=True, is_active=True)
+            match.participants.roster()
+            .filter(is_captain=True)
             .exclude(player=captain)
             .select_related("player")
             .first()

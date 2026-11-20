@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-
-import discord
+from datetime import datetime, timedelta
+from typing import Any
 
 from bot.db import db
 from bot.effects import flow
-from bot.effects.gateway import ChannelGone, Gateway
+from bot.effects.gateway import ChannelGone, EditCapped, Gateway
 from bot.renderers import names
 from bot.renderers.alerts import match_notice, render_alert
 from bot.renderers.board import (
@@ -23,6 +24,7 @@ from bot.renderers.board import (
     render_text_dm,
     render_voice_dm,
 )
+from bot.renderers.match_stats import render_match_stats
 from bot.renderers.queue import render_queue
 from bot.renderers.results import (
     render_correction,
@@ -147,6 +149,12 @@ def _match_staff_roles(community_id: int) -> list[int]:
     return permissions.role_ids_with(community_id, permissions.MATCH_STAFF_AREAS)
 
 
+def _viewer_roles(env: Env) -> list[int]:
+    """Who can watch every match's channels: the PUGs role, or everyone in a server without one
+    (the @everyone role's ID is the guild's)."""
+    return [env.community.pug_role_id or env.guild_id]
+
+
 def _request_board(match_id: int) -> None:
     request_board(_reload(match_id))
 
@@ -166,6 +174,7 @@ async def create_lobby(env: Env) -> None:
             names.match_text(env.match_id),
             members,
             await db(_match_staff_roles, community.pk),
+            viewer_role_ids=_viewer_roles(env),
         )
         await db(effects.record_resource, env.match_id, ResourceKind.TEXT, text_id)
     # No lobby voice of its own: the Waiting Room is the lobby until teams have their channels.
@@ -175,16 +184,17 @@ async def create_lobby(env: Env) -> None:
 
 @effect(effects.READY_PING_KIND)
 async def refresh_ready_ping(env: Env) -> None:
-    """Someone pressed Ready: the ping now mentions only those who haven't. An edit pings nobody."""
+    """The ping goes once nobody is left to call (the rest missed it). It's never edited to drop
+    names: an edit notifies nobody, and the board already shows who's ready. When the check
+    moves on, the status change clears it with the other notices."""
     channel_id, message_id, unready = await db(effects.ready_ping, env.match_id)
     if channel_id is None or message_id is None:
         raise Skip("The ready check is over.")
-    if not unready:  # Everyone still here is ready (the rest missed it): nobody left to call.
-        with contextlib.suppress(ChannelGone):
-            await env.gateway.delete_message(channel_id, message_id)
-        await db(effects.mark_notice_deleted, env.match_id, message_id)
-        return
-    await env.gateway.edit_text(channel_id, message_id, READY_PING_TEXT, user_ids=unready)
+    if unready:
+        raise Skip("Players still to ready: the ping stays as it is.")
+    with contextlib.suppress(ChannelGone):
+        await env.gateway.delete_message(channel_id, message_id)
+    await db(effects.mark_notice_deleted, env.match_id, message_id)
 
 
 def channel_url(guild_id: int, channel_id: int | None) -> str | None:
@@ -395,9 +405,16 @@ class _MatchFlowStore:
         await db(_queue_delete, channel_id, message_id, match_id=self.match_id)
 
 
-async def _render_board(env: Env) -> None:
-    resources = await db(effects.resources, env.match_id)
-    channel_id = await db(effects.board_channel, env.match_id)
+async def _render_board(
+    env: Env,
+    resources: dict[str, int] | None = None,
+    channel_id: int | None = None,
+    *,
+    bottom: bool | None = None,
+) -> None:
+    if resources is None or channel_id is None:
+        resources = await db(effects.resources, env.match_id)
+        channel_id = await db(effects.board_channel, env.match_id)
     if channel_id is None:
         raise Skip("Lobby channel isn't up yet; creating it renders the board.")
     state = await db(boards.board_state, env.match_id)
@@ -409,6 +426,7 @@ async def _render_board(env: Env) -> None:
             render_board(state),
             render_pickers(state),
             log_extra={"match": env.match_id},
+            bottom=bottom,
         )
     except ChannelGone:
         if state.is_scrim:
@@ -439,7 +457,7 @@ async def move_board(env: Env) -> None:
         raise
     if bottom:
         raise Skip("The board is already last.")
-    await _render_board(env)
+    await _render_board(env, resources, channel_id, bottom=False)  # Checked just now.
 
 
 @effect("clear_notices")
@@ -452,72 +470,142 @@ async def clear_notices(env: Env) -> None:
         await db(effects.mark_notice_deleted, env.match_id, message_id)
 
 
+# What each queue panel shows, by message ID, and when it was drawn: a render that changes
+# nothing is skipped, as the board's are (bot/effects/flow.py).
+_QUEUE_SHOWN: dict[int, tuple[str, datetime]] = {}
+QUEUE_RECHECK = timedelta(hours=3)
+
+
 @effect("render_queue")
 async def render_queue_effect(env: Env) -> None:
     community = env.community
     if not community.queue_channel_id:
         raise Skip("Queue channel isn't set up.")
     view = render_queue(await db(boards.queue_view, community))
-    if community.queue_message_id:
+    fingerprint = flow.digest(view)
+    old_id = community.queue_message_id
+    if old_id:
+        shown = _QUEUE_SHOWN.get(old_id)
+        if shown is not None and shown[0] == fingerprint and now() - shown[1] < QUEUE_RECHECK:
+            return  # Nothing on the panel would change.
         try:
-            await env.gateway.edit_view(
-                community.queue_channel_id, community.queue_message_id, view
-            )
+            await env.gateway.edit_view(community.queue_channel_id, old_id, view)
+            _QUEUE_SHOWN[old_id] = (fingerprint, now())
             return
         except ChannelGone:
             logger.warning("Queue message is gone; posting a new one")
+            old_id = None
+        except EditCapped:
+            logger.info("Queue message is too old to edit again; posting a new one")
     from league.services import community as community_service
 
+    # Post, save, then delete: the panel is never missing, and its ID is never lost.
     message_id = await env.gateway.send_view(community.queue_channel_id, view)
     await db(community_service.save_wiring, community.pk, queue_message_id=message_id)
+    _QUEUE_SHOWN[message_id] = (fingerprint, now())
+    if old_id:
+        _QUEUE_SHOWN.pop(old_id, None)
+        with contextlib.suppress(ChannelGone):
+            await env.gateway.delete_message(community.queue_channel_id, old_id)
 
 
-LeaderboardPage = tuple[discord.ui.LayoutView, tuple[str, bytes]]
+@dataclass(frozen=True, slots=True)
+class _LeaderboardData:
+    channel_id: int | None
+    message_ids: list[int]
+    rows: list[Any]
+    rating_label: str
+    season_name: str
 
 
-def _leaderboard_pages(community_id: int) -> tuple[int | None, list[int], list[LeaderboardPage]]:
-    """The channel, its current messages, and each page: the view and its image. The images are
-    drawn here, on the database thread, off the bot's event loop."""
-    from bot.renderers.leaderboard import pages
+def _leaderboard_data(community_id: int) -> _LeaderboardData:
+    """Only the reads. The images are drawn in a worker thread: on the database thread they held
+    up every button press behind them, long enough for Discord to give up on some."""
     from league.services import leaderboards
 
     community = Community.objects.get(pk=community_id)
     season = Season.objects.open_for(community)
-    rows = leaderboards.table(season)
-    return (
+    return _LeaderboardData(
         community.leaderboard_channel_id,
         list(community.leaderboard_message_ids),
-        pages(rows, leaderboards.label(community), season.name, now()),
+        leaderboards.table(season),
+        leaderboards.label(community),
+        season.name,
     )
+
+
+# What each leaderboard message shows, by message ID, and when that was last confirmed. A page
+# that hasn't changed isn't edited: eight edits an hour in one channel is what Discord was
+# rate-limiting. Every few hours each page is edited anyway, which also notices one someone
+# deleted. A restart starts empty, so its first refresh edits them all.
+_LEADERBOARD_SHOWN: dict[int, tuple[str, datetime]] = {}
+LEADERBOARD_RECHECK = timedelta(hours=6)
+
+
+def _unchanged(message_id: int, key: str) -> bool:
+    shown = _LEADERBOARD_SHOWN.get(message_id)
+    return shown is not None and shown[0] == key and now() - shown[1] < LEADERBOARD_RECHECK
 
 
 @effect("render_leaderboard")
 async def render_leaderboard_effect(env: Env) -> None:
     """Every player, highest first, ten to an image and one image to a message. Edits the
-    messages already there (their image replaced in place), posts any more it needs and deletes
-    any it no longer does. Runs after each result and every hour (the bot's leaderboard loop)."""
+    messages already there whose page changed (their image replaced in place), posts any more it
+    needs and deletes any it no longer does. Runs after each result and every hour (the bot's
+    leaderboard loop)."""
+    from bot.renderers import leaderboard, leaderboard_image
     from league.services import leaderboards
 
-    channel_id, message_ids, page_list = await db(_leaderboard_pages, env.community.pk)
+    data = await db(_leaderboard_data, env.community.pk)
+    channel_id, message_ids = data.channel_id, data.message_ids
     if not channel_id:
         raise Skip("Leaderboard channel isn't set up.")
+    groups = leaderboard_image.split(data.rows)
+    moment = now()
     kept: list[int] = []
-    views = [view for view, _image in page_list]
-    for index, (view, image) in enumerate(page_list):
+    for index, group in enumerate(groups):
+        key = leaderboard.page_key(
+            group,
+            index=index,
+            count=len(groups),
+            total=len(data.rows),
+            rating_label=data.rating_label,
+            season_name=data.season_name,
+        )
+        if index < len(message_ids) and _unchanged(message_ids[index], key):
+            kept.append(message_ids[index])
+            continue
+        draw = functools.partial(
+            leaderboard.page,
+            group,
+            index=index,
+            count=len(groups),
+            total=len(data.rows),
+            rating_label=data.rating_label,
+            season_name=data.season_name,
+            updated_at=moment,
+        )
+        view, image = await asyncio.to_thread(draw)
         if index < len(message_ids):
             try:
                 await env.gateway.edit_view(channel_id, message_ids[index], view, file=image)
                 kept.append(message_ids[index])
+                _LEADERBOARD_SHOWN[message_ids[index]] = (key, moment)
                 continue
-            except ChannelGone:
-                # A message was deleted: start again from here, so the pages stay in order.
+            except (ChannelGone, EditCapped):
+                # A message was deleted, or is too old to edit again: start again from here,
+                # so the pages stay in order.
                 for stale in message_ids[index:]:
+                    _LEADERBOARD_SHOWN.pop(stale, None)
                     with contextlib.suppress(ChannelGone):
                         await env.gateway.delete_message(channel_id, stale)
                 message_ids = message_ids[:index]
-        kept.append(await env.gateway.send_view(channel_id, view, file=image))
+        posted = await env.gateway.send_view(channel_id, view, file=image)
+        kept.append(posted)
+        _LEADERBOARD_SHOWN[posted] = (key, moment)
         await db(leaderboards.save_messages, env.community.pk, kept + message_ids[len(kept) :])
-    for stale in message_ids[len(views) :]:
+    for stale in message_ids[len(groups) :]:
+        _LEADERBOARD_SHOWN.pop(stale, None)
         with contextlib.suppress(ChannelGone):
             await env.gateway.delete_message(channel_id, stale)
     await db(leaderboards.save_messages, env.community.pk, kept)
@@ -660,6 +748,7 @@ async def create_team_voice(env: Env) -> None:
             members,
             await db(_match_staff_roles, community.pk),
             open_to_everyone=await db(_open_voice, community.pk),
+            viewer_role_ids=_viewer_roles(env),
         )
         await db(effects.record_resource, env.match_id, kind, channel_id)
     await db(_enqueue_team_moves, env.match_id, assignments)
@@ -725,24 +814,23 @@ async def post_results(env: Env) -> None:
             shot.archive_channel_id, shot.archive_message_id, shot.attachment_id or 0
         )
         if fetched is not None:
-            suffix = fetched[0].rsplit(".", 1)[-1] if "." in fetched[0] else "png"
+            # The stored type, so a later edit names the image the same without downloading it.
+            fallback = fetched[0].rsplit(".", 1)[-1] if "." in fetched[0] else "png"
+            suffix = shot.image_extension or fallback
             file = (f"match-{env.match_id}.{suffix}", fetched[1])
     view = render_results(view_model, attachment_name=file[0] if file else None)
     message_id = await env.gateway.send_view(results_channel, view, file=file)
     await db(effects.record_resource, env.match_id, ResourceKind.RESULTS_MESSAGE, message_id)
+    await db(api_results.request_stats_for, env.match_id)  # deadlock-api's data may be in already.
 
 
 async def _results_attachment_name(env: Env, view_model: boards.ResultsView) -> str | None:
+    """The name the results post gave its screenshot, from the stored file type: an edit never
+    downloads the image again just to learn its extension."""
     shot = view_model.screenshot
-    if shot is None or not shot.archive_channel_id or not shot.archive_message_id:
+    if shot is None or not shot.archive_message_id or not shot.image_extension:
         return None
-    fetched = await env.gateway.fetch_attachment(
-        shot.archive_channel_id, shot.archive_message_id, shot.attachment_id or 0
-    )
-    if fetched is None:
-        return None
-    suffix = fetched[0].rsplit(".", 1)[-1] if "." in fetched[0] else "png"
-    return f"match-{env.match_id}.{suffix}"
+    return f"match-{env.match_id}.{shot.image_extension}"
 
 
 @effect("refresh_results")
@@ -822,13 +910,45 @@ async def check_match_api(env: Env) -> None:
         data = await asyncio.to_thread(deadlock_api.match_metadata, deadlock_match_id)
     except deadlock_api.ApiError as exc:
         await db(
-            api_results.record_miss, env.match_id, deadlock_match_id, "error", exc.status, str(exc)
+            api_results.record_miss,
+            env.match_id,
+            deadlock_match_id,
+            "error",
+            exc.status,
+            str(exc),
+            exc.retry_after,
         )
         return
     if data is None:
         await db(api_results.record_miss, env.match_id, deadlock_match_id, "not_found", 404, "")
         return
-    await db(api_results.record_metadata, env.match_id, deadlock_match_id, data)
+    names = await asyncio.to_thread(_steam_names, data)
+    await db(api_results.record_metadata, env.match_id, deadlock_match_id, data, names)
+
+
+def _steam_names(data: dict[str, Any]) -> dict[int, str]:
+    """The players' Steam names, for the stats reply. One request for all ten; without them
+    the reply falls back to the names linked here, so a failure costs nothing else."""
+    players = (data.get("match_info") or {}).get("players") or []
+    accounts = [int(p["account_id"]) for p in players if isinstance(p, dict) and "account_id" in p]
+    try:
+        return deadlock_api.steam_names(accounts)
+    except deadlock_api.ApiError as exc:
+        logger.info("No Steam names for the stats reply: %s", exc)
+        return {}
+
+
+@effect("post_api_stats")
+async def post_api_stats(env: Env) -> None:
+    """deadlock-api's scoreboard, as a reply under the match's results post."""
+    results_channel = env.community.results_channel_id
+    message_id = await db(effects.resource_id, env.match_id, ResourceKind.RESULTS_MESSAGE)
+    if not results_channel or not message_id:
+        raise Skip("No results post to reply to.")
+    stats = await db(api_results.match_stats, int(env.effect.payload["check_id"]))
+    if stats is None:
+        raise Skip("No stats to post.")
+    await env.gateway.send_view(results_channel, render_match_stats(stats), reply_to=message_id)
 
 
 @effect("scoreboard_notice")

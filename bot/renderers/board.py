@@ -323,7 +323,9 @@ def _champion_emoji(champion: ChampionOption) -> discord.PartialEmoji | None:
 
 def _champion_button(state: BoardState, champion: ChampionOption) -> RouteButton:
     # The colour says what a click does. Taken champions stay in place, so the grid never shifts.
-    available = ButtonStyle.danger if state.step_action == "ban" else ButtonStyle.success
+    # Discord has no orange button, and its red shouted across a whole grid, so a ban is blurple
+    # and a pick green. Taken heroes are greyed out and disabled.
+    available = ButtonStyle.primary if state.step_action == "ban" else ButtonStyle.success
     return RouteButton(
         "choose_champion",
         state.match_id,
@@ -367,7 +369,7 @@ def _champion_selects(state: BoardState) -> list[ActionRow[Any]]:
 
 def _hero_text(line: DraftLine) -> str:
     """Bebot's hero line: plain emoji, name, and "(random choice)" or "(randomed)"."""
-    emoji = style.hero_emoji_text(line.emoji)
+    emoji = style.hero_emoji_text(line.emoji, line.emoji_id)
     return style.hero_line(emoji, line.label, random_choice=line.random_choice, auto=line.auto)
 
 
@@ -411,12 +413,28 @@ def draft_summary(state: BoardState, *, final: bool) -> str:
     return "\n".join(parts)
 
 
+def _draft_teams(state: BoardState) -> str:
+    """Who's on each side while the heroes are drafted: captain first, then the players."""
+    blocks = []
+    for team in state.side_order:
+        lines = _team(state, team)
+        if not lines:
+            continue
+        side = state.side_of(team)
+        names = ", ".join(f"{'👑 ' if line.is_captain else ''}{line.name}" for line in lines)
+        blocks.append(f"{style.side_emoji(side)} **{state.team_name(team)}**: {names}")
+    return "\n".join(blocks)
+
+
 def _champion_draft(state: BoardState, box: Container[Any]) -> None:
     box.add_item(TextDisplay(draft_summary(state, final=False)))
     box.add_item(TextDisplay(style.timeline_block(state.champion_steps, state.champion_step)))
+    teams = _draft_teams(state)
     if state.is_scrim:
-        return  # Bebot's board alone: a scrim has no ratings to show.
-    # Our extras: each team's rating, and where the draft is up to.
+        if teams:  # Bebot's board, plus who's playing. A scrim has no ratings to show.
+            box.add_item(TextDisplay(teams))
+        return
+    # Our extras: the teams, each team's rating, and where the draft is up to.
     ratings = "\n".join(
         f"-# {_team_heading(state, team, _team(state, team))}"
         for team in state.side_order
@@ -424,9 +442,11 @@ def _champion_draft(state: BoardState, box: Container[Any]) -> None:
     )
     noun = "Ban" if state.step_action == "ban" else "Pick"
     progress = f"{noun} {state.turn_position} of {state.turn_total}." if state.turn_total else ""
-    box.add_item(
-        TextDisplay(f"{progress}{_next_up(state)}".strip() + (f"\n{ratings}" if ratings else ""))
+    text = "\n".join(
+        part for part in (teams, f"{progress}{_next_up(state)}".strip(), ratings) if part
     )
+    if text:
+        box.add_item(TextDisplay(text))
 
 
 def _random_button(state: BoardState) -> RouteButton:
@@ -581,14 +601,15 @@ def _awaiting(state: BoardState, box: Container[Any]) -> None:
     box.add_item(
         TextDisplay(
             f"**{state.reported_by}** reported **{state.team_name(state.reported_winner)}** won.\n"
-            "The other captain can confirm, dispute or add a screenshot. "
-            "Silence confirms when the timer runs out."
+            "The other captain can confirm, dispute or add their own report. "
+            "Silence confirms when the timer runs out.\n"
+            "-# The game is over: everyone is back in the Waiting Room and free to queue."
         )
     )
     box.add_item(
         ActionRow(
             RouteButton("confirm", state.match_id, label="Confirm", style=ButtonStyle.success),
-            RouteButton("report_open", state.match_id, label="Add my screenshot"),
+            RouteButton("report_open", state.match_id, label="Add my report"),
             RouteButton("dispute_open", state.match_id, label="Dispute", style=ButtonStyle.danger),
         )
     )

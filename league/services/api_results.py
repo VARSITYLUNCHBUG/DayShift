@@ -18,6 +18,7 @@ When the metadata arrives:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
@@ -29,6 +30,7 @@ from league.domain.engine import Status
 from league.models import ApiMatchCheck, Community, Match, MatchParticipant, SteamAccount
 from league.models.alerts import AlertKind
 from league.models.api import CheckStatus
+from league.models.matches import MatchResource, ResourceKind
 from league.models.permissions import Area
 from league.models.scoreboards import AwardSource
 from league.services import alerts, runtime, steam
@@ -38,8 +40,11 @@ logger = logging.getLogger(__name__)
 
 # Minutes to wait before each fetch. About four hours in all.
 BACKOFF_MINUTES = (0, 2, 5, 15, 30, 60, 60, 60)
+# After a 429, the next try waits at least this long. Without an API key the limits are tight.
+RATE_LIMIT_WAIT = timedelta(minutes=10)
 CHECKABLE = frozenset({Status.AWAITING_CONFIRMATION, Status.DISPUTED, Status.COMPLETED})
 HIDDEN_KING_TEAM = 0  # In match metadata, team 0 is Hidden King and team 1 the Archmother.
+NONE_LINKED = "none of the linked players were in"
 
 
 def status_lines(community: Community) -> list[str]:
@@ -65,19 +70,23 @@ def status_lines(community: Community) -> list[str]:
     return lines
 
 
-def schedule(match: Match, attempt: int = 1) -> bool:
-    """Queue a fetch, if the match has an ID, a result to check and the server wants checks."""
+def schedule(match: Match, attempt: int = 1, *, wait_at_least: timedelta | None = None) -> bool:
+    """Queue a fetch, if the match has an ID, a result to check and the server wants checks.
+    `wait_at_least` is how long deadlock-api asked us to back off after a 429."""
     if not runtime.of(match.community_id).api_results or match.deadlock_match_id is None:
         return False
     if match.status not in CHECKABLE or attempt > len(BACKOFF_MINUTES):
         return False
+    wait = timedelta(minutes=BACKOFF_MINUTES[attempt - 1])
+    if wait_at_least is not None:
+        wait = max(wait, wait_at_least)
     add_effect(
         match.community,
         "check_match_api",
         {"attempt": attempt, "deadlock_match_id": match.deadlock_match_id},
         match=match,
         dedupe_key=f"check_match_api:{match.pk}:{match.deadlock_match_id}:{attempt}",
-        run_after=now() + timedelta(minutes=BACKOFF_MINUTES[attempt - 1]),
+        run_after=now() + wait,
     )
     return True
 
@@ -128,6 +137,10 @@ def summarise(data: dict[str, Any]) -> dict[str, Any]:
                 "net_worth": player.get("net_worth"),
                 "player_damage": stats.get("player_damage"),
                 "healing": stats.get("player_healing"),
+                # The scoreboard's Healing counts barriers given too.
+                "barriering": stats.get("player_barriering"),
+                # Damage to guardians, walkers, shrines and the patron: the scoreboard's Objective.
+                "objective_damage": stats.get("boss_damage"),
                 "mvp_rank": player.get("mvp_rank"),
                 # Seconds into the match the player abandoned it. 0 or missing: they didn't.
                 "abandoned_s": player.get("abandon_match_time_s") or 0,
@@ -137,6 +150,8 @@ def summarise(data: dict[str, Any]) -> dict[str, Any]:
         "match_id": info.get("match_id"),
         "duration_s": info.get("duration_s"),
         "winning_team": info.get("winning_team"),
+        "start_time": info.get("start_time"),
+        "game_mode": info.get("game_mode"),
         "players": players,
     }
 
@@ -161,8 +176,9 @@ def _next_attempt(match: Match) -> int:
 
 @transaction.atomic
 def record_miss(match_id: int, deadlock_match_id: int, status: str, http_status: int | None,
-                reason: str) -> ApiMatchCheck:  # fmt: skip
-    """Not in deadlock-api yet, or the request failed: note it and try again later."""
+                reason: str, retry_after: int | None = None) -> ApiMatchCheck:  # fmt: skip
+    """Not in deadlock-api yet, or the request failed: note it and try again later. A rate
+    limit waits at least as long as deadlock-api asked, and never less than RATE_LIMIT_WAIT."""
     match = Match.objects.lock(match_id)
     attempt = _next_attempt(match)
     check = ApiMatchCheck.objects.create(
@@ -174,17 +190,27 @@ def record_miss(match_id: int, deadlock_match_id: int, status: str, http_status:
         problems=[reason[:300]] if reason else [],
         created_at=now(),
     )
-    schedule(match, attempt + 1)
+    wait = None
+    if http_status == 429:
+        wait = max(RATE_LIMIT_WAIT, timedelta(seconds=retry_after or 0))
+    schedule(match, attempt + 1, wait_at_least=wait)
     return check
 
 
 @transaction.atomic
-def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any]) -> ApiMatchCheck:
-    """Compare deadlock-api's match with ours, store the comparison, and act on it."""
+def record_metadata(
+    match_id: int,
+    deadlock_match_id: int,
+    data: dict[str, Any],
+    names: dict[int, str] | None = None,
+) -> ApiMatchCheck:
+    """Compare deadlock-api's match with ours, store the comparison, and act on it. `names` are
+    the players' Steam names, for the stats posted under the result."""
     from league.services import corrections, results
 
     match = Match.objects.lock(match_id)
     summary = summarise(data)
+    summary["names"] = {str(account): name for account, name in (names or {}).items() if name}
     letters = _team_letters(match)
     api_players = {p["account_id"]: p for p in summary["players"]}
     api_winner = (
@@ -220,7 +246,7 @@ def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any])
     if api_winner and claimed and api_winner != claimed:
         problems.append("deadlock-api shows the other team won")
     if linked and not present:
-        problems.append(f"none of the linked players were in Deadlock match {deadlock_match_id}")
+        problems.append(f"{NONE_LINKED} Deadlock match {deadlock_match_id}")
     if wrong_team:
         problems.append(f"{len(wrong_team)} linked player(s) were on the other team")
     status = CheckStatus.MISMATCH if problems else CheckStatus.OK
@@ -239,6 +265,7 @@ def record_metadata(match_id: int, deadlock_match_id: int, data: dict[str, Any])
         problems=problems,
         created_at=now(),
     )
+    request_stats(match, check)
     if status == CheckStatus.OK:
         steam.mark_verified(seen_right)
         awards = _awards(api_players, linked)
@@ -340,3 +367,128 @@ def api_stat_lines(match: Match) -> dict[int, str]:
         kda = f"{p.get('kills', '?')}/{p.get('deaths', '?')}/{p.get('assists', '?')}"
         lines[player_id] = f"{hero} {kda}, {_compact(p.get('player_damage'))} damage".strip()
     return lines
+
+
+# --- The stats reply under the result --------------------------------------------------------
+
+
+def _postable(check: ApiMatchCheck) -> bool:
+    """Data for this match: not a miss, and not a match none of our players were in (a wrong
+    ID, which staff correct with /deadlock check)."""
+    if check.status not in (CheckStatus.OK, CheckStatus.MISMATCH):
+        return False
+    if not (check.summary or {}).get("players"):
+        return False
+    return not any(problem.startswith(NONE_LINKED) for problem in check.problems)
+
+
+def request_stats(match: Match, check: ApiMatchCheck | None = None) -> bool:
+    """Reply to the results post with deadlock-api's stats once both the post and the data are
+    in, whichever comes second. Once per Deadlock match ID."""
+    check = check or latest_ok(match)
+    if check is None or not _postable(check):
+        return False
+    posted = MatchResource.objects.filter(
+        match=match, kind=ResourceKind.RESULTS_MESSAGE, deleted_at__isnull=True
+    ).exists()
+    if not posted:
+        return False
+    add_effect(
+        match.community,
+        "post_api_stats",
+        {"check_id": check.pk},
+        match=match,
+        dedupe_key=f"api_stats:{match.pk}:{check.deadlock_match_id}",
+    )
+    return True
+
+
+def request_stats_for(match_id: int) -> bool:
+    """Run after the results post: reply with stats that arrived before it."""
+    return request_stats(Match.objects.select_related("community").get(pk=match_id))
+
+
+@dataclass(frozen=True, slots=True)
+class StatsRow:
+    name: str
+    hero: str
+    souls: int
+    kills: int
+    deaths: int
+    assists: int
+    damage: int
+    objective: int
+    healing: int
+
+
+@dataclass(frozen=True, slots=True)
+class MatchStats:
+    deadlock_match_id: int
+    winner: str  # "hk", "am", or "" when deadlock-api doesn't say.
+    duration_s: int | None
+    start_time: int | None
+    game_mode: int | None
+    hk: list[StatsRow]
+    am: list[StatsRow]
+
+
+def _int(value: Any) -> int:
+    return value if isinstance(value, int) else 0
+
+
+def _optional_int(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def _names_here(match: Match) -> dict[int, str]:
+    """Account ID to a name for each linked account on the roster: its Steam name as /link
+    saw it, else the player's name here."""
+    names: dict[int, str] = {}
+    rows = SteamAccount.objects.filter(
+        player__matches__match=match, player__matches__removed_reason=""
+    ).select_related("player")
+    for row in rows:
+        names[row.account_id] = row.steam_name or row.player.display_name
+    return names
+
+
+def match_stats(check_id: int) -> MatchStats | None:
+    """deadlock-api's scoreboard, for the stats reply. Players go by their Steam names, as on
+    the in-game scoreboard."""
+    from league.models import Champion
+
+    check = ApiMatchCheck.objects.select_related("match").filter(pk=check_id).first()
+    if check is None or not _postable(check):
+        return None
+    summary = check.summary
+    heroes = dict(Champion.objects.values_list("pk", "name"))
+    fetched = summary.get("names") or {}
+    here = _names_here(check.match)
+    sides: dict[str, list[StatsRow]] = {"hk": [], "am": []}
+    for player in summary.get("players", []):
+        account = int(player["account_id"])
+        side = "hk" if player.get("team") == HIDDEN_KING_TEAM else "am"
+        sides[side].append(
+            StatsRow(
+                name=fetched.get(str(account)) or here.get(account) or f"Player {account}",
+                hero=heroes.get(player.get("hero_id"), "Unknown hero"),
+                souls=_int(player.get("net_worth")),
+                kills=_int(player.get("kills")),
+                deaths=_int(player.get("deaths")),
+                assists=_int(player.get("assists")),
+                damage=_int(player.get("player_damage")),
+                objective=_int(player.get("objective_damage")),
+                healing=_int(player.get("healing")) + _int(player.get("barriering")),
+            )
+        )
+    winning = summary.get("winning_team")
+    winner = "" if winning not in (0, 1) else "hk" if winning == HIDDEN_KING_TEAM else "am"
+    return MatchStats(
+        deadlock_match_id=check.deadlock_match_id,
+        winner=winner,
+        duration_s=_optional_int(summary.get("duration_s")),
+        start_time=_optional_int(summary.get("start_time")),
+        game_mode=_optional_int(summary.get("game_mode")),
+        hk=sides["hk"],
+        am=sides["am"],
+    )

@@ -256,7 +256,7 @@ def test_champion_grid_has_messages_of_its_own_below_the_board(popped: Match) ->
 def test_a_taken_champion_stays_in_place_greyed_out(popped: Match) -> None:
     match = to_champion_draft(popped)
     before = grid_buttons(boards.board_state(match.pk))
-    assert {button["style"] for button in before} == {discord.ButtonStyle.danger.value}  # Bans.
+    assert {button["style"] for button in before} == {discord.ButtonStyle.primary.value}  # Bans.
 
     step = build_plan(match.mode)[match.step_index]
     captain = match.captain_of(team_for_role(step.role, match.champion_first_pick)).player
@@ -624,10 +624,10 @@ def test_detect_image_checks_bytes(data: bytes, expected: str | None) -> None:
 
 
 def test_deadlock_match_id_parsing() -> None:
-    assert parse_deadlock_match_id("") is None
     assert parse_deadlock_match_id(" 122069248 ") == 122069248
-    with pytest.raises(InvalidAction):
-        parse_deadlock_match_id("abc")
+    for bad in ("", "  ", "abc", "0"):  # Required now: blank is refused like nonsense.
+        with pytest.raises(InvalidAction):
+            parse_deadlock_match_id(bad)
 
 
 # --- Whole flow on a fake gateway ----------------------------------------------------------
@@ -650,6 +650,8 @@ class FakeGateway:
     revoked: list[tuple[int, int]] = field(default_factory=list)
     members_seen: dict[int, list[int]] = field(default_factory=dict)
     staff_seen: dict[int, list[int]] = field(default_factory=dict)  # Staff roles per channel.
+    viewers_seen: dict[int, list[int]] = field(default_factory=dict)  # Read-only roles.
+    replies_to: dict[int, int | None] = field(default_factory=dict)  # Message it replied to.
     role_pings: list[list[int]] = field(default_factory=list)
     view_pings: dict[int, list[int]] = field(default_factory=dict)  # Roles a view pinged.
     view_user_pings: dict[int, list[int]] = field(default_factory=dict)
@@ -674,19 +676,29 @@ class FakeGateway:
             raise self.fail_next.pop(method)
 
     async def create_text_channel(
-        self, guild_id, category_id, name, member_ids, staff_role_ids
+        self, guild_id, category_id, name, member_ids, staff_role_ids, *, viewer_role_ids=()
     ) -> int:
         self._maybe_fail("create_text_channel")
         channel_id = self._id()
+        self.viewers_seen[channel_id] = list(viewer_role_ids)
         self.channels[channel_id] = name
         self.members_seen[channel_id] = list(member_ids)
         self.staff_seen[channel_id] = list(staff_role_ids)
         return channel_id
 
     async def create_voice_channel(
-        self, guild_id, category_id, name, member_ids, staff_role_ids, *, open_to_everyone=False
+        self,
+        guild_id,
+        category_id,
+        name,
+        member_ids,
+        staff_role_ids,
+        *,
+        open_to_everyone=False,
+        viewer_role_ids=(),
     ) -> int:
         channel_id = self._id()
+        self.viewers_seen[channel_id] = list(viewer_role_ids)
         self.open_voice[channel_id] = open_to_everyone
         self.channels[channel_id] = name
         self.voice[channel_id] = set()
@@ -729,12 +741,13 @@ class FakeGateway:
         self.dm_edits.append((user_id, message_id, view))
 
     async def send_view(
-        self, channel_id, view, *, file=None, ping_role_ids=(), ping_user_ids=()
+        self, channel_id, view, *, file=None, ping_role_ids=(), ping_user_ids=(), reply_to=None
     ) -> int:
         if channel_id in self.deleted:
             raise ChannelGone(str(channel_id))
         self._maybe_fail("send_view")
         message_id = self._id()
+        self.replies_to[message_id] = reply_to
         self.views[message_id] = view
         self.posted_files.append((channel_id, file))
         self.view_pings[message_id] = list(ping_role_ids)
@@ -1556,13 +1569,23 @@ def test_a_failed_board_move_does_not_ping_twice(wired: Community) -> None:
 def test_only_other_peoples_server_messages_count_as_chat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from bot.watched import ChannelWatch
+
     seen: list[int] = []
+    last: dict[int, int] = {}
     monkeypatch.setattr(effects, "note_chat", seen.append)
-    bot = SimpleNamespace(user=SimpleNamespace(id=1))
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=1),
+        watch=ChannelWatch(),  # Not loaded yet: every channel counts, as before.
+        gateway=SimpleNamespace(note_last_message=last.__setitem__),
+    )
 
     def message(guild: object, author: int, channel: int) -> Any:
         return SimpleNamespace(
-            guild=guild, author=SimpleNamespace(id=author), channel=SimpleNamespace(id=channel)
+            id=100 + channel,
+            guild=guild,
+            author=SimpleNamespace(id=author),
+            channel=SimpleNamespace(id=channel),
         )
 
     async def scenario() -> None:
@@ -1572,6 +1595,7 @@ def test_only_other_peoples_server_messages_count_as_chat(
 
     asyncio.run(scenario())
     assert seen == [7]
+    assert last == {5: 105, 7: 107}  # The bot's own message is the channel's last one too.
 
 
 # --- Subs ------------------------------------------------------------------------------------
@@ -2038,18 +2062,26 @@ def test_a_dm_nobody_can_receive_is_not_a_failure(code: int) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_the_ready_ping_drops_players_as_they_ready(wired: Community) -> None:
+def test_the_ready_ping_is_never_edited_and_goes_when_the_check_ends(
+    wired: Community,
+) -> None:
+    """Twelve Ready presses used to mean twelve ping edits, which notify nobody and only spent
+    the channel's rate limit. The board shows who's ready; the ping goes with the check."""
     gateway = FakeGateway()
     match = popped_match(wired, gateway)
     ping = resource(match, ResourceKind.READY_PING)
+    text_id = resource(match, ResourceKind.TEXT)
     everyone = [p.player for p in match.participants.select_related("player")]
     assert len(gateway.text_mentions[ping]) == 12
     lobby.mark_ready(match.pk, everyone[0])
     lobby.mark_ready(match.pk, everyone[1])
     drain(gateway)
-    left = gateway.text_mentions[ping]
-    assert len(left) == 10 and everyone[0].discord_user_id not in left
-    assert ping in gateway.edited  # An edit, so nobody is pinged again.
+    assert ping not in gateway.edited
+    assert ping in gateway.messages[text_id]
+    for player in everyone[2:]:
+        lobby.mark_ready(match.pk, player)
+    drain(gateway)
+    assert ping not in gateway.messages[text_id]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -2159,6 +2191,20 @@ def test_the_leaderboard_posts_images_then_replaces_them_in_place(wired: Communi
 
     leaderboards.request_all()
     drain(gateway)
+    # Nothing changed, so nothing is edited: that's what kept Discord rate-limiting the channel.
+    assert gateway.edited_files == {}
+
+    from bot.effects import handlers
+
+    handlers._LEADERBOARD_SHOWN.clear()  # As after a restart: the bot no longer knows.
+    leaderboards.request_all()
+    drain(gateway)
     assert Community.objects.get(pk=wired.pk).leaderboard_message_ids == message_ids
     assert set(gateway.edited_files) == set(message_ids)  # Each image replaced in place.
     assert gateway.edited_files[message_ids[0]][1].startswith(b"\x89PNG")
+
+    gateway.edited_files.clear()
+    ratings.seed_player(season, make_player(24), "high", actor=None)  # Changes every page.
+    leaderboards.request_all()
+    drain(gateway)
+    assert set(gateway.edited_files) == set(message_ids)

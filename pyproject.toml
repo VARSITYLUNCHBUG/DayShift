@@ -13,8 +13,10 @@ dependencies = [
     "pyyaml>=6",
     "whitenoise>=6.9",
     "openskill>=6.2,<7",
-    # The leaderboard images (bot/renderers/leaderboard_image.py).
+    # The leaderboard images (bot/renderers/leaderboard_image.py), and the character maps that
+    # pick a fallback font for each name's letters (bot/renderers/fonts.py).
     "pillow>=13.0.0",
+    "fonttools>=4.55",
     "uvicorn[standard]>=0.30,<1",
 ]
 

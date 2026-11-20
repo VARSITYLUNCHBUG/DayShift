@@ -8,7 +8,7 @@ page.
 
 `/leaderboard` (needs the PUG role, if one is set), `/stats`, `/queue status`, `/link`,
 `/unlink [account]`,
-`/submit` (fallback for when the report form's upload fails), `/randomdraft`, `/prio`, `/ping`,
+`/submit winner deadlock_match_id [screenshot]` (fallback for when the report form fails), `/randomdraft`, `/prio`, `/ping`,
 `/pings`.
 
 ## Staff, by area

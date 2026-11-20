@@ -368,15 +368,17 @@ def test_custom_emojis_only_on_buttons_and_only_where_allowed(league: Community)
 
     assert "123456789012345678" in {str(i) for i in emoji_ids(with_custom)}
     assert emoji_ids(without) <= {None}
-    # Discord only draws a custom emoji in text for a bot in the server that owns it.
-    draft.choose_champion(
-        with_custom.pk,
-        make_player(1),
-        _fresh(with_custom).step_index,
-        draft.available_champions(_fresh(with_custom))[0],
-    )
-    assert "<:" not in _text(with_custom)
-    assert "<:" not in str(render_random_draft(scrims.random_draft(league)).to_components())
+    # The draft's text shows the hero icons too, by the same rule as the buttons.
+    for match in (with_custom, without):
+        draft.choose_champion(
+            match.pk,
+            make_player(1),
+            _fresh(match).step_index,
+            draft.available_champions(_fresh(match))[0],
+        )
+    assert "<:h:123456789012345678>" in _text(with_custom)
+    assert "<:" not in _text(without)
+    assert "<:h:" in str(render_random_draft(scrims.random_draft(league)).to_components())
 
 
 # --- Outbox, on a fake gateway ------------------------------------------------------------------

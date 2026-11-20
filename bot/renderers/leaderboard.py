@@ -6,6 +6,7 @@ each, one image to a message, so a refresh edits each message's image in place.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Any
 
@@ -27,27 +28,65 @@ def file_name(index: int) -> str:
     return f"leaderboard-{index + 1}.png"
 
 
-def pages(
-    rows: list[Row], rating_label: str, season_name: str, updated_at: datetime
-) -> list[tuple[LayoutView, tuple[str, bytes]]]:
-    """Each message of the leaderboard: its image (ten players) and the view that shows it. The
-    last one says how to see your own place in full."""
-    pngs = leaderboard_image.images(
-        rows, season_name=season_name, rating_label=rating_label, updated_at=updated_at
+Page = tuple[LayoutView, tuple[str, bytes]]
+
+
+def page_key(
+    group: list[Row], *, index: int, count: int, total: int, rating_label: str, season_name: str
+) -> str:
+    """What a page shows, bar its "Updated" time: a refresh that changes none of it leaves that
+    message alone, which spares Discord's edit limit."""
+    content = repr((group, index, count, total, rating_label, season_name))
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def page(
+    group: list[Row],
+    *,
+    index: int,
+    count: int,
+    total: int,
+    rating_label: str,
+    season_name: str,
+    updated_at: datetime,
+) -> Page:
+    """One message of the leaderboard: its image (up to ten players) and the view that shows it.
+    The last one says how to see your own place in full. Drawing takes a moment: keep it off the
+    event loop and the database thread."""
+    png = leaderboard_image.render(
+        group,
+        season_name=season_name,
+        rating_label=rating_label,
+        total=total,
+        updated_at=updated_at,
     )
-    out = []
-    for index, png in enumerate(pngs):
-        name = file_name(index)
-        view = LayoutView(timeout=None)
-        view.add_item(MediaGallery(discord.MediaGalleryItem(f"attachment://{name}")))
-        if index == len(pngs) - 1:
-            footer: TextDisplay[Any] = TextDisplay(
-                "-# Highest first. Refreshes every hour and after each match. "
-                "`/stats` shows yours in full."
-            )
-            view.add_item(footer)
-        out.append((view, (name, png)))
-    return out
+    name = file_name(index)
+    view = LayoutView(timeout=None)
+    view.add_item(MediaGallery(discord.MediaGalleryItem(f"attachment://{name}")))
+    if index == count - 1:
+        footer: TextDisplay[Any] = TextDisplay(
+            "-# Highest first. Refreshes every hour and after each match. "
+            "`/stats` shows yours in full."
+        )
+        view.add_item(footer)
+    return view, (name, png)
+
+
+def pages(rows: list[Row], rating_label: str, season_name: str, updated_at: datetime) -> list[Page]:
+    """Every message of the leaderboard, ten players to each image."""
+    groups = leaderboard_image.split(rows)
+    return [
+        page(
+            group,
+            index=index,
+            count=len(groups),
+            total=len(rows),
+            rating_label=rating_label,
+            season_name=season_name,
+            updated_at=updated_at,
+        )
+        for index, group in enumerate(groups)
+    ]
 
 
 def page_text(view: LayoutView) -> str:
