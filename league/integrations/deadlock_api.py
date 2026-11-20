@@ -30,9 +30,12 @@ SERVER_REGIONS = (
 class ApiError(Exception):
     """A request that didn't succeed. `status` is the HTTP status, or None for a network error."""
 
-    def __init__(self, message: str, status: int | None = None) -> None:
+    def __init__(
+        self, message: str, status: int | None = None, retry_after: int | None = None
+    ) -> None:
         super().__init__(message)
         self.status = status
+        self.retry_after = retry_after  # Seconds a 429 asks us to wait, when it says.
 
     @property
     def rate_limited(self) -> bool:
@@ -58,8 +61,20 @@ def _request(method: str, path: str, **kwargs: Any) -> httpx.Response:
         raise ApiError(f"deadlock-api unreachable: {type(exc).__name__}") from exc
     if response.status_code >= 400 and response.status_code != 404:
         detail = response.text[:200].strip()
-        raise ApiError(f"deadlock-api {response.status_code}: {detail}", response.status_code)
+        raise ApiError(
+            f"deadlock-api {response.status_code}: {detail}",
+            response.status_code,
+            _retry_after(response),
+        )
     return response
+
+
+def _retry_after(response: httpx.Response) -> int | None:
+    """A 429's Retry-After, in seconds. deadlock-api sends seconds; a date form is ignored."""
+    if response.status_code != 429:
+        return None
+    raw = response.headers.get("retry-after", "").strip()
+    return int(raw) if raw.isdigit() else None
 
 
 # --- Matches ---------------------------------------------------------------------------------
