@@ -32,7 +32,6 @@ from league.domain.engine import Status
 from league.models import Match, OutboxEffect, Player
 from league.models.outbox import EffectStatus
 from league.services import deadlines, health, lobby
-from league.services import effects as effects_service
 from league.services.effects import WatchedChannels
 
 LEAGUE_DIR = Path(__file__).resolve().parent.parent / "league"
@@ -92,9 +91,9 @@ def test_the_heartbeat_waits_for_every_loop(tmp_path: Path) -> None:
 # --- The loops --------------------------------------------------------------------------------
 
 
-async def _fake_db(fn: object, *args: object, **kwargs: object) -> list[object] | None:
-    if fn is effects_service.next_due_at:
-        return None  # Nothing delayed.
+async def _fake_db(fn: object, *args: object, **kwargs: object) -> object:
+    if fn is worker_module._due_and_next:
+        return [], None  # Nothing due, nothing delayed.
     return []
 
 

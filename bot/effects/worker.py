@@ -12,6 +12,7 @@ import functools
 import logging
 import time
 from collections.abc import Callable
+from datetime import datetime
 
 import discord
 
@@ -30,6 +31,13 @@ logger = logging.getLogger(__name__)
 _PERMANENT_STATUS = {400, 401, 403, 404}
 
 
+def _due_and_next() -> tuple[list[list[OutboxEffect]], datetime | None]:
+    """What is due now and when the next delayed effect is, in one trip to the database thread.
+    The moment is taken before the look at what's due (see `effects.next_due_at`)."""
+    looked = now()
+    return effects.due_by_match(), effects.next_due_at(looked)
+
+
 class EffectWorker:
     def __init__(
         self,
@@ -44,6 +52,8 @@ class EffectWorker:
         self.on_effect_done = on_effect_done
         # One running task per lane: a match ID, or a key for work outside any match.
         self._lanes: dict[effects.Lane, asyncio.Task[int]] = {}
+        # When the next delayed effect is due, as of the last dispatch. None: nothing delayed.
+        self.next_due_at: datetime | None = None
 
     @property
     def busy_matches(self) -> set[effects.Lane]:
@@ -56,7 +66,8 @@ class EffectWorker:
         finishes, which keeps that lane's effects in order.
         """
         started = 0
-        for group in await db(effects.due_by_match):
+        groups, self.next_due_at = await db(_due_and_next)
+        for group in groups:
             key = effects.lane_of(group[0])
             if key in self._lanes:
                 continue

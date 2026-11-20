@@ -67,6 +67,7 @@ class Outbox:
 def outbox(monkeypatch: pytest.MonkeyPatch) -> Outbox:
     box = Outbox()
     monkeypatch.setattr(worker_module.effects, "due_by_match", box.due_by_match)
+    monkeypatch.setattr(worker_module.effects, "next_due_at", lambda _after: None)
     monkeypatch.setattr(worker_module.effects, "mark_started", box.mark_started)
     monkeypatch.setattr(worker_module.effects, "mark_done", box.mark_done)
     return box

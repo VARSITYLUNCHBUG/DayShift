@@ -390,10 +390,9 @@ class DayShiftBot(discord.Client):
             wait = EFFECT_IDLE_SECONDS
             try:
                 self._effects_wake.clear()
-                looked = now()  # Before the dispatch's own look at what is due (next_due_at).
-                await self.worker.dispatch()
+                await self.worker.dispatch()  # Also reads when the next delayed effect is due.
                 self.heartbeat.beat("effects")
-                wait = effect_wait(await db(effects.next_due_at, looked))
+                wait = effect_wait(self.worker.next_due_at)
                 errors.passed()
             except Exception as exc:
                 errors.failed(exc)
@@ -413,9 +412,9 @@ class DayShiftBot(discord.Client):
             return
         with log_context.bind(guild=message.guild.id):
             try:
+                # No wake: a board move is due seconds out, and the effect loop looks at what's
+                # next at least every EFFECT_IDLE_SECONDS, so it's on time without one per message.
                 await db(effects.note_chat, message.channel.id)
-                # It may have queued or put off a board move: sleep until that one instead.
-                self.wake_effects()
             except Exception:
                 logger.exception("Couldn't note chat", extra={"channel": message.channel.id})
 
