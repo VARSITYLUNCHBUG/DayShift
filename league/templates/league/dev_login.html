@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dev sign-in · DayShift</title>
+  <style nonce="{{ request.csp_nonce }}">
+    body { background: #111019; color: #F3EFE6; font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; padding: 0 1rem; }
+    h1, h2 { font-weight: 800; }
+    form { align-items: center; display: flex; flex-wrap: wrap; gap: .5rem; margin: .25rem 0; }
+    button, input { border-radius: 999px; font: inherit; min-height: 44px; padding: .4rem 1rem; }
+    button { background: #F3EFE6; border: 0; color: #111019; cursor: pointer; font-weight: 700; }
+    input { background: #1A1824; border: 1px solid #6E6789; color: #F3EFE6; }
+    :focus-visible { outline: 3px solid #FF8DC3; outline-offset: 2px; }
+    .error { color: #FF6B6B; }
+    .meta { color: #A8A2B5; font-variant-numeric: tabular-nums; }
+    ul { list-style: none; padding: 0; }
+  </style>
+</head>
+<body>
+  <h1>Dev sign-in</h1>
+  <p>Local testing only. Use a separate browser profile for each player.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <h2>New stand-in</h2>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <input name="name" placeholder="Name" maxlength="100" required aria-label="Name">
+    <button type="submit">Sign in</button>
+  </form>
+  <h2>Existing players</h2>
+  <ul>
+    {% for player in players %}
+    <li>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next }}">
+        <input type="hidden" name="player" value="{{ player.pk }}">
+        <button type="submit">{{ player.display_name }}</button>
+        <span class="meta">#{{ player.pk }}{% if player.discord_user_id < 1000 %} &middot; stand-in{% endif %}</span>
+      </form>
+    </li>
+    {% empty %}
+    <li>No players yet.</li>
+    {% endfor %}
+  </ul>
+</body>
+</html>
