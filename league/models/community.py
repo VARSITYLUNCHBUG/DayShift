@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 
 from django.contrib.postgres.fields import ArrayField
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator
 from django.db import models
 
 DEFAULT_PENALTY_POLICY = {
@@ -94,6 +96,18 @@ class RuntimeSettings(models.Model):
     max_concurrent_matches = models.PositiveSmallIntegerField(
         default=12, help_text="Ranked matches that can run at once. The queue waits beyond this."
     )
+    queue_idle_minutes = models.PositiveSmallIntegerField(
+        default=90,
+        validators=[MaxValueValidator(1440)],
+        help_text="Minutes a player can sit in the queue without checking in. Then they're "
+        "taken out, with no penalty, so they can't miss a ready check. 0 turns this off.",
+    )
+    queue_warn_minutes = models.PositiveSmallIntegerField(
+        default=5,
+        validators=[MaxValueValidator(1440)],
+        help_text='Minutes before they\'re taken out that a "Still queueing?" DM asks them to '
+        "stay in. 0: no DM. Must be less than the idle minutes.",
+    )
     auto_captain = models.BooleanField(
         default=False,
         help_text="On: captains are picked automatically, by experience and then rating. "
@@ -139,3 +153,10 @@ class RuntimeSettings(models.Model):
 
     def __str__(self) -> str:
         return f"Settings for {self.community}"
+
+    def clean(self) -> None:
+        idle, warn = self.queue_idle_minutes, self.queue_warn_minutes
+        if idle and warn >= idle:
+            raise ValidationError(
+                {"queue_warn_minutes": "The check-in has to go out before the idle time is up."}
+            )

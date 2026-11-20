@@ -243,6 +243,8 @@ class RuntimeSettingsForm(forms.ModelForm):
         model = RuntimeSettings
         fields = (
             "max_concurrent_matches",
+            "queue_idle_minutes",
+            "queue_warn_minutes",
             "auto_captain",
             "open_match_voice",
             "match_channel_close_minutes",
@@ -298,6 +300,7 @@ class RuntimeSettingsAdmin(admin.ModelAdmin):
         "open_match_voice",
         "match_channel_close_minutes",
         "max_concurrent_matches",
+        "queue_idle_minutes",
         "score_ocr",
         "api_results",
         "interim_points",
