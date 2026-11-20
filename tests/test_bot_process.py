@@ -108,7 +108,14 @@ def test_the_bot_runs_every_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         await asyncio.gather(*bot._tasks, return_exceptions=True)
         return names
 
-    assert asyncio.run(scenario()) == {"deadlines", "effects", "leaderboard", "watchdog"}
+    assert asyncio.run(scenario()) == {
+        "deadlines",
+        "effects",
+        "leaderboard",
+        "watchdog",
+        "watched-channels",
+        "failed-requests",
+    }
     assert beat.exists()
 
 

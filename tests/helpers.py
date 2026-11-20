@@ -22,6 +22,7 @@ def image(number: int = 1) -> ImageRef:
         archive_channel_id=1,
         archive_message_id=1000 + number,
         attachment_id=2000 + number,
+        extension="png",
     )
 
 

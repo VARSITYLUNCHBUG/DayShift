@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models import QuerySet
 
 from league.domain.errors import InvalidAction
 from league.models import Community, DraftModeVersion, RuntimeSettings, Season
@@ -98,3 +99,20 @@ def start_season(community: Community, params: dict[str, object] | None = None) 
         rating_params=dict(params or {}),
         started_at=moment,
     )
+
+
+def _synced_rows(guild_id: int | None) -> QuerySet[Community]:
+    """The servers a command sync covers: one guild, or every server for a global sync."""
+    rows = Community.objects.all()
+    return rows if guild_id is None else rows.filter(discord_guild_id=guild_id)
+
+
+def commands_synced(guild_id: int | None, fingerprint: str) -> bool:
+    """Whether every server this sync covers already has exactly these commands. A server with
+    no row yet (before /setup) hasn't, so it's synced."""
+    values = list(_synced_rows(guild_id).values_list("commands_fingerprint", flat=True))
+    return bool(values) and all(value == fingerprint for value in values)
+
+
+def record_commands_synced(guild_id: int | None, fingerprint: str) -> None:
+    _synced_rows(guild_id).update(commands_fingerprint=fingerprint)

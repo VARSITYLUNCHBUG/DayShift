@@ -29,7 +29,7 @@ flowchart TB
 | Queue | Join and Leave buttons, FIFO. Voice isn't required | Blocked by a cooldown or a live match |
 | Pop at 12 | Creates a private text channel, `match-12`. The Waiting Room is the lobby's voice channel | Queue waits at `max_concurrent_matches` |
 | Gather | In the Waiting Room: nothing to do. Anywhere else: DM with a Waiting Room invite and Ready button. DMs closed: mention in the match channel | |
-| Ready | Ready button on the board and in the "Ready Up" DM. The board is posted right after the lobby ping, before the invites go out. As players ready, the ping is edited to mention only those still to ready (an edit pings nobody) | 180 s. A miss frees the spot, offered down the priority list (the queue, longest wait first). Unfilled in 2 min: cancel, and everyone left goes back to the front of the queue |
+| Ready | Ready button on the board and in the "Ready Up" DM. The board is posted right after the lobby ping, before the invites go out, and shows who has readied. The ping is never edited (an edit notifies nobody); it goes when the check moves on, or once nobody is left to call | 180 s. A miss frees the spot, offered down the priority list (the queue, longest wait first). Unfilled in 2 min: cancel, and everyone left goes back to the front of the queue |
 | Captain vote | Everyone votes for up to two captains, themselves included, from players with 5 completed matches. Most votes wins; rating breaks ties and fills any gap. Two or fewer eligible, or the Auto Captain setting on: no vote, captains are appointed by experience and rating | 45 s, or closes early once everyone has voted |
 | Captain check-in | Each captain presses **I'm here** before anyone is drafted | 60 s (`captains.checkin_seconds`). A captain who misses it is replaced by the next eligible player in vote order, who gets the full time. With nobody eligible left, the draft starts with the captains it has |
 | Player draft | `FSSFFSSFFS`, lower-rated captain first. Last player is assigned. No message announces it: the board shows the captains and whose pick it is | 45 s, then highest rated |
@@ -39,9 +39,13 @@ flowchart TB
 | Champion draft | The mode's ban and pick order, from the team the coinflip put first. 🎲 Random takes a champion on purpose | 40 s a turn. A timeout takes a random champion, for bans too |
 | Draft summary | Named like "Crimson Wolf", with a GIF from `presets/draft_gifs.json` and GLHF, above the lobby code prompt | |
 | Lobby | deadlock-api's bot always creates the custom lobby; its code is posted and a captain presses Start match. Only if that fails is a random captain asked to create one and enter its code, with the settings checklist ([Lobbies](integrations.md#lobbies)) | No lobby in 3 min counts as a failure. Then 3 min for the host, then the other captain, then cancel |
-| Report | Press the team that won, then add the screenshot, and optionally the Deadlock match ID, MVP and key players. With [score OCR](integrations.md#score-ocr) on, the screenshot is read | 3 h without a report goes to staff |
-| Confirm | The other captain confirms, disputes or adds a screenshot | 5 min. Silence confirms |
-| Results | First screenshot, the rating table, 🏅 MVP and ⭐ key players, and scoreboard stats go to the results channel. Every screenshot goes to the archive | Effects retry |
+| Report | Press the team that won, then enter the Deadlock match ID (required, and recorded on the match), and optionally the screenshot, MVP and key players. The report ends the game for its players: the team voices empty into the Waiting Room and everyone can queue again, however the result is then settled. With [score OCR](integrations.md#score-ocr) on, a screenshot is read | 3 h without a report goes to staff |
+| Confirm | The other captain confirms, disputes or adds their own report, from the match channel, which stays open until the result is settled | 5 min. Silence confirms |
+| Results | The first screenshot, the rating table, 🏅 MVP and ⭐ key players, and scoreboard stats go to the results channel. Once deadlock-api has the match, its scoreboard is posted as a reply ([Result checks](integrations.md#result-checks)). Every screenshot goes to the archive | Effects retry |
+
+Match channels are private to their players and staff to talk in. Anyone with the PUG role (set
+with `/setup pug_role`; everyone, without one) can read the text channel and see the team voices,
+but not join them unless Open match voice is on.
 
 This is the flow the server used with Bebot and NeatQueue, and it is the only one: every match
 runs it. The timers and the ban and pick order live in the draft mode. These values are starting

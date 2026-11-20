@@ -56,7 +56,14 @@ def test_startup_recovery_waits_for_the_database_then_starts_the_loops(
         return set(names)
 
     with caplog.at_level(logging.INFO, logger="bot.client"):
-        assert asyncio.run(scenario()) == {"deadlines", "effects", "leaderboard", "watchdog"}
+        assert asyncio.run(scenario()) == {
+            "deadlines",
+            "effects",
+            "leaderboard",
+            "watchdog",
+            "watched-channels",
+            "failed-requests",
+        }
     assert beat.exists()
     assert flaky.calls.count(deadlines.extend_past_due) == 4
     failed = [r for r in caplog.records if r.getMessage() == "Startup recovery failed, retrying"]

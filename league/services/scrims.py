@@ -300,6 +300,7 @@ def tick() -> int:
 class RandomHero:
     name: str
     unicode_emoji: str
+    emoji_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -321,6 +322,6 @@ def random_draft(community: Community) -> RandomDraft:
             break
         row = rows[pool.pop(rng.randrange(len(pool)))]
         side = "hk" if team_for_role(step.role, "A") == "A" else "am"
-        hero = RandomHero(row.name, row.unicode_emoji)
+        hero = RandomHero(row.name, row.unicode_emoji, row.discord_emoji_id)
         (result.bans if step.action == "ban" else result.picks)[side].append(hero)
     return result

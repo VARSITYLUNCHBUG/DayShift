@@ -59,7 +59,7 @@ def in_draft(popped: Match) -> Match:
 
 
 def non_captain(match: Match, team: str = "") -> Player:
-    rows = match.participants.filter(is_active=True, is_captain=False)
+    rows = match.participants.filter(removed_reason="", is_captain=False)  # Still in it.
     if team:
         rows = rows.filter(team=team)
     return rows.order_by("id").first().player

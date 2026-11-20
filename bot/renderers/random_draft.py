@@ -12,7 +12,10 @@ from league.services.scrims import RandomDraft, RandomHero
 
 def _hero_list(heroes: list[RandomHero]) -> str:
     return style.hero_list(
-        [style.hero_line(style.hero_emoji_text(hero.unicode_emoji), hero.name) for hero in heroes]
+        [
+            style.hero_line(style.hero_emoji_text(hero.unicode_emoji, hero.emoji_id), hero.name)
+            for hero in heroes
+        ]
     )
 
 

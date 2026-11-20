@@ -44,8 +44,16 @@ ENV PYTHONUNBUFFERED=1 \
 # without waiting for a new python tag. Then no pip: nothing installs packages at runtime, and
 # its vendored libraries (urllib3, msgpack, ...) would only be more to scan and patch. The app's
 # virtualenv never had one.
+# The fonts draw players' names in any script on the leaderboard images (bot/renderers/fonts.py):
+# Noto for most scripts and symbols, WenQuanYi for Chinese, Japanese and Korean (a twentieth the
+# size of Noto CJK), and Noto Color Emoji. FriBiDi switches on Pillow's bundled text layout, which
+# joins Arabic letters and orders right-to-left text. Unpinned like the upgrade above: Debian
+# stable only ships fixes, and a pinned version vanishes from the mirror when one lands.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
+        fonts-noto-core fonts-noto-color-emoji fonts-wqy-microhei libfribidi0 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip uninstall --yes --no-cache-dir pip \

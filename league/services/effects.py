@@ -101,8 +101,9 @@ def mark_done(effect_id: int, status: str = EffectStatus.DONE) -> None:
     OutboxEffect.objects.filter(pk=effect_id).update(status=status, done_at=now(), last_error="")
 
 
-def mark_retry(effect_id: int, error: str) -> str:
-    """Back off and retry, or fail for good once attempts run out. Returns the new status."""
+def mark_retry(effect_id: int, error: str, wait_at_least: float = 0) -> str:
+    """Back off and retry, or fail for good once attempts run out. Returns the new status.
+    `wait_at_least` is how long Discord asked us to wait, for a rate limit."""
     effect = OutboxEffect.objects.get(pk=effect_id)
     effect.attempts += 1
     effect.last_error = error[:2000]
@@ -110,7 +111,7 @@ def mark_retry(effect_id: int, error: str) -> str:
         effect.status = EffectStatus.FAILED
         effect.done_at = now()
     else:
-        delay = min(2**effect.attempts, MAX_BACKOFF_SECONDS)
+        delay = max(min(2**effect.attempts, MAX_BACKOFF_SECONDS), wait_at_least)
         effect.run_after = now() + timedelta(seconds=delay)
     effect.save(update_fields=["attempts", "last_error", "status", "done_at", "run_after"])
     return effect.status
@@ -170,7 +171,8 @@ READY_PING_KIND = "refresh_ready_ping"
 
 
 def request_ready_ping(match: Match) -> None:
-    """Someone readied or left the ready check: refresh who the ping mentions. Coalesces."""
+    """The ready check changed shape (missed players were removed): delete the ping if nobody is
+    left to call. Coalesces."""
     from league.services.common import request_render
 
     request_render(match.community, READY_PING_KIND, match)
@@ -248,6 +250,34 @@ def board_channel(match_id: int) -> int | None:
         .values_list("host_channel_id", flat=True)
         .first()
     )
+
+
+@dataclass(frozen=True, slots=True)
+class WatchedChannels:
+    """The channels whose events the bot acts on. Everything else in the server is ignored
+    without a trip to the database."""
+
+    text: frozenset[int]  # Live match text channels and the channels scrims run in.
+    voice: frozenset[int]  # Every Waiting Room, and live team voices.
+
+
+def watched_channels() -> WatchedChannels:
+    from league.domain.engine import SCRIM_LIVE
+
+    live = MatchResource.objects.filter(deleted_at__isnull=True)
+    text = set(live.filter(kind=ResourceKind.TEXT).values_list("discord_id", flat=True))
+    hosts = Match.objects.filter(kind=MatchKind.SCRIM, status__in=SCRIM_LIVE).values_list(
+        "host_channel_id", flat=True
+    )
+    text |= {channel_id for channel_id in hosts if channel_id is not None}
+    voice = set(
+        live.filter(kind__in=(ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE)).values_list(
+            "discord_id", flat=True
+        )
+    )
+    rooms = Community.objects.values_list("waiting_room_channel_id", flat=True)
+    voice |= {channel_id for channel_id in rooms if channel_id is not None}
+    return WatchedChannels(frozenset(text), frozenset(voice))
 
 
 def note_chat(channel_id: int) -> None:

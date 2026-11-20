@@ -25,7 +25,7 @@ def now() -> datetime:
     return timezone.now()
 
 
-def seconds_from_now(seconds: int) -> datetime:
+def seconds_from_now(seconds: float) -> datetime:
     return now() + timedelta(seconds=seconds)
 
 
@@ -82,8 +82,10 @@ def request_render(
     *,
     lane: str | None = None,
     payload: dict[str, object] | None = None,
+    delay_seconds: float = 0,
 ) -> None:
     """Ask for a re-render. Renders read the latest state, so ones not yet started coalesce.
+    `delay_seconds` holds a new render back a moment, so a burst of changes is one edit.
 
     One the worker has started may have read the state before this change, so it doesn't count.
     The row lock makes the worker's claim wait for this transaction, so either the claim comes
@@ -108,7 +110,8 @@ def request_render(
             .first()
         )
         if unstarted is None:
-            add_effect(community, kind, payload, match=match, lane=lane)
+            run_after = seconds_from_now(delay_seconds) if delay_seconds else None
+            add_effect(community, kind, payload, match=match, lane=lane, run_after=run_after)
 
 
 def clear_notices(match: Match) -> None:
@@ -117,12 +120,25 @@ def clear_notices(match: Match) -> None:
         add_effect(match.community, "clear_notices", match=match)
 
 
+# Twelve Ready presses land within seconds, and each would edit the board. During the ready
+# check a short wait folds them into a few edits; every other step renders at once.
+READY_BOARD_DELAY_SECONDS = 1.0
+
+
 def render_board(match: Match) -> None:
-    request_render(match.community, "render_board", match)
+    from league.domain.engine import Status
+
+    delay = READY_BOARD_DELAY_SECONDS if match.status == Status.READY_CHECK else 0
+    request_render(match.community, "render_board", match, delay_seconds=delay)
+
+
+# Joins and leaves come in bursts as a match pops or finishes, and Discord allows a channel about
+# five edits every five seconds. A short wait folds a burst into one edit of the queue panel.
+QUEUE_RENDER_DELAY_SECONDS = 1.5
 
 
 def render_queue(community: Community) -> None:
-    request_render(community, "render_queue")
+    request_render(community, "render_queue", delay_seconds=QUEUE_RENDER_DELAY_SECONDS)
 
 
 def close_subs(match: Match) -> None:

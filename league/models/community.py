@@ -72,6 +72,9 @@ class Community(models.Model):
     leaderboard_channel_id = models.BigIntegerField(null=True, blank=True)
     leaderboard_message_ids = ArrayField(models.BigIntegerField(), default=list, blank=True)
     penalty_policy = models.JSONField(default=default_penalty_policy)
+    # A fingerprint of the slash commands last registered here. A restart with the same commands
+    # skips registering them again: Discord caps how many it accepts a day.
+    commands_fingerprint = models.CharField(max_length=64, blank=True)
 
     class Meta:
         db_table = "communities"
