@@ -84,6 +84,7 @@ Everything goes to `services/web/test-results/` (gitignored):
 | `match-changes.e2e.ts` | A swap both ways. A sub through the queue. An early leave reported and agreed (void). |
 | `pages.e2e.ts` | The postgame tabs (Summary, Timeline, Replay scrubbing, Advanced). Privacy (Me, the ladder, the API). The share card (toggles, PNG download). axe on the main pages. |
 | `phone.e2e.ts` (`@phone`) | The sticky room action. The full-screen chat. No sideways scroll at 390 and 320 px. |
+| `layout.e2e.ts` (`@phone`) | Every page, the finished match's record and postgame, and the room through each phase to the game, each loaded once and checked at 320, 390, 768 and 1280 px: no sideways scroll, nothing past the screen's edge (a scroller's content aside), and every control at least 24 px square (WCAG 2.5.8). Each page's screenshot is attached to the report. `LAYOUT_WIDTHS=320,360,414` checks other widths. |
 
 Captains: new players can't be voted for (they need five matches), so `support/match.ts` gives the
 browser player and one rival the top two ratings, and the captains are appointed by rating.
