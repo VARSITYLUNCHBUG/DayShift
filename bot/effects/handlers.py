@@ -856,6 +856,26 @@ async def _create_team_voice_channel(
     return channel_id, await db(voice_pool.is_pooled, channel_id)
 
 
+@effect(voice_pool.FILL_KIND)
+async def fill_voice_pool(env: Env) -> None:
+    """Make the server's first pooled channels before any match needs them: empty, with only
+    staff and the PUGs role set, as a returned channel is. Paced like any voice creation."""
+    community = env.community
+    size = int(env.effect.payload.get("size", voice_pool.INITIAL_SIZE))
+    while (number := await db(voice_pool.next_number, community.pk, size)) is not None:
+        open_to_everyone = await db(_open_voice, community.pk)
+        channel_id = await env.gateway.create_voice_channel(
+            env.guild_id,
+            community.match_category_id,
+            names.pooled_voice(number),
+            [],
+            await db(_match_staff_roles, community.pk),
+            open_to_everyone=open_to_everyone,
+            viewer_role_ids=_viewer_roles(env),
+        )
+        await db(voice_pool.add_free, community.pk, number, channel_id, open_to_everyone)
+
+
 @effect("create_team_voice")
 async def create_team_voice(env: Env) -> None:
     """Each team gets a voice channel from the server's pool, or a new one if the pool is short.

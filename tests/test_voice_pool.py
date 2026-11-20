@@ -275,3 +275,31 @@ def test_a_claimed_channel_deleted_before_the_retry_is_swapped_for_another(
     assert team_channels(second)[0] == kept
     assert not voice_pool.is_pooled(gone)
     assert_nothing_failed()
+
+
+def test_the_first_eight_channels_are_made_ahead_of_any_match(wired: Community) -> None:
+    gateway = FakeGateway()
+    voice_pool.request_fill(wired)
+    drain(gateway)
+    assert gateway.voice_created == [f"Team Voice {n}" for n in range(1, 9)]
+    assert len(voice_pool.free_channels(wired.pk)) == 8
+    # Made empty: nobody is let in until a match borrows one.
+    assert all(not gateway.members_seen[c] for c in voice_pool.free_channels(wired.pk))
+
+    match = to_champion_draft(new_match(wired, gateway, 1))
+    drain(gateway)
+    assert len(gateway.voice_created) == 8  # The match borrowed two; none was made.
+    numbers = [VoiceChannelSlot.objects.get(discord_id=c).number for c in team_channels(match)]
+    assert numbers == [1, 2]
+    assert team_ids(match, "A") <= {u for c, u in gateway.granted if c == team_channels(match)[0]}
+    voice_pool.request_fill(wired)
+    drain(gateway)
+    assert len(gateway.voice_created) == 8  # Already full: a second fill makes nothing.
+
+
+def test_the_first_fill_stops_at_what_the_server_can_use(wired: Community) -> None:
+    runtime.update(wired, max_concurrent_matches=2)
+    gateway = FakeGateway()
+    voice_pool.request_fill(wired)
+    drain(gateway)
+    assert len(gateway.voice_created) == 4

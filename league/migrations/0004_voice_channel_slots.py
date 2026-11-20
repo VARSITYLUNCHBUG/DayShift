@@ -2,6 +2,28 @@
 
 import django.db.models.deletion
 from django.db import migrations, models
+from django.utils import timezone
+
+
+def queue_initial_pools(apps, schema_editor):
+    """Ask the bot to make each server's first 8 team voice channels. A migration can't reach
+    Discord, so it queues the work as an outbox effect, which the bot runs when it starts."""
+    Community = apps.get_model("league", "Community")
+    OutboxEffect = apps.get_model("league", "OutboxEffect")
+    moment = timezone.now()
+    for community_id in Community.objects.values_list("pk", flat=True):
+        OutboxEffect.objects.get_or_create(
+            dedupe_key=f"fill_voice_pool:{community_id}:initial",
+            defaults={
+                "community_id": community_id,
+                "kind": "fill_voice_pool",
+                "lane": f"fill_voice_pool:{community_id}",
+                "payload": {"size": 8},
+                "status": "pending",
+                "run_after": moment,
+                "created_at": moment,
+            },
+        )
 
 
 class Migration(migrations.Migration):
@@ -27,4 +49,5 @@ class Migration(migrations.Migration):
                 'constraints': [models.UniqueConstraint(fields=('community', 'number'), name='uniq_voice_slot_number')],
             },
         ),
+        migrations.RunPython(queue_initial_pools, migrations.RunPython.noop),
     ]

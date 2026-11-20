@@ -15,12 +15,15 @@ from dataclasses import dataclass
 
 from django.db import IntegrityError, transaction
 
-from league.models import Match, MatchResource, VoiceChannelSlot
+from league.models import Community, Match, MatchResource, VoiceChannelSlot
 from league.models.matches import ResourceKind
 from league.services import effects, runtime
-from league.services.common import lock_community, now
+from league.services.common import add_effect, lock_community, now
 
 TEAM_VOICE_KINDS = (ResourceKind.TEAM_A_VOICE, ResourceKind.TEAM_B_VOICE)
+# Channels made ahead of the first matches, so even a server's opening day creates none mid-match.
+INITIAL_SIZE = 8
+FILL_KIND = "fill_voice_pool"
 # Two teams a match.
 CHANNELS_PER_MATCH = 2
 
@@ -96,13 +99,15 @@ def note_open(channel_id: int, open_to_everyone: bool) -> None:
     VoiceChannelSlot.objects.filter(discord_id=channel_id).update(open_to_everyone=open_to_everyone)
 
 
-def next_number(community_id: int) -> int | None:
-    """The number for a new pooled channel, or None if the pool is already full: the caller
-    makes a one-off channel instead, deleted after its match."""
+def next_number(community_id: int, up_to: int | None = None) -> int | None:
+    """The number for a new pooled channel, or None if the pool already has `up_to` channels
+    (by default, all it can grow to): the caller makes a one-off channel instead, deleted after
+    its match."""
     numbers = set(
         VoiceChannelSlot.objects.filter(community_id=community_id).values_list("number", flat=True)
     )
-    if len(numbers) >= target_size(community_id):
+    size = target_size(community_id)
+    if len(numbers) >= (size if up_to is None else min(up_to, size)):
         return None
     return next(n for n in range(1, len(numbers) + 2) if n not in numbers)
 
@@ -167,3 +172,26 @@ def drop_claim(match_id: int, kind: str, channel_id: int) -> None:
     MatchResource.objects.filter(
         match_id=match_id, kind=kind, discord_id=channel_id, deleted_at__isnull=True
     ).update(deleted_at=now())
+
+
+@transaction.atomic
+def add_free(community_id: int, number: int, channel_id: int, open_to_everyone: bool) -> None:
+    """A channel made ahead of need joins the pool, free. If a match's new channel took the
+    number meanwhile, this one gets the next free number; only its name is out of step."""
+    lock_community(community_id)
+    taken = set(
+        VoiceChannelSlot.objects.filter(community_id=community_id).values_list("number", flat=True)
+    )
+    if number in taken:
+        number = next(n for n in range(1, len(taken) + 2) if n not in taken)
+    VoiceChannelSlot.objects.create(
+        community_id=community_id,
+        number=number,
+        discord_id=channel_id,
+        open_to_everyone=open_to_everyone,
+    )
+
+
+def request_fill(community: Community, size: int = INITIAL_SIZE) -> None:
+    """Make channels until the pool has `size` (or all it can grow to, if that's fewer)."""
+    add_effect(community, FILL_KIND, {"size": size}, lane=f"{FILL_KIND}:{community.pk}")
