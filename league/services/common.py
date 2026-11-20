@@ -137,9 +137,10 @@ def render_board(match: Match) -> None:
     request_render(match.community, "render_board", match, delay_seconds=delay)
 
 
-# A 200 ms window coalesces near-simultaneous clicks while keeping the panel responsive.
-# Sustained joins can need multiple edits; discord.py paces those using Discord's headers.
-QUEUE_RENDER_DELAY_SECONDS = 0.2
+# Joins and leaves come in bursts as a match pops or finishes, and Discord allows a channel about
+# five edits every five seconds. A one-second window folds a burst into one edit and keeps a
+# sustained rush at that limit, rather than leaning on 429s, which count toward Cloudflare's ban.
+QUEUE_RENDER_DELAY_SECONDS = 1.0
 
 
 def render_queue(community: Community) -> None:
