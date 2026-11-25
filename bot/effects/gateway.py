@@ -343,7 +343,7 @@ class DiscordGateway:
             VOICE_MEMBER,
             SELF_VOICE,
             viewer_role_ids,
-            VOICE_VIEWER,
+            VOICE_MEMBER if open_to_everyone else VOICE_VIEWER,
         )
         if open_to_everyone:
             overwrites[guild.default_role] = VOICE_MEMBER
@@ -657,7 +657,8 @@ class DiscordGateway:
     ) -> None:
         viewers = set(viewer_role_ids)
         # @everyone is hidden, unless it's the viewer role (a server with no PUGs role).
-        overwrites = dict.fromkeys(viewers, VOICE_VIEWER)
+        # Role denies override @everyone allows: open voice must allow the PUG role too.
+        overwrites = dict.fromkeys(viewers, VOICE_MEMBER if open_to_everyone else VOICE_VIEWER)
         overwrites[guild_id] = VOICE_VIEWER if guild_id in viewers else HIDDEN
         if open_to_everyone:
             overwrites[guild_id] = VOICE_MEMBER
