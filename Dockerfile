@@ -49,6 +49,10 @@ ENV PYTHONUNBUFFERED=1 \
 # size of Noto CJK), and Noto Color Emoji. FriBiDi switches on Pillow's bundled text layout, which
 # joins Arabic letters and orders right-to-left text. Unpinned like the upgrade above: Debian
 # stable only ships fixes, and a pinned version vanishes from the mirror when one lands.
+# A cached copy of this layer would keep the fixes it was built with forever, because nothing
+# here changes when Debian publishes one. CI passes the day as DEBIAN_REFRESH, which every RUN
+# below sees, so the layer is rebuilt at least daily; a local build leaves it empty and cached.
+ARG DEBIAN_REFRESH=
 # hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
