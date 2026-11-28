@@ -51,7 +51,10 @@ class Gateway(Protocol):
         staff_role_ids: Iterable[int],
         *,
         viewer_role_ids: Iterable[int] = (),
-    ) -> int: ...
+        slowmode_seconds: int = 0,
+    ) -> int:
+        """`slowmode_seconds`: Discord's slowmode, set in the create call itself."""
+        ...
 
     async def create_voice_channel(
         self,
@@ -308,6 +311,7 @@ class DiscordGateway:
         staff_role_ids: Iterable[int],
         *,
         viewer_role_ids: Iterable[int] = (),
+        slowmode_seconds: int = 0,
     ) -> int:
         """A match text channel: its players, staff and `viewer_role_ids` (the PUGs role) talk."""
         guild = self._guild(guild_id)
@@ -315,7 +319,10 @@ class DiscordGateway:
             guild, member_ids, staff_role_ids, TEXT_MEMBER, SELF_TEXT, viewer_role_ids, TEXT_PUGS
         )
         channel = await guild.create_text_channel(
-            name, category=self._category(guild, category_id), overwrites=overwrites
+            name,
+            category=self._category(guild, category_id),
+            overwrites=overwrites,
+            slowmode_delay=slowmode_seconds,
         )
         return channel.id
 

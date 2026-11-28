@@ -120,6 +120,13 @@ class RuntimeSettings(models.Model):
     match_channel_close_minutes = models.PositiveSmallIntegerField(
         default=3, help_text="Minutes a match's text channel stays open after the match ends."
     )
+    match_chat_slowmode_seconds = models.PositiveSmallIntegerField(
+        default=3,
+        validators=[MaxValueValidator(21600)],
+        help_text="Discord slowmode in each new match channel: seconds each player waits between "
+        "messages, so chat can't bury the board. Staff aren't slowed. 0 turns it off. Set when "
+        "the channel is made, so it costs no extra request.",
+    )
     score_ocr = models.CharField(
         max_length=8,
         choices=OCR_MODES,
