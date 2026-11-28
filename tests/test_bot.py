@@ -684,6 +684,7 @@ class FakeGateway:
     voice_created: list[str] = field(default_factory=list)  # Names, in the order made.
     resets: list[int] = field(default_factory=list)  # Pooled channels made ready for reuse.
     hidden: set[int] = field(default_factory=set)  # Voice channels only staff can see.
+    slowmodes: dict[int, int] = field(default_factory=dict)  # Text channel to its slowmode.
 
     def _id(self) -> int:
         self.next_id += 1
@@ -694,10 +695,19 @@ class FakeGateway:
             raise self.fail_next.pop(method)
 
     async def create_text_channel(
-        self, guild_id, category_id, name, member_ids, staff_role_ids, *, viewer_role_ids=()
+        self,
+        guild_id,
+        category_id,
+        name,
+        member_ids,
+        staff_role_ids,
+        *,
+        viewer_role_ids=(),
+        slowmode_seconds=0,
     ) -> int:
         self._maybe_fail("create_text_channel")
         channel_id = self._id()
+        self.slowmodes[channel_id] = slowmode_seconds
         self.viewers_seen[channel_id] = list(viewer_role_ids)
         self.channels[channel_id] = name
         self.members_seen[channel_id] = list(member_ids)
@@ -844,6 +854,7 @@ class FakeGateway:
         self.revoked.append((channel_id, user_id))
 
     async def set_voice_status(self, channel_id, text, *, paced=True) -> None:
+        self._maybe_fail("set_voice_status")
         if not paced:
             self.unpaced.append(("set_voice_status", channel_id))
         self.statuses[channel_id] = text
@@ -1068,7 +1079,7 @@ def test_full_match_through_effects(wired: Community) -> None:
     drain(gateway)
     assert any("Lobby code: `ABC123`" in row[1] for row in gateway.texts)
     captain_a = match.captain_of("A").player.display_name
-    assert gateway.statuses[team_a] == f"Match {match.pk} · {captain_a}'s Team · Lobby code: ABC123"
+    assert gateway.statuses[team_a] == f"ABC123 · {captain_a}'s Team"
 
     match = finish(match, "A")
     drain(gateway)
@@ -1319,7 +1330,8 @@ def live_notice_texts(gateway: FakeGateway, match: Match) -> list[str]:
 
 
 def assert_board_last(gateway: FakeGateway, match: Match) -> None:
-    """The flow is at the bottom: the board, then the champion grid's messages in order."""
+    """The flow is at the bottom: the board, then the champion grid's messages in order, with
+    at most a notice or two of ours below it and no chat (see `effects.notices_below_board`)."""
     order = channel_order(gateway, match)
     grid = [
         message_id
@@ -1327,7 +1339,10 @@ def assert_board_last(gateway: FakeGateway, match: Match) -> None:
         if (message_id := effects.resource_id(match.pk, kind)) is not None
     ]
     expected = [resource(match, ResourceKind.BOARD_MESSAGE), *grid]
-    assert order[-len(expected) :] == expected
+    below = order[order.index(expected[0]) + len(expected) :]
+    assert order[len(order) - len(below) - len(expected) : len(order) - len(below)] == expected
+    assert len(below) <= effects.NOTICES_BELOW_BOARD
+    assert set(below) <= set(effects.live_notices(match.pk))
 
 
 def popped_match(wired: Community, gateway: FakeGateway) -> Match:
@@ -1487,11 +1502,14 @@ def test_chat_from_before_a_move_no_longer_counts(wired: Community) -> None:
     match = ready_all(match)
     drain(gateway)
     assert_board_last(gateway, match)
-    assert not OutboxEffect.objects.filter(kind="move_board", status=EffectStatus.PENDING).exists()
+    # Only our own notices count now, if any went up below the board after it moved.
+    pending = OutboxEffect.objects.filter(kind="move_board", status=EffectStatus.PENDING)
+    assert all(m.payload["messages"] == m.payload["notices"] for m in pending)
+    notices = sum(m.payload["notices"] for m in pending)
 
     gateway.chat(text_id)
     move = OutboxEffect.objects.get(kind="move_board", match=match, status=EffectStatus.PENDING)
-    assert move.payload["messages"] == 1
+    assert move.payload["messages"] == notices + 1
     assert (move.run_after - effects.now()).total_seconds() > effects.BOARD_MOVE_MAX_WAIT_SECONDS
 
 
@@ -1505,8 +1523,7 @@ def test_champion_grid_follows_the_board_and_goes_when_the_draft_ends(wired: Com
     picker_2 = resource(match, ResourceKind.PICKER_MESSAGE_2)
     assert_board_last(gateway, match)
 
-    # A step with no chat below edits the board in place, and posts the grid afresh: an edited
-    # grid message would carry an "(edited)" tag that splits the grid.
+    # A step with no chat below edits the board and the grid in place: no posts or deletes.
     step = build_plan(match.mode)[match.step_index]
     captain = match.captain_of(team_for_role(step.role, match.champion_first_pick)).player
     champion = boards.board_state(match.pk).champions[-1].id  # Alphabetically last.
@@ -1518,9 +1535,8 @@ def test_champion_grid_follows_the_board_and_goes_when_the_draft_ends(wired: Com
         resource(match, kind)
         for kind in (ResourceKind.PICKER_MESSAGE, ResourceKind.PICKER_MESSAGE_2)
     ]
-    assert picker not in new_grid and picker_2 not in new_grid
-    assert not set(new_grid) & gateway.edited
-    assert {picker, picker_2}.isdisjoint(channel_order(gateway, fresh(match)))
+    assert new_grid == [picker, picker_2]
+    assert picker_2 in gateway.edited  # The last hero's message: the one that changed.
     assert_board_last(gateway, match)
     assert any(
         button.get("disabled") for button in all_buttons(gateway.views[new_grid[1]].to_components())
@@ -1602,8 +1618,10 @@ def test_a_deleted_board_comes_back(wired: Community) -> None:
 @pytest.mark.django_db(transaction=True)
 def test_chat_elsewhere_in_the_server_is_ignored(wired: Community) -> None:
     popped_match(wired, FakeGateway())
+    before = list(OutboxEffect.objects.filter(kind="move_board").values_list("pk", "payload"))
     effects.note_chat(QUEUE_CHANNEL)
-    assert not OutboxEffect.objects.filter(kind="move_board").exists()
+    after = list(OutboxEffect.objects.filter(kind="move_board").values_list("pk", "payload"))
+    assert after == before
 
 
 @pytest.mark.django_db(transaction=True)
@@ -1611,8 +1629,10 @@ def test_chat_in_a_closed_channel_is_ignored(wired: Community) -> None:
     match = popped_match(wired, FakeGateway())
     text_id = resource(match, ResourceKind.TEXT)
     effects.mark_resource_deleted(match.pk, ResourceKind.TEXT)
+    before = list(OutboxEffect.objects.filter(kind="move_board").values_list("pk", "payload"))
     effects.note_chat(text_id)
-    assert not OutboxEffect.objects.filter(kind="move_board").exists()
+    after = list(OutboxEffect.objects.filter(kind="move_board").values_list("pk", "payload"))
+    assert after == before
 
 
 @pytest.mark.django_db(transaction=True)
@@ -1967,6 +1987,31 @@ def test_board_fits_with_the_most_sub_requests_allowed(popped: Match, phase: str
     assert_within_limits(render_board(state))
 
 
+@pytest.mark.django_db
+def test_a_crowded_board_drops_the_draft_end_while_the_bots_lobby_waits(popped: Match) -> None:
+    """The bot's lobby before Start, with the most sub requests and an early-leave claim, is
+    over 40 components in the full layout: the board falls back to its compact form, which
+    keeps the Start button and the report buttons."""
+    from league.services import subs
+
+    match = to_in_progress(to_champion_draft(popped))
+    team_a = list(match.participants.filter(team="A", is_captain=False).order_by("id"))
+    for row in team_a[: subs.MAX_PENDING]:
+        subs.request_sub_out(match.pk, row.player, row.player_id)
+    state = boards.board_state(match.pk)
+    state.api_lobby, state.api_started = True, False
+    state.gif_url = "https://example.com/glhf.gif"
+    state.early_leave_name, state.early_leave_by = "Leaver", "Captain"
+    view = render_board(state)
+    assert_within_limits(view)
+    payload = view.to_components()
+    actions = {custom_id.split(":")[2] for custom_id in all_custom_ids(payload)}
+    assert {"api_start", "report_open", "early_yes"} <= actions
+    assert "GLHF" not in str(payload)  # The compact form.
+    state.subs = []
+    assert "GLHF" in str(render_board(state).to_components())  # The full one when it fits.
+
+
 # --- Vote, sides and the draft summary ---------------------------------------------------------
 
 
@@ -2076,6 +2121,8 @@ def test_match_channel_names_read_alike() -> None:
     assert names.team_voice(12, "Kestrel") == "Match 12 · Kestrel's Team"
     assert names.team_voice(12, " Kes​trel \n") == "Match 12 · Kestrel's Team"
     assert len(names.team_voice(12, "x" * 200)) == 100
+    assert names.team_label(" Kestrel ") == "Kestrel's Team"
+    assert names.team_label("") == "Team"
 
 
 def test_open_spots_say_how_many_subs_and_who_was_asked() -> None:

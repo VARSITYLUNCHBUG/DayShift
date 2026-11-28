@@ -24,8 +24,9 @@ def _match_channel_url(match_id: int) -> str | None:
 @handles("ready")
 async def ready(ctx: Context) -> None:
     await ctx.interaction.response.defer()
-    await db(lobby.mark_ready, ctx.match_id, await actor(ctx.interaction))
-    if ctx.interaction.guild_id is None:
+    from_dm = ctx.interaction.guild_id is None
+    await db(lobby.mark_ready, ctx.match_id, await actor(ctx.interaction), from_dm=from_dm)
+    if from_dm:
         # From the DM: the DM itself turns into the answer, so its Ready can't be pressed again.
         view = render_voice_dm(
             ctx.match_id,

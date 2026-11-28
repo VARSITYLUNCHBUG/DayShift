@@ -91,17 +91,18 @@ def test_concurrent_calls_get_spaced_slots_and_a_slow_one_holds_nobody_up() -> N
 def test_main_lane_voice_calls_skip_the_pacer(wired: Community) -> None:
     """The lobby code's voice status runs in the match's main lane, so it never waits behind
     another match's paced voice setup."""
-    from bot.effects.handlers import Env, announce_lobby_code
+    from bot.effects.handlers import Env, lobby_code_status
 
     match = popped_match(wired, FakeGateway())
     match.lobby_code = "ABC123"
     match.save(update_fields=["lobby_code"])
     effects.record_resource(match.pk, ResourceKind.TEXT, 4242)
     effects.record_resource(match.pk, ResourceKind.TEAM_A_VOICE, 4243)
-    common.add_effect(wired, "announce_lobby_code", match=match)
-    effect = OutboxEffect.objects.get(match=match, kind="announce_lobby_code")
+    common.add_effect(wired, "lobby_code_status", match=match)
+    effect = OutboxEffect.objects.get(match=match, kind="lobby_code_status")
+    assert effects.lane_of(effect) == match.pk  # The main lane, not the voice lane.
     gateway = FakeGateway()
-    asyncio.run(announce_lobby_code(Env(gateway, effect, wired, match)))
+    asyncio.run(lobby_code_status(Env(gateway, effect, wired, match)))
     assert ("set_voice_status", 4243) in gateway.unpaced
 
 

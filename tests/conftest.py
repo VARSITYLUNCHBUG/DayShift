@@ -137,7 +137,7 @@ def _queue_renders_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
     from league.services import common
 
     monkeypatch.setattr(common, "QUEUE_RENDER_DELAY_SECONDS", 0)
-    monkeypatch.setattr(common, "READY_BOARD_DELAY_SECONDS", 0)
+    monkeypatch.setattr(common, "BURST_BOARD_DELAY_SECONDS", 0)
 
 
 @pytest.fixture

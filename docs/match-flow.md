@@ -146,9 +146,15 @@ Players can chat freely, and the board stays at the bottom:
 - **A state change** edits the board if it's the last message. Otherwise a new board is posted at
   the bottom and the old one deleted.
 - **Chat** moves the board once three messages sit below it and chat has been quiet for 5 s, or
-  20 s after the third message if chat doesn't stop. A board that moves mid-click could cost a
+  8 s after the third message if chat doesn't stop. A board that moves mid-click could cost a
   captain a wrong ban, so it doesn't move on every message. Change this with the `BOARD_MOVE_*`
-  values in `league/services/effects.py`.
+  values in `league/services/effects.py`. Each match channel is made with Discord's slowmode
+  (3 s by default, the Match chat slowmode runtime setting), so twelve players can't post fast
+  enough to bury the board between moves; staff aren't slowed. Measured on live Discord with
+  chat at twelve players' flat-out pace and no slowmode, the board's buttons were on screen only
+  about a quarter of the time.
+- **Our own pings** don't move the board: with nobody chatting, up to two notices may sit under
+  it and it's still edited where it is. A notice counts towards a move as a chat message does.
 - **The champion draft is Bebot's board**: 🏆 Draft #N with its name, 👑 Captains with the timer
   on the captain whose turn it is, 🚫 Bans, each side's heroes one per line ("(random choice)" for
   🎲, "(randomed)" for a timeout), and the bracketed turn strip, in the acting side's colour. Under
@@ -157,9 +163,10 @@ Players can chat freely, and the board stays at the bottom:
 - **Choices are buttons**, so everything is visible at once. Champions are red to ban and green to
   pick. Drafted players and taken champions stay in place, greyed out, so nothing shifts under a
   click. The champion grid has messages of its own directly below the board, split evenly over two
-  because Discord allows 40 components per message, with Random at the end. They are posted afresh
-  each turn rather than edited, so no "(edited)" tag splits the grid. A roster above 55 falls back
-  to dropdowns.
+  because Discord allows 40 components per message, with Random at the end. Each turn edits them in
+  place, and only the message that changed, so a turn costs an edit or two rather than two posts
+  and two deletes. They're posted afresh only when chat has pushed the board up, or the grid gains
+  or loses a message. A roster above 55 falls back to dropdowns.
 
 The bot only learns that a message was sent. It doesn't have the Message Content intent, so it
 can't read chat.

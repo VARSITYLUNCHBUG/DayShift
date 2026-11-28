@@ -89,8 +89,9 @@ def create_match(community: Community, entries: Sequence[QueueEntry]) -> Match |
 
     add_effect(community, "create_lobby", match=match, dedupe_key=f"create_lobby:{match.pk}")
     # The board goes up straight after the channel and its ping, ahead of the twelve invites and
-    # DMs, so nobody sits looking at a ping with no Ready button under it.
-    render_board(match)
+    # DMs, so nobody sits looking at a ping with no Ready button under it. It's the first
+    # render, so it skips the ready check's wait, which would put it behind those DMs.
+    render_board(match, at_once=True)
     for entry in entries:
         _gather(match, entry.player)
     render_queue(community)
@@ -118,7 +119,9 @@ def _gather(match: Match, player: Player, *, sub: bool = False) -> None:
 
 
 @transaction.atomic
-def mark_ready(match_id: int, player: Player) -> None:
+def mark_ready(match_id: int, player: Player, *, from_dm: bool = False) -> None:
+    """`from_dm`: pressed in the Ready Up DM, whose click turns that DM into the answer itself,
+    so there's no DM left to edit afterwards."""
     match = Match.objects.lock(match_id)
     if match.status != Status.READY_CHECK:
         raise StaleAction("The ready check has already finished.")
@@ -128,7 +131,7 @@ def mark_ready(match_id: int, player: Player) -> None:
         raise InvalidAction(copy.ALREADY_READY)
     participant.ready_at = now()
     participant.save(update_fields=["ready_at"])
-    if participant.ready_dm_message_id is not None:
+    if participant.ready_dm_message_id is not None and not from_dm:
         add_effect(
             match.community,
             "ready_dm_done",

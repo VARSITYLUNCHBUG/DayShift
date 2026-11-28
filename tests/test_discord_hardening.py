@@ -25,11 +25,12 @@ from bot.effects.gateway import DiscordGateway, EditCapped
 from bot.watched import ChannelWatch
 from league.domain.engine import Status
 from league.models import Community, OutboxEffect
+from league.models.matches import ResourceKind
 from league.models.outbox import EffectStatus
 from league.services import common, community, effects, lobby, queue
 from league.services.effects import WatchedChannels
 from tests.conftest import make_player
-from tests.helpers import fresh
+from tests.helpers import fresh, to_champion_draft
 from tests.test_bot import (
     ARCHIVE_CHANNEL,
     QUEUE_CHANNEL,
@@ -73,8 +74,90 @@ def test_a_long_rate_limit_retries_the_effect_after_the_wait(wired: Community) -
     drain(gateway)
     effect = OutboxEffect.objects.get(kind="render_queue")
     assert effect.status == EffectStatus.PENDING  # Not failed: it comes back.
-    assert effect.attempts == 1
+    assert effect.attempts == 0  # A rate limit isn't a failure: no attempt is used.
     assert effect.run_after >= common.now() + timedelta(seconds=85)
+    # Its lane still waits for it, so the lane's effects stay in order.
+    later = OutboxEffect.objects.create(
+        community=wired, kind="render_queue", run_after=common.now(), created_at=common.now()
+    )
+    assert later.pk not in [row.pk for group in effects.due_by_match() for row in group]
+
+
+def test_repeated_long_rate_limits_never_fail_the_effect(wired: Community) -> None:
+    _render_queue(wired)
+    effect = OutboxEffect.objects.get(kind="render_queue")
+    for _ in range(effects.MAX_ATTEMPTS + 2):
+        OutboxEffect.objects.filter(pk=effect.pk).update(run_after=common.now())
+        gateway = FakeGateway(fail_next={"send_view": discord.RateLimited(3600.0)})
+        gateway.messages[QUEUE_CHANNEL] = []
+        drain(gateway)
+    effect.refresh_from_db()
+    assert (effect.status, effect.attempts) == (EffectStatus.PENDING, 0)
+
+
+def _effect(wired: Community, kind: str, **fields: Any) -> OutboxEffect:
+    moment = common.now()
+    fields.setdefault("run_after", moment)
+    return OutboxEffect.objects.create(community=wired, kind=kind, created_at=moment, **fields)
+
+
+def test_a_held_lane_cannot_crowd_other_lanes_out_of_the_batch(wired: Community) -> None:
+    """Effects waiting behind a long wait are left out before the batch limit, so other lanes'
+    due work is still fetched however many pile up."""
+    match = popped_match(wired, FakeGateway())
+    OutboxEffect.objects.all().delete()
+    hour = common.now() + timedelta(hours=1)
+    _effect(wired, "create_team_voice", match=match, attempts=1, run_after=hour)
+    for _ in range(5):
+        _effect(wired, "team_move_player", match=match)  # Behind the voice setup.
+    _effect(wired, "check_match_api", match=match, started_at=common.now(), run_after=hour)
+    _effect(wired, "fetch_api_match_id", match=match)  # Behind deadlock-api's wait.
+    _effect(wired, "post_text", lane="stuck", started_at=common.now(), run_after=hour)
+    for _ in range(5):
+        _effect(wired, "post_text", lane="stuck")  # Behind a rate-limit wait.
+    board = _effect(wired, "render_board", match=match)  # The match's own main lane.
+    other = _effect(wired, "post_text", lane="free")
+    panel = _effect(wired, "render_queue")
+    due = effects.due_by_match(limit=3)
+    assert sorted(row.pk for group in due for row in group) == [board.pk, other.pk, panel.pk]
+
+
+def test_a_board_too_large_to_post_fails_at_once(
+    wired: Community, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bot.effects import handlers
+    from bot.renderers.board import BoardTooLarge
+
+    gateway = FakeGateway()
+    match = popped_match(wired, gateway)
+
+    def too_large(state: Any) -> Any:
+        raise BoardTooLarge("over 40")
+
+    monkeypatch.setattr(handlers, "render_board", too_large)
+    common.render_board(match)
+    drain(gateway)
+    effect = OutboxEffect.objects.filter(kind="render_board").latest("id")
+    assert (effect.status, effect.attempts) == (EffectStatus.FAILED, 0)  # Not retried.
+
+
+def test_a_failed_lobby_code_status_does_not_ping_everyone_again(wired: Community) -> None:
+    gateway = FakeGateway()
+    match = popped_match(wired, gateway)
+    match.lobby_code = "ABC123"
+    match.save(update_fields=["lobby_code"])
+    effects.record_resource(match.pk, ResourceKind.TEAM_A_VOICE, 4243)
+    common.add_effect(wired, "announce_lobby_code", match=match)
+    common.add_effect(wired, "lobby_code_status", match=match)
+    gateway.fail_next["set_voice_status"] = _http_error(503, 0)
+    drain(gateway)
+    status = OutboxEffect.objects.get(kind="lobby_code_status")
+    assert (status.status, status.attempts) == (EffectStatus.PENDING, 1)
+    OutboxEffect.objects.filter(pk=status.pk).update(run_after=common.now())
+    drain(gateway)
+    pings = [text for _channel, text, _users in gateway.texts if "Lobby code" in text]
+    assert len(pings) == 1
+    assert "ABC123" in gateway.statuses[4243]
 
 
 def test_the_client_caps_how_long_discord_py_sleeps_on_a_429() -> None:
@@ -195,7 +278,7 @@ def test_ready_presses_wait_a_moment_so_the_board_edits_once(
 ) -> None:
     gateway = FakeGateway()
     match = popped_match(wired, gateway)
-    monkeypatch.setattr(common, "READY_BOARD_DELAY_SECONDS", 1.0)
+    monkeypatch.setattr(common, "BURST_BOARD_DELAY_SECONDS", 1.0)
     players = [p.player for p in match.participants.select_related("player")][:4]
     for player in players:
         lobby.mark_ready(match.pk, player)
@@ -353,3 +436,110 @@ def test_failed_requests_count_as_discord_counts_them(
         for _ in range(7):
             counter.record(403)
     assert len([r for r in caplog.records if r.levelno == logging.ERROR]) == 1  # Once a window.
+
+
+# --- Fewer requests for the same board -----------------------------------------------------
+
+
+def _grid_ids(match_id: int) -> list[int | None]:
+    from bot.effects.handlers import GRID_KINDS
+
+    return [effects.resource_id(match_id, kind) for kind in GRID_KINDS]
+
+
+def test_a_champion_draft_step_edits_the_grid_in_place(wired: Community) -> None:
+    from league.domain.draft_plan import build_plan, team_for_role
+    from league.services import draft
+
+    gateway = FakeGateway()
+    match = to_champion_draft(popped_match(wired, gateway))
+    drain(gateway)
+    common.clear_notices(match)  # The pings of the steps above, which a real match spaces out.
+    common.render_board(match)
+    drain(gateway)
+    board = effects.resource_id(match.pk, ResourceKind.BOARD_MESSAGE)
+    grid = _grid_ids(match.pk)
+    assert board is not None and any(grid)
+    posted = len(gateway.views)
+    step = build_plan(match.mode)[match.step_index]
+    captain = match.captain_of(team_for_role(step.role, match.champion_first_pick)).player
+    draft.choose_champion(match.pk, captain, match.step_index, draft.available_champions(match)[0])
+    drain(gateway)
+    assert len(gateway.views) == posted  # Nothing posted afresh, nothing deleted.
+    assert effects.resource_id(match.pk, ResourceKind.BOARD_MESSAGE) == board
+    assert _grid_ids(match.pk) == grid
+    assert {board, *[g for g in grid if g]} <= gateway.edited
+
+
+def test_a_notice_below_the_board_leaves_it_where_it_is(wired: Community) -> None:
+    gateway = FakeGateway()
+    match = popped_match(wired, gateway)
+    drain(gateway)
+    board = effects.resource_id(match.pk, ResourceKind.BOARD_MESSAGE)
+    channel = effects.resource_id(match.pk, ResourceKind.TEXT)
+    common.add_effect(wired, "ping_lobby", {"text": "hello"}, match=match)
+    drain(gateway)
+    common.render_board(fresh(match), at_once=True)
+    drain(gateway)
+    # The notice is last and the board above it was edited in place, not posted again.
+    assert effects.resource_id(match.pk, ResourceKind.BOARD_MESSAGE) == board
+    assert gateway.messages[channel][-1] in effects.live_notices(match.pk)
+    # Chat on top of it counts towards a move as before.
+    for _ in range(effects.BOARD_MOVE_AFTER_MESSAGES):
+        effects.note_chat(channel)
+    assert not effects.notices_below_board(match.pk, board)
+
+
+def test_bursty_phases_fold_board_renders_and_the_first_board_goes_up_at_once(
+    wired: Community, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(common, "BURST_BOARD_DELAY_SECONDS", 1.0)
+    gateway = FakeGateway()
+    for player in [make_player(n) for n in range(1, 13)]:
+        queue.join(wired.pk, player)
+    match = OutboxEffect.objects.get(kind="create_lobby").match
+    first = OutboxEffect.objects.get(kind="render_board", match=match)
+    assert first.run_after <= common.now()  # Ahead of the twelve DMs, not behind them.
+    drain(gateway)
+    for status in (Status.CAPTAIN_PHASE, Status.CAPTAIN_CHECKIN, Status.TEAM_CONFIRM):
+        match.status = status
+        common.render_board(match)
+        render = OutboxEffect.objects.filter(
+            kind="render_board", match=match, status=EffectStatus.PENDING
+        ).get()
+        assert render.run_after > common.now()
+        render.delete()
+    match.status = Status.CHAMPION_DRAFT
+    common.render_board(match)
+    assert (
+        OutboxEffect.objects.get(
+            kind="render_board", match=match, status=EffectStatus.PENDING
+        ).run_after
+        <= common.now()
+    )
+
+
+def test_ready_from_the_dm_edits_that_dm_once(wired: Community) -> None:
+    gateway = FakeGateway()
+    match = popped_match(wired, gateway)
+    participant = match.participants.select_related("player").first()
+    participant.ready_dm_message_id = 777
+    participant.save(update_fields=["ready_dm_message_id"])
+    lobby.mark_ready(match.pk, participant.player, from_dm=True)
+    assert not OutboxEffect.objects.filter(kind="ready_dm_done").exists()
+    other = match.participants.select_related("player").exclude(pk=participant.pk).first()
+    other.ready_dm_message_id = 778
+    other.save(update_fields=["ready_dm_message_id"])
+    lobby.mark_ready(match.pk, other.player)  # On the board: the DM still needs its edit.
+    assert OutboxEffect.objects.filter(kind="ready_dm_done").count() == 1
+
+
+def test_match_channels_are_made_with_the_servers_slowmode(wired: Community) -> None:
+    from league.services import runtime
+
+    gateway = FakeGateway()
+    match = popped_match(wired, gateway)
+    text_id = effects.resource_id(match.pk, ResourceKind.TEXT)
+    assert gateway.slowmodes[text_id] == 3  # The default, in the create call itself.
+    runtime.update(wired, match_chat_slowmode_seconds=0)
+    assert runtime.of(wired).match_chat_slowmode_seconds == 0

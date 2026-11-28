@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import functools
+import operator
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+
+from django.db.models import Q
 
 from league.domain.engine import TIMED, Status
 from league.models import (
@@ -28,17 +32,25 @@ MAX_BACKOFF_SECONDS = 300
 
 # A board that moves just as a captain clicks could cost them a wrong ban, so chat only moves it
 # once it's being pushed out of view, and then waits for a quiet moment. Non-stop chat can only hold
-# that off for so long. A message or two left below the board moves it much later, if nothing else
-# has by then.
+# that off for so long: 8 s, measured on live Discord against twelve players' worth of spam, keeps
+# the board in view most of the time for about 6 requests a move in the hero draft (3 a move
+# elsewhere), far inside Discord's 5 posts a second per channel. A message or two left below the
+# board moves it much later, if nothing else has by then.
 BOARD_MOVE_AFTER_MESSAGES = 3
 BOARD_MOVE_QUIET_SECONDS = 5
-BOARD_MOVE_MAX_WAIT_SECONDS = 20
+BOARD_MOVE_MAX_WAIT_SECONDS = 8
 BOARD_MOVE_IDLE_SECONDS = 3600
 
 
 Lane = int | str
 VOICE_SETUP_KINDS = frozenset({"create_team_voice", "team_move_player", "swap_team_voice"})
 VOICE_KINDS = VOICE_SETUP_KINDS | {"restart_voice", "cleanup_voice"}
+# deadlock-api calls: a slow or rate-limited answer (60 s reads, waits of minutes) must not hold
+# up the match's board and notices, so they run in a lane of their own.
+API_KINDS = frozenset({"create_api_lobby", "fetch_api_match_id", "check_match_api"})
+# Replaced board and grid messages: deleted one at a time, which keeps them inside Discord's delete
+# bucket, in a lane of their own so the board never waits on them.
+DELETE_KINDS = frozenset({"delete_message"})
 
 
 def cancel_voice_setup(match_id: int) -> None:
@@ -59,14 +71,20 @@ def queue_voice_cleanup(match: Match) -> None:
 def lane_key(match_id: int | None, lane: str, kind: str, community_id: int) -> Lane:
     """Which effects must run in order with this one.
 
-    A match's voice setup, moves and cleanup have a separate ordered lane; its other effects
-    share the main match lane, scrims included. Work outside a match runs in the lane it
-    names (a server's staff alerts, say), or else one lane per kind and server, so a queue panel
-    that keeps failing in one server never holds up another server or another kind of work.
+    A match's voice setup, moves and cleanup have a separate ordered lane, and so do its
+    deadlock-api calls and the deletes of its replaced messages; its other effects share the
+    main match lane, scrims included. Work
+    outside a match runs in the lane it names (a server's staff alerts, say), or else one lane
+    per kind and server, so a queue panel that keeps failing in one server never holds up
+    another server or another kind of work.
     """
     if match_id is not None:
         if kind in VOICE_KINDS:
             return f"voice:{match_id}"
+        if kind in API_KINDS:
+            return f"api:{match_id}"
+        if kind in DELETE_KINDS:
+            return f"deletes:{match_id}"
         return match_id
     return lane or f"{kind}:{community_id}"
 
@@ -75,32 +93,51 @@ def lane_of(effect: OutboxEffect) -> Lane:
     return lane_key(effect.match_id, effect.lane, effect.kind, effect.community_id)
 
 
+def _lane_filter(match_id: int | None, lane: str, kind: str, community_id: int) -> Q:
+    """The effects in the same lane as this one, as a query (the database form of `lane_key`)."""
+    if match_id is not None:
+        for kinds in (VOICE_KINDS, API_KINDS, DELETE_KINDS):
+            if kind in kinds:
+                return Q(match_id=match_id, kind__in=kinds)
+        return Q(match_id=match_id) & ~Q(kind__in=VOICE_KINDS | API_KINDS | DELETE_KINDS)
+    if lane:
+        return Q(match_id__isnull=True, lane=lane)
+    return Q(match_id__isnull=True, lane="", kind=kind, community_id=community_id)
+
+
 def due_by_match(limit: int = 200) -> list[list[OutboxEffect]]:
     """Due effects grouped by lane (see `lane_key`), so each lane runs its effects in order.
 
-    If an earlier effect of a lane is waiting on a retry, later ones of that lane wait too.
+    An effect that has begun and isn't finished holds its lane: it is running, waiting on a
+    retry, or waiting out a rate limit. Later effects of that lane wait for it, and are left out
+    before the limit is applied, so a lane stuck behind a long wait can't fill the batch and keep
+    every other lane's due work from being fetched.
     """
     moment = now()
-    retrying: dict[Lane, int] = {}
-    waiting = OutboxEffect.objects.filter(status=EffectStatus.PENDING, attempts__gt=0).order_by(
-        "id"
-    )
-    for match_id, lane, kind, community_id, effect_id in waiting.values_list(
+    holding: dict[Lane, tuple[int, Q]] = {}
+    held = OutboxEffect.objects.filter(
+        Q(attempts__gt=0) | Q(started_at__isnull=False), status=EffectStatus.PENDING
+    ).order_by("id")
+    for match_id, lane, kind, community_id, effect_id in held.values_list(
         "match_id", "lane", "kind", "community_id", "id"
     ):
-        retrying.setdefault(lane_key(match_id, lane, kind, community_id), effect_id)
+        key = lane_key(match_id, lane, kind, community_id)
+        if key not in holding:
+            holding[key] = (effect_id, _lane_filter(match_id, lane, kind, community_id))
 
+    due = OutboxEffect.objects.filter(status=EffectStatus.PENDING, run_after__lte=moment)
+    if holding:
+        due = due.exclude(
+            functools.reduce(
+                operator.or_, (Q(id__gt=first) & same for first, same in holding.values())
+            )
+        )
     groups: dict[Lane, list[OutboxEffect]] = defaultdict(list)
-    due = (
-        OutboxEffect.objects.filter(status=EffectStatus.PENDING, run_after__lte=moment)
-        .select_related("community", "match")
-        .order_by("id")[:limit]
-    )
-    for effect in due:
+    for effect in due.select_related("community", "match").order_by("id")[:limit]:
         key = lane_of(effect)
-        blocker = retrying.get(key)
-        if blocker is not None and effect.pk > blocker:
-            continue
+        first = holding.get(key)
+        if first is not None and effect.pk > first[0]:
+            continue  # Already left out above; a second check costs nothing.
         groups[key].append(effect)
     return list(groups.values())
 
@@ -144,6 +181,16 @@ def mark_later(effect_id: int, seconds: float, why: str) -> None:
         run_after=now() + timedelta(seconds=max(seconds, 1)),
         started_at=None,
         last_error=why[:2000],
+    )
+
+
+def mark_rate_limited(effect_id: int, seconds: float, why: str) -> None:
+    """Discord asked for a wait longer than the client sleeps through: run it again after that,
+    with no attempt used, since a rate limit isn't a failure and a long-window bucket (a daily
+    channel cap, say) can ask more than once. Unlike `mark_later` it keeps `started_at`, so its
+    lane keeps waiting for it and the lane's effects stay in order (see `due_by_match`)."""
+    OutboxEffect.objects.filter(pk=effect_id, status=EffectStatus.PENDING).update(
+        run_after=now() + timedelta(seconds=max(seconds, 1)), last_error=why[:2000]
     )
 
 
@@ -203,7 +250,34 @@ def mark_resource_deleted(match_id: int, kind: str) -> None:
 
 
 def record_notice(match_id: int, message_id: int) -> None:
+    """A notice of ours is up, below the board. It counts towards moving the board as a chat
+    message does, but until then the board stays put: a ping or two below it leaves it in view
+    (see `notices_below_board`), and moving it would cost a post and a delete each time."""
     MatchResource.objects.create(match_id=match_id, kind=ResourceKind.NOTICE, discord_id=message_id)
+    match = Match.objects.select_related("community").get(pk=match_id)
+    _debounce_move(match.community, "move_board", BOARD_MOVE, match=match, notice=True)
+
+
+# How many of our own notices may sit below the board before it moves back below them.
+NOTICES_BELOW_BOARD = 2
+
+
+def notices_below_board(match_id: int, after_id: int) -> frozenset[int]:
+    """Our live notices below the board's flow, whose last message is `after_id`, when nobody
+    has chatted since the board last moved: if the channel's last message is one of these, the
+    board is still in view. Empty once anyone has chatted, or once there are more than
+    NOTICES_BELOW_BOARD of them. (Discord's message IDs grow with time.)"""
+    pending = OutboxEffect.objects.filter(
+        match_id=match_id, kind="move_board", status=EffectStatus.PENDING, attempts=0
+    ).first()
+    if pending is not None and int(pending.payload.get("messages", 0)) != int(
+        pending.payload.get("notices", 0)
+    ):
+        return frozenset()  # Someone chatted since the board last moved.
+    below = [message_id for message_id in live_notices(match_id) if message_id > after_id]
+    if not 0 < len(below) <= NOTICES_BELOW_BOARD:
+        return frozenset()
+    return frozenset(below)
 
 
 def record_ready_dm(match_id: int, discord_user_id: int, message_id: int) -> None:
@@ -359,9 +433,11 @@ def _debounce_move(
     match: Match | None = None,
     lane: str | None = None,
     payload: dict[str, object] | None = None,
+    notice: bool = False,
 ) -> None:
     """Move once chat is pushing the message out of view, after a quiet moment. Non-stop chat
-    can only hold that off for so long; a message or two left below moves it much later."""
+    can only hold that off for so long; a message or two left below moves it much later.
+    `notice`: the message is one of our own notices, counted apart as well."""
     moment = now()
     pending = OutboxEffect.objects.filter(
         match=match, lane=lane or "", kind=kind, status=EffectStatus.PENDING, attempts=0
@@ -370,7 +446,7 @@ def _debounce_move(
         add_effect(
             community,
             kind,
-            {**(payload or {}), "messages": 1},
+            {**(payload or {}), "messages": 1, "notices": int(notice)},
             match=match,
             lane=lane,
             run_after=moment + timedelta(seconds=timing.idle_seconds),
@@ -378,6 +454,8 @@ def _debounce_move(
         return
     messages = int(pending.payload.get("messages", 0)) + 1
     pending.payload["messages"] = messages
+    if notice:
+        pending.payload["notices"] = int(pending.payload.get("notices", 0)) + 1
     if messages >= timing.after_messages:
         latest = moment + timedelta(seconds=timing.max_wait_seconds)
         move_by = datetime.fromisoformat(pending.payload.setdefault("move_by", latest.isoformat()))

@@ -24,10 +24,14 @@ def match_text(match_id: int) -> str:
     return f"match-{match_id}"
 
 
-def team_voice(match_id: int, captain: str) -> str:
+def team_label(captain: str) -> str:
+    """The team's name on the board, `Kestrel's Team`, or `Team` with no captain yet."""
     who = _clean(captain)
-    name = f"Match {match_id} · {who}'s Team" if who else f"Match {match_id} · Team"
-    return name[:MAX_LENGTH]
+    return f"{who}'s Team"[:MAX_LENGTH] if who else "Team"
+
+
+def team_voice(match_id: int, captain: str) -> str:
+    return f"Match {match_id} · {team_label(captain)}"[:MAX_LENGTH]
 
 
 def pooled_voice(number: int) -> str:
