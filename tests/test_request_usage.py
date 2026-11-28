@@ -162,3 +162,38 @@ def test_unavailable_dm_cache_is_bounded(monkeypatch: pytest.MonkeyPatch) -> Non
     for user_id in (1, 2, 3):
         gateway._remember_unavailable_dm(user_id)
     assert set(gateway._dm_unavailable_until) == {2, 3}
+
+
+def test_the_busiest_second_counts_bot_token_requests_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock = iter([0.0, 0.1, 0.2, 0.3, 1.5, 1.6, 2.0])
+    failed = request_health.FailedRequests(clock=lambda: next(clock))
+    url = "https://discord.com/api/v10/channels/9/messages"
+    for _ in range(3):
+        failed.response("POST", url, 200, {})
+    failed.response("POST", "https://discord.com/api/v10/interactions/1/tok/callback", 204, {})
+    failed.response("PATCH", url + "/5", 200, {})  # 1.5 s: the first three have left the window.
+    with caplog.at_level(logging.INFO, logger="bot.request_health"):
+        failed.log_usage_summary()
+    summary = next(r for r in caplog.records if r.getMessage() == "Discord API usage")
+    assert summary.peak_per_second == 3
+
+
+def test_load_tests_get_a_line_per_request_without_tokens(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failed = request_health.FailedRequests()
+    failed.log_each = True
+    headers = {"X-RateLimit-Bucket": "abc", "X-RateLimit-Limit": "5", "X-RateLimit-Remaining": "4"}
+    with caplog.at_level(logging.INFO, logger="bot.request_log"):
+        failed.response(
+            "POST", "https://discord.com/api/v10/channels/77/messages", 200, headers, 0.25
+        )
+        failed.response("POST", "https://discord.com/api/v10/webhooks/8/secret", 200, {}, 0.1)
+    lines = [r for r in caplog.records if r.name == "bot.request_log"]
+    assert [(r.route, r.major, r.ms) for r in lines] == [
+        ("/channels/:id/messages", "77", 250),
+        ("/webhooks/:id/:token", None, 100),
+    ]
+    assert "secret" not in str([r.__dict__ for r in lines])
