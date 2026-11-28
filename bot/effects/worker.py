@@ -19,6 +19,7 @@ import discord
 from bot.db import db
 from bot.effects.gateway import ChannelGone, EditCapped, Gateway
 from bot.effects.handlers import HANDLERS, Env, Later, Skip
+from bot.renderers.board import BoardTooLarge
 from league import log_context, timings
 from league.models import OutboxEffect
 from league.models.outbox import EffectStatus
@@ -160,16 +161,28 @@ class EffectWorker:
                 "Edit refused: message too old", extra={"kind": effect.kind, "message": str(exc)}
             )
             return True
+        except BoardTooLarge as exc:
+            # Built the same way it fails the same way, and nothing reached Discord. The next
+            # change to the match renders it afresh; the board already up stays meanwhile.
+            await db(effects.mark_failed, effect.pk, str(exc))
+            logger.error("Board too large to post", extra={"kind": effect.kind, "why": str(exc)})
+            return True
         except discord.RateLimited as exc:
             logger.warning(
                 "Discord effect deferred by rate limit",
                 extra={"kind": effect.kind, "retry_after_seconds": exc.retry_after},
             )
             # A wait longer than the client's max_ratelimit_timeout. Sleeping it out here would
-            # stall every later effect in this lane, so step aside and come back after it.
-            return await self._retry(
-                effect, f"Rate limited for {exc.retry_after:.0f}s", wait_at_least=exc.retry_after
+            # stall every later effect in this lane's task, so step aside and come back after it.
+            # The lane still waits for it, so its effects stay in order, but no attempt is used:
+            # Discord said when, and a long-window bucket can say so more than once.
+            await db(
+                effects.mark_rate_limited,
+                effect.pk,
+                exc.retry_after,
+                f"Rate limited for {exc.retry_after:.0f}s",
             )
+            return False
         except discord.HTTPException as exc:
             if exc.status in _PERMANENT_STATUS:
                 await self._fail(effect, f"{exc.status} {exc.code}: {exc.text}")

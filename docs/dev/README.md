@@ -128,6 +128,30 @@ only call those.
 A release's migrations run while the previous release still serves, so add columns nullable or
 with a default, and remove a column one release after the code stops using it.
 
+## Load test
+
+Many matches at once on a real Discord test server, with chat flooding every match channel, to
+see how close the bot comes to Discord's limits. Run a dev stack on the real-Discord token
+(`.env` with no simulator settings), with the request log on, then:
+
+```bash
+LOG_FORMAT=json DISCORD_REQUEST_LOG=1 docker compose -f compose.yaml -f compose.dev.yaml up -d
+docker compose -f compose.yaml -f compose.dev.yaml exec web python manage.py dev_loadtest --matches 12
+docker compose -f compose.yaml -f compose.dev.yaml logs bot --since 15m --no-log-prefix \
+  | python devtools/loadtest_report.py
+```
+
+- **`dev_loadtest`** makes stand-in players as needed, pops `--matches` matches at once, pauses
+  their timers and plays every phase through the services, `--moves` moves per match each
+  `--tick` seconds. Chat comes from two webhooks per match channel at `--chat-rate` messages a
+  second of `--chat-lines` lines each; Discord lets webhooks post about 30 a minute in a channel.
+- **The report** gives the busiest second against Discord's 50, every 429 by route and scope, the
+  refused requests Discord counts towards its ban, each bucket by how close it came to running
+  out, and latency by route.
+- Stand-ins have made-up Discord IDs, so their DMs, voice moves and member permissions come back
+  400 or 404. Those don't count towards Discord's ban, but real members would add requests the
+  test can't make.
+
 ## Debugging
 
 - **What did the bot do?** The Discord view's event log, or

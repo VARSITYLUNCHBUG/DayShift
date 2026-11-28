@@ -29,6 +29,8 @@ x-dev-env: &dev-env
   # to this PC by the VM's address (DEV_BIND).
   ALLOWED_HOSTS: "*"
   LOG_FORMAT: ${LOG_FORMAT:-text}
+  # A log line per Discord response, for `manage.py dev_loadtest` and its report.
+  DISCORD_REQUEST_LOG: ${DISCORD_REQUEST_LOG:-}
 
 # The dev-only services get the same hardening as the app.
 x-dev-hardening: &dev-hardening

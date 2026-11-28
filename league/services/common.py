@@ -120,15 +120,23 @@ def clear_notices(match: Match) -> None:
         add_effect(match.community, "clear_notices", match=match)
 
 
-# Twelve Ready presses land within seconds, and each would edit the board. During the ready
-# check a short wait folds them into a few edits; every other step renders at once.
-READY_BOARD_DELAY_SECONDS = 1.0
+# Twelve Ready presses land within seconds, and each would edit the board; so do the captain
+# votes, the captains' check-in and the team check. In those steps a short wait folds a burst
+# into a few edits. The drafts, where one captain acts at a time, render at once.
+BURST_BOARD_DELAY_SECONDS = 1.0
 
 
-def render_board(match: Match) -> None:
+def render_board(match: Match, *, at_once: bool = False) -> None:
+    """`at_once` skips the wait, for a board nobody has seen yet."""
     from league.domain.engine import Status
 
-    delay = READY_BOARD_DELAY_SECONDS if match.status == Status.READY_CHECK else 0
+    bursty = match.status in {
+        Status.READY_CHECK,
+        Status.CAPTAIN_PHASE,
+        Status.CAPTAIN_CHECKIN,
+        Status.TEAM_CONFIRM,
+    }
+    delay = BURST_BOARD_DELAY_SECONDS if bursty and not at_once else 0
     request_render(match.community, "render_board", match, delay_seconds=delay)
 
 

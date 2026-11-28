@@ -710,6 +710,9 @@ def _start_game(match: Match, code: str, *, source: str, actor: Player | None) -
     )
     match.save_transition("lobby_code", "started_at", "api_party_id", "api_lobby_created_at")
     add_effect(match.community, "announce_lobby_code", match=match)
+    # In the main lane too, so it never waits behind another match's voice work, but on its own,
+    # so retrying it can't ping everyone again.
+    add_effect(match.community, "lobby_code_status", match=match)
     add_effect(
         match.community,
         "report_reminder",

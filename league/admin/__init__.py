@@ -248,6 +248,7 @@ class RuntimeSettingsForm(forms.ModelForm):
             "auto_captain",
             "open_match_voice",
             "match_channel_close_minutes",
+            "match_chat_slowmode_seconds",
             "score_ocr",
             "lobby_region",
             "api_results",

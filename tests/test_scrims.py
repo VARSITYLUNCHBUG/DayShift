@@ -414,15 +414,15 @@ def test_the_board_posts_then_keeps_its_grid_below(server: Community) -> None:
     grid = _grid_ids(match)
     assert len(grid) == 2
     assert gateway.messages[CHANNEL] == [posted, *grid]
-    # A pick reposts the grid, so nothing in the channel is ever "(edited)" but the board.
+    # A pick edits the grid where it is: no posts, no deletes.
     match = _fresh(match)
     draft.choose_champion(
         match.pk, acting_captain(match), match.step_index, draft.available_champions(match)[0]
     )
     drain(gateway)
     assert _board_id(match) == posted
-    assert not set(_grid_ids(match)) & set(grid)
-    assert gateway.messages[CHANNEL] == [posted, *_grid_ids(match)]
+    assert _grid_ids(match) == grid and set(grid) <= gateway.edited
+    assert gateway.messages[CHANNEL] == [posted, *grid]
     # A scrim posts no notices and never gets channels of its own.
     assert not MatchResource.objects.filter(match=match, kind=ResourceKind.TEXT).exists()
     assert gateway.texts == []
@@ -507,16 +507,24 @@ def test_a_failed_delete_is_retried_on_its_own(server: Community) -> None:
     gateway = FakeGateway()
     match = _captained(server)
     drain(gateway)
-    old_grid = _grid_ids(match)
+    old_board, old_grid = _board_id(match), _grid_ids(match)
     match = _fresh(match)
+    gateway.chat(CHANNEL)  # Chat below it: the next render posts the board and grid afresh.
     gateway.fail_next["delete_message"] = _http_error(500, 0)
     draft.choose_champion(
         match.pk, acting_captain(match), match.step_index, draft.available_champions(match)[0]
     )
     drain(gateway)
-    retried = OutboxEffect.objects.filter(kind="delete_message", match=match)
-    assert retried.count() == 1 and retried.get().status == EffectStatus.DONE
-    assert not set(old_grid) & set(gateway.messages[CHANNEL])  # Nothing left behind.
+    # Each replaced message is a delete job of its own, in the match's delete lane.
+    deletes = OutboxEffect.objects.filter(kind="delete_message", match=match)
+    assert deletes.count() == 3
+    assert {effects.lane_of(row) for row in deletes} == {f"deletes:{match.pk}"}
+    failed = deletes.get(attempts=1)  # The rest of the lane waits behind its retry.
+    assert set(deletes.values_list("status", flat=True)) == {EffectStatus.PENDING}
+    deletes.filter(pk=failed.pk).update(run_after=effects.now())
+    drain(gateway)
+    assert not deletes.exclude(status=EffectStatus.DONE).exists()
+    assert not {old_board, *old_grid} & set(gateway.messages[CHANNEL])  # Nothing left behind.
 
 
 @pytest.mark.django_db(transaction=True)

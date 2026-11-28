@@ -173,7 +173,7 @@ def test_an_exhausted_short_window_waits_before_resetting() -> None:
         bucket.remaining = 0
         bucket.expires = asyncio.get_running_loop().time() + 0.01
         await bucket._refresh()
-        assert bucket.remaining == 2
+        assert bucket.remaining == 1  # One request probes the new window (see the next test).
 
     asyncio.run(scenario())
 
@@ -186,5 +186,61 @@ def test_each_bot_uses_the_corrected_factory_and_retains_the_wait_cap() -> None:
         assert bot.http.get_ratelimit("test-route") is bucket
         assert bot.http.max_ratelimit_timeout == 60
         await bot.close()
+
+    asyncio.run(scenario())
+
+
+def test_after_a_window_ends_one_request_probes_before_the_rest_go() -> None:
+    """Discord refills buckets gradually, so a reset doesn't let every waiter burst at once."""
+
+    async def scenario() -> None:
+        bucket = QuotaAwareRatelimit(60)
+        bucket.update(
+            SimpleNamespace(
+                headers={
+                    "X-Ratelimit-Limit": "5",
+                    "X-Ratelimit-Remaining": "0",
+                    "X-Ratelimit-Reset-After": "0.05",
+                }
+            )
+        )
+        bucket.remaining = 0
+        waiters = [asyncio.create_task(bucket.acquire()) for _ in range(4)]
+        await asyncio.sleep(0.15)  # The window ends: only the probe goes.
+        assert sum(task.done() for task in waiters) == 1
+        bucket.update(
+            SimpleNamespace(
+                headers={
+                    "X-Ratelimit-Limit": "5",
+                    "X-Ratelimit-Remaining": "4",
+                    "X-Ratelimit-Reset-After": "1",
+                }
+            )
+        )
+        await bucket.__aexit__(None, None, None)  # The probe's answer frees the rest.
+        await asyncio.wait_for(asyncio.gather(*waiters), 2.0)
+
+    asyncio.run(scenario())
+
+
+def test_the_global_pace_holds_bot_token_requests_to_its_rate() -> None:
+    from bot.ratelimits import GlobalPace
+
+    async def scenario() -> None:
+        now = [0.0]
+        slept: list[float] = []
+
+        async def sleep(seconds: float) -> None:
+            slept.append(seconds)
+            now[0] += seconds
+
+        pace = GlobalPace(3, clock=lambda: now[0], sleep=sleep)
+        url = "https://discord.com/api/v10/channels/1/messages"
+        for _ in range(3):
+            await pace.wait(url)
+        await pace.wait("https://discord.com/api/v10/interactions/1/tok/callback")  # Exempt.
+        assert slept == []
+        await pace.wait(url)  # The fourth in the same second waits for the first to age out.
+        assert slept == [1.0] and pace.take_delayed() == 1 and pace.take_delayed() == 0
 
     asyncio.run(scenario())

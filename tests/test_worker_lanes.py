@@ -165,6 +165,12 @@ def test_lane_keys() -> None:
     assert lane_key(101, "", "create_team_voice", 1) == "voice:101"
     assert lane_key(101, "", "team_move_player", 1) == "voice:101"
     assert lane_key(101, "", "cleanup_voice", 1) == "voice:101"
+    # deadlock-api's slow reads and long waits never hold up the match's board.
+    assert lane_key(101, "", "check_match_api", 1) == "api:101"
+    assert lane_key(101, "", "create_api_lobby", 1) == "api:101"
+    assert lane_key(101, "", "fetch_api_match_id", 1) == "api:101"
+    # Replaced board and grid messages go one at a time, off the board's path.
+    assert lane_key(101, "", "delete_message", 1) == "deletes:101"
 
 
 def test_slow_voice_setup_does_not_block_its_own_match_board(

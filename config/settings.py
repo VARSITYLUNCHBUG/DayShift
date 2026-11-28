@@ -193,6 +193,8 @@ LOGGING = {
 
 # --- Bot ---------------------------------------------------------------------------------------
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
+# A log line per Discord response, for load tests (devtools/loadtest_report.py). Noisy: leave off.
+DISCORD_REQUEST_LOG = os.environ.get("DISCORD_REQUEST_LOG", "").lower() in {"1", "true", "yes"}
 VOICE_CREATE_INTERVAL_SECONDS = max(
     0.0, float(os.environ.get("VOICE_CREATE_INTERVAL_SECONDS", "5"))
 )

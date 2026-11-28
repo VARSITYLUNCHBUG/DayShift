@@ -91,8 +91,12 @@ sequenceDiagram
    and moves; a channel returned after the players leave is recorded and cleaned up.
    Team voice channels are pooled per server (`voice_channel_slots`) and reused rather than
    created and deleted for every match ([Team voice pool](match-flow.md#team-voice-pool)).
-   Server errors and rate limits are retried with backoff; an effect that keeps failing ends as
-   `failed`, visible in the admin and logged as an error.
+   Server errors are retried with backoff; an effect that keeps failing ends as `failed`,
+   visible in the admin and logged as an error. A rate limit isn't a failure: the effect runs
+   again once Discord's wait is over, using none of its tries, and its lane waits for it. Work
+   held up that way is left out of the worker's fetch, so it never crowds out other lanes. A
+   board that won't fit in one message (Discord's 40 components) falls back to a compact
+   layout, and one that still won't fit fails at once rather than being retried.
 
 ## Staying inside Discord's limits
 
@@ -105,9 +109,15 @@ keeps well clear of that:
   would be refused, and waits out a 429. Past a minute (`max_ratelimit_timeout`) it raises
   instead, and the worker retries that effect after the wait rather than stall its lane. The 12
   member moves when teams are set, or at cleanup, are paced the same way; nothing batches them.
-- **Fewer calls.** Board, queue and leaderboard renders coalesce, and the queue and a ready
-  check's board wait a moment so a burst is one edit. A render that would show the same thing is
-  skipped (a fingerprint of the view, per message, forgotten every few hours and on restart).
+- **Fewer calls.** Board, queue and leaderboard renders coalesce. The queue, and the board in the
+  steps where many people press at once (the ready check, the captain vote and check-in, the team
+  check), wait a second so a burst is one edit; the first board of a pop goes up at once, ahead of
+  the DMs. A render that would show the same thing is skipped (a fingerprint of the board and of
+  its grid, per message, forgotten every few hours and on restart), and the champion grid is
+  edited in place rather than posted again each turn. A ping of ours below the board doesn't move
+  it: with no chat, up to two notices may sit under it and it's still edited where it is; a
+  notice counts towards a move as a chat message does. deadlock-api calls run in a lane of their
+  own per match, so a slow answer never holds up the board.
   Each channel's newest message is known from the gateway's events, so keeping a board in view
   doesn't read history. One invite per channel serves a whole pop. Slash commands are synced
   only when they change (`communities.commands_fingerprint`).
@@ -121,6 +131,9 @@ keeps well clear of that:
   A 429 is logged separately with its scope and retry header; a long wait raised before a new
   HTTP request is logged as `Discord effect deferred by rate limit`. Tokens and query strings
   are excluded. Bucket values are observations from the last response, not a live global quota.
+  The summary also gives the busiest second's count of bot-token requests and how many the
+  global pace held back. With `DISCORD_REQUEST_LOG` on, every response is logged on its own
+  line too, for the load test ([dev/README.md](dev/README.md#load-test)).
 - **Unavailable DMs.** A failed DM delivery is remembered for 60 seconds, so further notices in
   the same burst use the existing channel fallback without another refused DM request. After
   that the bot tries again, allowing changed privacy settings to take effect. Server errors
@@ -132,9 +145,16 @@ keeps well clear of that:
   application delays, not Discord limits; the API's returned cooldown still takes precedence.
 - **Long quota windows.** `bot/ratelimits.py` corrects discord.py 2.7's bucket wait-cap behavior:
   available tokens may be used even if the window resets tomorrow. Exhausted buckets retain
-  their expiry and respect the wait cap; HTTP 429 handling remains in discord.py. This small
-  per-client bucket compatibility layer uses library internals and has regression tests, so
-  check it when upgrading discord.py.
+  their expiry and respect the wait cap; HTTP 429 handling remains in discord.py.
+- **A window that ends.** discord.py treats a bucket whose window has ended as full again and lets
+  every waiting request go at once, but Discord's buckets refill gradually, so that burst draws
+  429s. After a reset one request goes first, and its response says how many more may follow.
+- **50 a second, for the whole bot.** discord.py only reacts to a global 429. `GlobalPace` holds
+  bot-token requests to 40 in any rolling second, just before each one goes out, so retries
+  count and a request waiting on its own bucket holds no slot. Interaction responses and
+  webhooks don't count. A load test of twelve matches at once peaked at 53 a second without it.
+  These layers use library internals and have regression tests, so check them when upgrading
+  discord.py.
 - **Chat and voice events stay off the database thread.** The bot sees every message and voice
   move in the server. An in-memory list of the channels that matter (`bot/watched.py`) drops
   the rest before they queue behind button presses on the one database thread.

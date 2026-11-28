@@ -136,21 +136,27 @@ def _reload(match_id: int) -> Match:
 async def _notice(
     env: Env, text: str, *, user_ids: Iterable[int] = (), role_ids: Iterable[int] = ()
 ) -> int:
-    """Post a message about the flow. It stays until the match moves on, with the board below it.
+    """Post a message about the flow. It stays until the match moves on.
 
-    The board moves in its own effect, so a failed move can't retry this and ping people twice.
+    The board isn't moved below it at once: a notice or two under the board leaves it in view, so
+    it's edited where it is, and the notice counts towards a move as chat does
+    (`effects.record_notice`). A move is its own effect anyway, so a failed one can't retry this
+    and ping people twice.
     """
     message_id = await env.gateway.send_text(
         await _text_channel(env), text, user_ids=user_ids, role_ids=role_ids
     )
     await db(effects.record_notice, env.match_id, message_id)
-    await db(_request_board, env.match_id)
     return message_id
 
 
 READY_PING_TEXT = (
     "your lobby is ready. Press **Ready** on the board below, and wait in the Waiting Room."
 )
+
+
+def _slowmode(community_id: int) -> int:
+    return runtime.of(community_id).match_chat_slowmode_seconds
 
 
 def _open_voice(community_id: int) -> bool:
@@ -188,6 +194,7 @@ async def create_lobby(env: Env) -> None:
             members,
             await db(_match_staff_roles, community.pk),
             viewer_role_ids=_viewer_roles(env),
+            slowmode_seconds=await db(_slowmode, community.pk),
         )
         await db(effects.record_resource, env.match_id, ResourceKind.TEXT, text_id)
     # No lobby voice of its own: the Waiting Room is the lobby until teams have their channels.
@@ -447,11 +454,14 @@ async def _render_board(
     if channel_id is None or state is None:
         raise Skip("Lobby channel isn't up yet; creating it renders the board.")
     resources = live
+    messages = _match_flow(resources, channel_id)
+    if bottom is None and messages.board_id is not None:
+        bottom = await _board_in_view(env, messages)
     try:
         reposted = await flow.render(
             env.gateway,
             _MatchFlowStore(env.match_id),
-            _match_flow(resources, channel_id),
+            messages,
             render_board(state),
             render_pickers(state),
             log_extra={"match": env.match_id},
@@ -466,6 +476,16 @@ async def _render_board(
         await db(effects.cancel_board_moves, env.match_id)  # Chat now starts counting afresh.
 
 
+async def _board_in_view(env: Env, messages: flow.FlowMessages) -> bool:
+    """The board is last in its channel, or only a notice or two of ours came after it."""
+    if await flow.at_bottom(env.gateway, messages):
+        return True
+    if messages.last_id is None:
+        return False
+    below = await db(effects.notices_below_board, env.match_id, messages.last_id)
+    return bool(below) and await env.gateway.latest_message_id(messages.channel_id) in below
+
+
 @effect("render_board")
 async def render_board_effect(env: Env) -> None:
     await _render_board(env)
@@ -478,13 +498,13 @@ async def move_board(env: Env) -> None:
     if channel_id is None or ResourceKind.BOARD_MESSAGE not in resources:
         raise Skip("The channel has closed.")
     try:
-        bottom = await flow.at_bottom(env.gateway, _match_flow(resources, channel_id))
+        in_view = await _board_in_view(env, _match_flow(resources, channel_id))
     except ChannelGone:
         if await db(scrims.is_host_channel, channel_id):
             await db(scrims.close_gone, env.match_id)
         raise
-    if bottom:
-        raise Skip("The board is already last.")
+    if in_view:
+        raise Skip("The board is already last, or only a notice or two of ours is below it.")
     await _render_board(env, resources, channel_id, bottom=False)  # Checked just now.
 
 
@@ -744,18 +764,26 @@ async def refresh_staff_alert(env: Env) -> None:
 
 @effect("announce_lobby_code")
 async def announce_lobby_code(env: Env) -> None:
+    """The ping only. The voice statuses are an effect of their own (`lobby_code_status`), so a
+    failed status call retries just that, and nobody is pinged twice."""
     match = await db(_reload, env.match_id)
     members = await db(_active_user_ids, match)
     await _notice(env, f"Lobby code: `{match.lobby_code}`", user_ids=members)
+
+
+@effect("lobby_code_status")
+async def lobby_code_status(env: Env) -> None:
+    match = await db(_reload, env.match_id)
     resources = await db(effects.resources, env.match_id)
     captains = await db(boards.captain_names, match)
     for team, kind in TEAM_VOICES:
         channel_id = resources.get(kind)
         if channel_id:
-            # The team stays in the status: a pooled channel's name doesn't say whose it is.
-            label = names.team_voice(env.match_id, captains.get(team, ""))
+            # The code first, where a glance at the channel list finds it, then whose team it is:
+            # a pooled channel's name doesn't say.
+            label = names.team_label(captains.get(team, ""))
             await env.gateway.set_voice_status(
-                channel_id, f"{label} · Lobby code: {match.lobby_code}", paced=False
+                channel_id, f"{match.lobby_code} · {label}", paced=False
             )
 
 
@@ -1279,7 +1307,8 @@ async def delete_board(env: Env) -> None:
 
 
 def _queue_delete(channel_id: int, message_id: int, *, match_id: int) -> None:
-    """A delete that failed mid-render, retried as a job of its own in the match's lane."""
+    """A replaced board or grid message, deleted as a job of its own in the match's delete lane
+    (`effects.lane_key`), so deletes keep to Discord's pace without holding up the board."""
     match = Match.objects.select_related("community").get(pk=match_id)
     add_effect(
         match.community,

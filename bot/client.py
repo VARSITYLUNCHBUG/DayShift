@@ -42,6 +42,7 @@ from bot.handlers import queue as _queue  # noqa: F401
 from bot.handlers import results as _results  # noqa: F401
 from bot.handlers import subs as _subs  # noqa: F401
 from bot.handlers import swaps as _swaps  # noqa: F401
+from bot.ratelimits import GlobalPace
 from bot.ratelimits import install as install_ratelimit_compatibility
 from bot.request_health import FailedRequests
 from bot.routing import RouteButton, RouteSelect, RouteUserSelect
@@ -235,8 +236,11 @@ class DayShiftBot(discord.Client):
         intents.guild_messages = True
         # Every response passes through this, to count what Discord counts against us.
         self.failed_requests = FailedRequests()
+        self.failed_requests.log_each = settings.DISCORD_REQUEST_LOG
+        # Keeps bot-token requests under Discord's 50 a second, before each one goes out.
+        self.global_pace = GlobalPace()
         super().__init__(
-            http_trace=self.failed_requests.trace_config(),
+            http_trace=self.failed_requests.trace_config(before_send=self.global_pace.wait),
             intents=intents,
             allowed_mentions=discord.AllowedMentions.none(),
             max_messages=None,  # Nothing reads the message cache, so don't spend memory on it.
@@ -365,7 +369,7 @@ class DayShiftBot(discord.Client):
         """Log where the last minute's time went, when anything happened (league.timings)."""
         while True:
             await asyncio.sleep(TIMINGS_INTERVAL_SECONDS)
-            self.failed_requests.log_usage_summary()
+            self.failed_requests.log_usage_summary(held_back=self.global_pace.take_delayed())
             if summary := timings.summary():
                 logger.info("Timings", extra={"timings": summary})
 

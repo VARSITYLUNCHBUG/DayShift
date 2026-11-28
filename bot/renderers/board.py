@@ -551,37 +551,46 @@ def _lobby_code(state: BoardState, box: Container[Any]) -> None:
     )
 
 
-def _in_progress(state: BoardState, box: Container[Any]) -> None:
-    if state.api_lobby and not state.api_started:
+def _in_progress(state: BoardState, box: Container[Any], *, compact: bool = False) -> None:
+    """`compact` is for a board that would otherwise pass Discord's 40 components, such as the
+    bot's lobby waiting to start with the most sub requests open: the draft's name, GIF and
+    GLHF go, and the hosting text and Start button share the code's and the report's rows."""
+    hosting = state.api_lobby and not state.api_started
+    if hosting and not compact:
         # The bot's lobby often arrives the moment the draft ends, before anyone saw its
         # name, GIF and GLHF: they stay up while the players join, until a captain starts it.
         _draft_end(state, box, summary=False)
-    box.add_item(TextDisplay(f"### Lobby code: `{state.lobby_code}`"))
-    if state.api_lobby and not state.api_started:
+    code = f"### Lobby code: `{state.lobby_code}`"
+    start: list[RouteButton] = []
+    if hosting:
         leaves = (
             f" The bot leaves the lobby <t:{int(state.api_leaves_at.timestamp())}:R>."
             if state.api_leaves_at
             else ""
         )
-        box.add_item(
-            TextDisplay(
-                "The bot is hosting. Join with the code and sit on your team's side, then a "
-                f"captain presses Start match.{leaves}"
-            )
+        hosting_text = (
+            "The bot is hosting. Join with the code and sit on your team's side, then a "
+            f"captain presses Start match.{leaves}"
         )
-        box.add_item(
-            ActionRow(
-                RouteButton(
-                    "api_start", state.match_id, label="Start match", style=ButtonStyle.success
-                )
-            )
+        start_button = RouteButton(
+            "api_start", state.match_id, label="Start match", style=ButtonStyle.success
         )
+        if compact:
+            box.add_item(TextDisplay(f"{code}\n{hosting_text}"))
+            start.append(start_button)
+        else:
+            box.add_item(TextDisplay(code))
+            box.add_item(TextDisplay(hosting_text))
+            box.add_item(ActionRow(start_button))
+    else:
+        box.add_item(TextDisplay(code))
     box.add_item(Separator())
     box.add_item(TextDisplay(_final_draft_summary(state)))
     box.add_item(Separator())
     box.add_item(TextDisplay("Captains: when the game ends, press the team that won."))
     box.add_item(
         ActionRow(
+            *start,
             *[
                 RouteButton(
                     "report_open",
@@ -591,7 +600,7 @@ def _in_progress(state: BoardState, box: Container[Any]) -> None:
                     style=ButtonStyle.primary,
                 )
                 for team in ("A", "B")
-            ]
+            ],
         )
     )
     if state.deadline_at is not None:
@@ -888,7 +897,20 @@ def _strip_buttons(box: Container[Any], start: int) -> None:
             box.remove_item(item)
 
 
+class BoardTooLarge(ValueError):
+    """The board has more than Discord's 40 components even in its compact form. Rendering it
+    again can't help, so the worker fails it at once instead of retrying it."""
+
+
 def render_board(state: BoardState) -> LayoutView:
+    view = _board_view(state, compact=False) or _board_view(state, compact=True)
+    if view is None:
+        raise BoardTooLarge(f"Match #{state.match_id}'s board is over 40 components")
+    return view
+
+
+def _board_view(state: BoardState, *, compact: bool) -> LayoutView | None:
+    """The board, or None if it doesn't fit in one message."""
     box: Container[Any] = Container(accent_colour=_accent(state))
     header = _header(state)
     if header:
@@ -896,6 +918,8 @@ def render_board(state: BoardState) -> LayoutView:
     start = len(box.children)
     if state.is_scrim and state.status == Status.VOIDED:
         _stopped(state, box)
+    elif state.status == Status.IN_PROGRESS:
+        _in_progress(state, box, compact=compact)
     else:
         _SECTIONS[state.status](state, box)
     # A result can still come in while a sub is on the way: the game may have ended anyway.
@@ -915,7 +939,10 @@ def render_board(state: BoardState) -> LayoutView:
     if footer:
         box.add_item(ActionRow(*footer))
     view = LayoutView(timeout=None)
-    view.add_item(box)
+    try:
+        view.add_item(box)
+    except ValueError:  # discord.py refuses a view over 40 components.
+        return None
     return view
 
 

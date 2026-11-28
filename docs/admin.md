@@ -35,6 +35,7 @@ rebuilds the points and the leaderboard.
 | Auto Captain | Off | On: captains are appointed by experience and rating, with no vote. Off: players vote. Scrims are unaffected |
 | Open match voice | Off | On: anyone in the server can see and join a match's voice channels. Off: only its players and match staff. A pooled channel picks up a change the next time a match takes it |
 | Match channel close minutes | 3 | How long a finished match's text channel stays before it's deleted |
+| Match chat slowmode seconds | 3 | Discord slowmode in each new match channel: how long each player waits between messages, so chat can't bury the board. Staff aren't slowed. Set when the channel is made, at no extra request; a change applies to the next match. 0 turns it off |
 | Max concurrent matches | 12 | Ranked matches at once; the queue waits beyond this. It also caps the [team voice pool](match-flow.md#team-voice-pool) at two channels a match |
 | Queue idle minutes | 90 | How long a player can sit in the queue without checking in before they're taken out, with no penalty ([idle players](match-flow.md#idle-players)). 0 turns it off |
 | Queue warn minutes | 5 | How long before that the "Still queueing?" DM goes out. 0: no DM. Must be less than the idle minutes |
